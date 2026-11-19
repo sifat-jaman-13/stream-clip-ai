@@ -864,6 +864,8 @@ class Core:
         self.logs, self.log_id = [], 0
         self.phase, self.status = "idle", "Ready when you are."
         self.progress = 0
+        self.posting = {"active": False, "total": 0, "completed": 0, "current": "",
+                        "started": None, "done": 0, "last_name": "", "errors": 0}
         self.session = {"clips": 0, "chunks": 0, "started": None, "ended": None}
         self.settings = load_settings()
 
@@ -944,6 +946,7 @@ class Core:
                 "mode": eng.cfg["mode"] if eng else None,
                 "phase": self.phase, "status": self.status,
                 "progress": self.progress,
+                "posting": dict(self.posting),
                 "logs": [{"id": i, "t": t, "m": m} for (i, t, m) in self.logs if i > since],
                 "last_id": self.log_id,
                 "session": {"clips": s["clips"], "chunks": s["chunks"], "elapsed": el},
@@ -993,14 +996,33 @@ class Core:
         if not valid: raise ValueError("No valid clips selected.")
         if not ZERNIO_AVAILABLE:
             raise ValueError("Zernio posting unavailable: zernio_poster.py could not be loaded.")
+        with self.lock:
+            if self.posting["active"]:
+                raise ValueError("A Zernio posting batch is already in progress.")
+            self.posting.update({"active": True, "total": len(valid), "completed": 0, "current": "",
+                                 "started": time.time(), "done": 0, "last_name": "", "errors": 0})
         def publish_batch():
             for index, name in enumerate(valid):
                 publisher = ZernioPublisher(self.push, dict(cfg, enabled=False))
                 delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
+                with self.lock: self.posting["current"] = name
+                self.push(f"Zernio: uploading {index + 1} of {len(valid)} - {name}.")
                 try:
                     publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay)
+                    with self.lock:
+                        self.posting["completed"] += 1
+                        self.posting["done"] += 1
+                        self.posting["last_name"] = name
+                    self.push(f"Zernio upload complete: {name}.")
                 except Exception as e:
+                    with self.lock: self.posting["errors"] += 1
                     self.push(f"Zernio error for {name}: {e}")
+            with self.lock:
+                self.posting["active"] = False
+                self.posting["current"] = ""
+                errors = self.posting["errors"]
+                completed = self.posting["completed"]
+            self.push(f"Zernio posting complete: {completed} uploaded, {errors} failed.")
         threading.Thread(target=publish_batch, daemon=True, name="zernio-batch").start()
         self.push(f"Zernio: queued {len(valid)} clip(s) for publishing.")
         return {"queued": len(valid)}
@@ -1420,6 +1442,7 @@ select.text option{background:#14161f}
 .hero[data-phase=idle]{--hc:#646a82}.hero[data-phase=waiting]{--hc:#fbbf24}.hero[data-phase=recording]{--hc:#f87171}
 .hero[data-phase=transcribing]{--hc:#8b5cf6}.hero[data-phase=rendering]{--hc:#ec4899}.hero[data-phase=stopping]{--hc:#fbbf24}.hero[data-phase=working]{--hc:#8b5cf6}
 .progress-wrap{padding:11px 14px 12px;background:var(--card);border:1px solid var(--line);border-radius:12px}.progress-meta{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;font-weight:600;margin-bottom:7px}.progress-track{height:10px;background:rgba(255,255,255,.1);border-radius:8px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.35)}.progress-fill{height:100%;width:0;background:var(--grad);border-radius:8px;transition:width .25s ease;box-shadow:0 0 14px rgba(139,92,246,.55)}
+.post-progress{margin-bottom:12px;padding:11px 14px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.3);border-radius:12px}.post-progress .progress-meta{margin-bottom:7px}.post-progress .progress-track{height:9px}
 .local-note{color:var(--mute);font-size:11px;padding:0 22px 8px}.local-note b{color:var(--dim)}
 .rec-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--bad);margin-right:8px;animation:blink 1.2s infinite;vertical-align:1px}
 @keyframes blink{50%{opacity:.25}}
@@ -1627,6 +1650,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <button class="tab" data-t="words">Hype words</button>
   </div>
   <div class="panel" id="p-clips">
+    <div class="post-progress" id="post-progress" hidden><div class="progress-meta"><span id="post-label">Preparing uploads...</span><span><span id="post-value">0%</span> · <span id="post-time">0:00</span></span></div><div class="progress-track"><div class="progress-fill" id="post-fill"></div></div></div>
     <div class="prow" style="justify-content:flex-end;margin-bottom:10px"><button class="btn ghost" id="btn-publish-selected">Publish selected</button><button class="btn danger" id="btn-publish-all">Publish all clips</button></div>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty"><div class="big"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h4>No clips yet</h4><p>Paste a Twitch or YouTube live link (or choose a VOD file) and hit Start. Finished 9:16 clips with captions appear here, ready to post.</p></div>
@@ -1950,7 +1974,7 @@ $("#btn-quit").onclick=async()=>{
 
 /* ---------- state polling ---------- */
 const PHASES={idle:"Ready",waiting:"Waiting for the stream",recording:"Recording live",transcribing:"Listening for hype",rendering:"Rendering clips",stopping:"Wrapping up",working:"Working"};
-let lastLog=0,fails=0,busy=false,order="",cards=new Map(),selectedClips=new Set();
+let lastLog=0,fails=0,busy=false,order="",cards=new Map(),selectedClips=new Set(),lastPostDone=0;
 const fmtT=s=>{const m=Math.floor(s/60),h2=Math.floor(m/60);return h2?h2+":"+String(m%60).padStart(2,"0")+":"+String(s%60).padStart(2,"0"):m+":"+String(s%60).padStart(2,"0")};
 function ago(t){const s=Math.max(0,Date.now()/1000-t);if(s<60)return"just now";if(s<3600)return Math.floor(s/60)+" min ago";if(s<86400)return Math.floor(s/3600)+" h ago";return Math.floor(s/86400)+" d ago"}
 function addLogs(list){
@@ -1958,6 +1982,22 @@ function addLogs(list){
   list.forEach(l=>{const cls=/error|failed/i.test(l.m)?"err":/clip ready|live - rec/i.test(l.m)?"okk":"";box.append(h("div",{class:cls},h("span",{class:"t"},l.t),l.m))});
   while(box.children.length>500)box.firstChild.remove();
   if(stick)pl.scrollTop=pl.scrollHeight;
+}
+function updateSelectedButton(){
+  const b=$("#btn-publish-selected");b.textContent="Publish selected ("+selectedClips.size+")";b.disabled=selectedClips.size===0;
+}
+function updatePosting(p){
+  if(!p)return;
+  const total=Number(p.total)||0,done=Number(p.completed)||0,active=!!p.active;
+  const visible=active||total>0;
+  $("#post-progress").hidden=!visible;
+  const pct=total?Math.round(done/total*100):0;
+  $("#post-fill").style.width=pct+"%";$("#post-value").textContent=pct+"%";
+  $("#post-time").textContent=p.started?fmtT(Math.max(0,Math.floor(Date.now()/1000-p.started))):"0:00";
+  $("#post-label").textContent=active?(p.current?"Uploading "+done+" of "+total+": "+p.current:"Preparing uploads...")
+    :(p.errors?"Posting complete with "+p.errors+" failure(s).":"All uploads complete.");
+  $("#btn-publish-all").disabled=active;updateSelectedButton();
+  if(Number(p.done)>lastPostDone){toast("Upload complete: "+p.last_name,"ok");lastPostDone=Number(p.done)}
 }
 function updateRun(s){
   const hero=$("#hero");hero.dataset.phase=s.phase;
@@ -1971,6 +2011,7 @@ function updateRun(s){
   $("#progress-label").textContent=s.phase==="recording"?"Next clip batch":"";
   if(s.phase==="transcribing")$("#progress-label").textContent="Transcribing video";
   if(s.phase==="rendering")$("#progress-label").textContent="Rendering clips";
+  updatePosting(s.posting);
   $("#s-time").textContent=fmtT(s.session.elapsed);$("#s-chunks").textContent=s.session.chunks;$("#s-clips").textContent=s.session.clips;
   $("#startbar").hidden=s.running;$("#stopbar").hidden=!s.running;
   const live=s.mode==="live";
@@ -1982,7 +2023,7 @@ function clipCard(c){
   const v=h("video",{src:"/clips/"+encodeURIComponent(c.name)+"#t=0.1",loop:true,playsinline:true,preload:"metadata"});v.muted=true;
   const first=(c.caption||"").split("\n")[0]||c.name;
   const when=h("span",{class:"when","data-t":c.mtime},ago(c.mtime));
-  const pick=h("input",{class:"pick",type:"checkbox",title:"Select for publishing"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);
+  const pick=h("input",{class:"pick",type:"checkbox",title:"Select this clip for publishing"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>{pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);updateSelectedButton()};
   const copy=()=>{navigator.clipboard.writeText(c.caption||"").then(()=>toast("Caption copied","ok"),()=>toast("Couldn't copy","bad"))};
   const post=()=>publishNames([c.name]);
   const del=async()=>{if(await confirmBox("Delete this clip?","This permanently removes the video and its caption file.","Delete")){try{await api("/api/delete",{name:c.name});toast("Clip deleted");poll(true)}catch(e){toast(e.message,"bad")}}};
@@ -2011,7 +2052,8 @@ function renderClips(list){
   $$(".when").forEach(w=>w.textContent=ago(+w.dataset.t));
 }
 async function publishNames(names){
-  try{const r=await api("/api/zernio/publish",{names});toast("Queued "+r.queued+" clip(s) for Zernio","ok");selectedClips.clear();$$('.pick').forEach(x=>x.checked=false);}
+  if(!names.length){toast("Select at least one clip first","bad");return}
+  try{const r=await api("/api/zernio/publish",{names});toast("Started uploading "+r.queued+" clip(s) to Zernio","ok");selectedClips.clear();$$('.pick').forEach(x=>x.checked=false);updateSelectedButton();}
   catch(e){toast(e.message,"bad")}
 }
 $("#btn-publish-selected").onclick=()=>publishNames([...selectedClips]);

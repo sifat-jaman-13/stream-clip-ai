@@ -1529,6 +1529,7 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;bac
 .two .row{margin-top:14px}
 .folder-pick{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
 .update-list{line-height:1.7;white-space:pre-line}
+.about-links{display:flex;flex-wrap:wrap;gap:8px}
 .sw{display:flex;gap:10px}
 .sw button{width:30px;height:30px;border-radius:50%;border:2px solid transparent;box-shadow:0 0 0 2px rgba(0,0,0,.5) inset;transition:.15s}
 .sw button.on{border-color:#fff;transform:scale(1.12)}
@@ -1759,6 +1760,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
     <div class="hint update-list" id="updates-list"></div>
+    <div class="row"><label>About AutoClip</label></div>
+    <p class="hint">Created by Scarzero. Follow the author for new clips and updates.</p>
+    <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank">Instagram · @scarzero13</a></div>
     <div class="row"><label>Zernio posting</label></div>
     <p class="hint">Save your API key locally, identify connected channels, and control publishing for finished clips.</p>
     <div class="row"><label>Zernio API key</label><b id="z-key-state">Not saved</b></div>

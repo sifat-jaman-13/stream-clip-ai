@@ -65,6 +65,11 @@ def ensure_runtime_dirs():
     REC.mkdir(parents=True, exist_ok=True)
 
 ensure_runtime_dirs()
+
+def ffmpeg_exe():
+    """Prefer a bundled FFmpeg in portable builds, then fall back to system PATH."""
+    bundled = HERE / "vendor" / "ffmpeg" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    return str(bundled) if bundled.is_file() else (shutil.which("ffmpeg") or "ffmpeg")
 SETTINGS_FILE = HERE / "settings.json"
 CUSTOM_FILE = HERE / "custom_words.txt"
 ZERNIO_FILE = HERE / "zernio.json"
@@ -95,7 +100,8 @@ def acquire_instance_lock():
 
 DEFAULTS = {
     "mode": "live", "target": "",
-    "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 1.5,
+    "rec_dir": "", "out_dir": "",
+    "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 70,
     "model": "distil-large-v3",
     "color": "Yellow", "position": "Lower third", "caption_size": 100, "words_per_line": 3, "font": "Impact",
     "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "Classic",
@@ -127,11 +133,11 @@ def clean_cfg(raw):
         try: v = cast(raw.get(k, c[k]))
         except (TypeError, ValueError): v = c[k]
         c[k] = max(lo, min(hi, v))
-    num("clips_per_chunk", 1, 10, int); num("chunk_min", 1, 30, int)
+    num("clips_per_chunk", 0, 10, int); num("chunk_min", 1, 30, int)
     num("pre", 3, 90, int); num("post", 3, 90, int)
-    num("min_score", 0.3, 5.0, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
+    num("min_score", 0, 100, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
     num("subtitle_font_size", 60, 180, int); num("subtitle_nudge", -400, 400, int)
-    c["min_score"] = round(c["min_score"], 2)
+    c["min_score"] = round(c["min_score"], 1)
     num("cam_x", 0, 90, float); num("cam_y", 0, 90, float); num("cam_w", 10, 100, float); num("cam_h", 10, 100, float)
     num("game_x", 0, 100, float)
     num("crop_x", 0, 90, float); num("crop_y", 0, 90, float); num("crop_w", 10, 100, float); num("crop_h", 10, 100, float)
@@ -160,7 +166,26 @@ def clean_cfg(raw):
     f = str(raw.get("font", c["font"])).strip()
     if re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", f): c["font"] = f
     c["delete_rec"] = bool(raw.get("delete_rec", False))
+    for k in ("rec_dir", "out_dir"):
+        value = str(raw.get(k, "") or "").strip()
+        # Keep user-selected paths portable across Windows installs while avoiding
+        # control characters or excessively large values in settings.json.
+        c[k] = value[:1000] if "\x00" not in value else ""
     return c
+
+def apply_storage_paths(cfg):
+    """Switch runtime folders to the user-selected locations."""
+    global OUT, REC
+    def chosen(key, fallback):
+        value = str(cfg.get(key, "") or "").strip()
+        try:
+            path = pathlib.Path(value).expanduser() if value else fallback
+            return path.resolve()
+        except (OSError, ValueError):
+            return fallback
+    OUT = chosen("out_dir", HERE / "out")
+    REC = chosen("rec_dir", HERE / "rec")
+    ensure_runtime_dirs()
 
 def streamer_credit(cfg):
     """Use an explicit credit when supplied; otherwise infer common channel handles."""
@@ -179,7 +204,12 @@ def streamer_credit(cfg):
 def load_settings():
     try:
         raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        if raw.get("min_score") == 2.0: raw["min_score"] = 1.5      # old default was too strict
+        # Migrate the old internal 0-5 hype threshold to the new 0-100 score.
+        try:
+            old_score = float(raw.get("min_score"))
+            if 0 < old_score <= 5: raw["min_score"] = round(50 + old_score * 20, 1)
+        except (TypeError, ValueError):
+            pass
         return clean_cfg(raw)
     except Exception: return dict(DEFAULTS)
 
@@ -442,7 +472,7 @@ _model, _model_key, _nvenc = None, None, None
 def has_nvenc():
     global _nvenc
     if _nvenc is None:
-        r = run(["ffmpeg", "-v", "quiet", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1",
+        r = run([ffmpeg_exe(), "-v", "quiet", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1",
                  "-frames:v", "1", "-c:v", "h264_nvenc", "-f", "null", "-"], capture_output=True)
         _nvenc = r.returncode == 0
     return _nvenc
@@ -532,7 +562,7 @@ class Engine:
 
     def load_audio(self, path):
         """Decode to 16 kHz mono float32 with ffmpeg (bypasses PyAV completely)."""
-        r = run(["ffmpeg", "-v", "quiet", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
+        r = run([ffmpeg_exe(), "-v", "quiet", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
                 capture_output=True)
         a = np.frombuffer(r.stdout, dtype=np.float32)
         return a if len(a) > 16000 else None
@@ -570,7 +600,7 @@ class Engine:
 
     # ---- moment detection
     def rms_per_second(self, path):
-        cmd = ["ffmpeg", "-v", "quiet", "-i", str(path), "-vn", "-ac", "1", "-ar", "8000", "-f", "f32le", "-"]
+        cmd = [ffmpeg_exe(), "-v", "quiet", "-i", str(path), "-vn", "-ac", "1", "-ar", "8000", "-f", "f32le", "-"]
         a = np.frombuffer(run(cmd, capture_output=True).stdout, dtype=np.float32)
         n = len(a) // 8000
         if n == 0:
@@ -600,20 +630,23 @@ class Engine:
                 if k + L <= len(toks) and " ".join(x[1] for x in toks[k:k + L]) in HYPE_PHRASES:
                     hype[i] += 1.5
         kern = np.ones(5) / 5
-        score = z(np.convolve(rms, kern, "same")) + 0.5 * z(np.convolve(wps, kern, "same")) \
+        raw_score = z(np.convolve(rms, kern, "same")) + 0.5 * z(np.convolve(wps, kern, "same")) \
                 + 0.8 * z(np.convolve(hype, kern, "same"))
+        score = np.clip(50 + 20 * raw_score, 0, 100)
         self.best_score = float(score.max())
-        n_clips = max(1, round(n / self.seg_seconds * int(self.cfg["clips_per_chunk"])))
+        requested = int(self.cfg["clips_per_chunk"])
+        # Zero means unlimited: keep selecting non-overlapping moments while they
+        # clear the viral-score floor. A positive value keeps the normal cap.
+        n_clips = None if requested == 0 else max(1, round(n / self.seg_seconds * requested))
         picks, s = [], score.copy()
-        for _ in range(n_clips):
+        while n_clips is None or len(picks) < n_clips:
             i = int(s.argmax())
             if s[i] < float(self.cfg["min_score"]):
                 break
             picks.append((i, float(s[i])))
             s[max(0, i - 40): i + 40] = -99          # never pick overlapping moments
-        if not picks and self.best_score > 0:        # nothing passed the bar: still deliver the best moment of the chunk
-            picks = [(int(score.argmax()), self.best_score)]
-            self.log("No moment passed the threshold - using the best available moment of this chunk instead.")
+        if not picks:
+            self.log("No moment passed the viral-score floor - this segment produced no clips.")
         return picks, n
 
     # ---- render
@@ -647,7 +680,7 @@ class Engine:
         enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
         tmp = f"{name}.tmp.mp4"
-        cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}",
+        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}",
                "-i", str(pathlib.Path(src).resolve()), "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
                *enc, "-pix_fmt", "yuv420p", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
                "-c:a", "aac", "-b:a", "160k", "-r", "30", "-movflags", "+faststart", tmp]
@@ -665,7 +698,7 @@ class Engine:
                     af = f"[1:a]adelay={delay_ms}:all=1[cta];[0:a][cta]amix=inputs=2:duration=first:dropout_transition=2[a]"
                 else:
                     af = f"[1:a]adelay={delay_ms}:all=1[a]"
-                mix_cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(OUT / tmp), "-i", str(voice),
+                mix_cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", str(OUT / tmp), "-i", str(voice),
                            "-filter_complex", af, "-map", "0:v:0", "-map", "[a]",
                            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", mixed]
                 mr = run(mix_cmd, cwd=OUT, capture_output=True, text=True)
@@ -788,7 +821,7 @@ class Engine:
         except Exception:
             slog.close()
             raise
-        ff = popen(["ffmpeg", "-v", "error", "-i", "-", "-c", "copy", "-f", "segment",
+        ff = popen([ffmpeg_exe(), "-v", "error", "-i", "-", "-c", "copy", "-f", "segment",
                     "-segment_time", str(self.seg_seconds), "-reset_timestamps", "1", pattern],
                    stdin=sl.stdout)
         sl.stdout.close()
@@ -888,6 +921,7 @@ class Core:
                         "started": None, "done": 0, "last_name": "", "errors": 0}
         self.session = {"clips": 0, "chunks": 0, "started": None, "ended": None}
         self.settings = load_settings()
+        apply_storage_paths(self.settings)
 
     def push(self, msg):
         with self.lock:
@@ -925,7 +959,7 @@ class Core:
         with self.lock:
             if self.running:
                 raise ValueError("Already running.")
-            if not shutil.which("ffmpeg"):
+            if ffmpeg_exe() == "ffmpeg" and not shutil.which("ffmpeg"):
                 raise ValueError("ffmpeg not found. Run  winget install Gyan.FFmpeg  then restart AutoClip.")
             t = cfg["target"].strip().strip('"')
             if cfg["mode"] == "live":
@@ -938,6 +972,7 @@ class Core:
                     raise ValueError("That video file doesn't exist.")
             cfg = dict(cfg, target=t)
             self.settings = cfg
+            apply_storage_paths(cfg)
             save_settings(cfg)
             self.engine = Engine(cfg, self.emit)
             self.running = True
@@ -1103,6 +1138,18 @@ def browse_file():
     except Exception:
         return ""
 
+BROWSE_FOLDER_PY = (
+    "import tkinter as tk\nfrom tkinter import filedialog\n"
+    "r=tk.Tk();r.withdraw();r.attributes('-topmost',True)\n"
+    "print(filedialog.askdirectory(title='Choose AutoClip folder'))\n")
+
+def browse_folder():
+    try:
+        r = run([sys.executable, "-c", BROWSE_FOLDER_PY], capture_output=True, text=True)
+        return (r.stdout or "").strip().splitlines()[-1].strip() if (r.stdout or "").strip() else ""
+    except Exception:
+        return ""
+
 def grab_frame(mode, target):
     """One JPEG frame (as a data URL) from the live stream or a video file - used by the facecam-area picker."""
     import base64
@@ -1123,7 +1170,7 @@ def grab_frame(mode, target):
                 raise ValueError("Choose a video file first.")
             attempts = [["-ss", "5", "-i", target], ["-i", target]]
         for a in attempts:
-            r = run(["ffmpeg", "-v", "error", *a, "-frames:v", "1", "-vf", "scale=960:-2",
+            r = run([ffmpeg_exe(), "-v", "error", *a, "-frames:v", "1", "-vf", "scale=960:-2",
                      "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "4", "-"], capture_output=True, timeout=60)
             if r.stdout:
                 return "data:image/jpeg;base64," + base64.b64encode(r.stdout).decode("ascii")
@@ -1241,7 +1288,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/start":
                     CORE.start(clean_cfg(body)); return self._send(200, {"ok": True})
                 if path == "/api/settings":
-                    cfg = clean_cfg(body); CORE.settings = cfg; save_settings(cfg); return self._send(200, {"ok": True})
+                    if CORE.running:
+                        return self._send(400, {"error": "Stop clipping before changing storage folders."})
+                    cfg = clean_cfg(body); CORE.settings = cfg; apply_storage_paths(cfg); save_settings(cfg); return self._send(200, {"ok": True})
                 if path == "/api/stop":
                     CORE.stop(bool(body.get("force"))); return self._send(200, {"ok": True})
                 if path == "/api/words":
@@ -1281,6 +1330,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"image": grab_frame(str(body.get("mode", "live")), str(body.get("target", "")))})
                 if path == "/api/browse":
                     return self._send(200, {"path": browse_file()})
+                if path == "/api/browse_folder":
+                    return self._send(200, {"path": browse_folder()})
                 if path == "/api/quit":
                     self._send(200, {"ok": True}); CORE.shutdown(); QUIT.set(); return
             except ValueError as e:
@@ -1419,6 +1470,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;heigh
 input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;border:0}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .two .row{margin-top:14px}
+.folder-pick{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
 .sw{display:flex;gap:10px}
 .sw button{width:30px;height:30px;border-radius:50%;border:2px solid transparent;box-shadow:0 0 0 2px rgba(0,0,0,.5) inset;transition:.15s}
 .sw button.on{border-color:#fff;transform:scale(1.12)}
@@ -1559,11 +1611,12 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 
   <div class="card">
     <div class="ch"><span class="num">2</span><h3>Moment detection</h3></div>
-    <div class="row"><label>Strictness</label><b id="v-sens"></b></div>
-    <input type="range" id="r-sens" min="0.5" max="4" step="0.1">
+    <div class="row"><label>Min viral score</label><b id="v-sens"></b></div>
+    <input type="range" id="r-sens" min="0" max="100" step="1">
     <div class="ends"><span>More clips</span><span>Only the best</span></div>
+    <p class="hint">0 = no limit — selects every non-overlapping moment above the viral-score floor. Weak segments can produce fewer or no clips.</p>
     <div class="two">
-      <div><div class="row"><label>Clips / chunk</label><b id="v-cpc"></b></div><input type="range" id="r-cpc" min="1" max="10" step="1"></div>
+      <div><div class="row"><label>Clips / chunk (0 = no limit)</label><b id="v-cpc"></b></div><input type="range" id="r-cpc" min="0" max="10" step="1"></div>
       <div><div class="row"><label>Chunk length</label><b id="v-chunk"></b></div><input type="range" id="r-chunk" min="1" max="30" step="1"></div>
       <div><div class="row"><label>Before peak</label><b id="v-pre"></b></div><input type="range" id="r-pre" min="5" max="60" step="1"></div>
       <div><div class="row"><label>After peak</label><b id="v-post"></b></div><input type="range" id="r-post" min="5" max="60" step="1"></div>
@@ -1638,6 +1691,12 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 
   <div class="card" id="settings-card">
     <div class="ch"><span class="num">5</span><h3>App settings</h3></div>
+    <div class="row"><label>Storage folders</label></div>
+    <p class="hint">Choose where recordings and finished clips are saved. Changes apply after clipping is stopped.</p>
+    <div class="row"><label>Recording folder</label></div>
+    <div class="folder-pick"><input id="rec-dir" class="text" type="text" placeholder="Default: app folder\rec"><button class="btn ghost" id="rec-dir-browse">Browse</button></div>
+    <div class="row"><label>Output / clips folder</label></div>
+    <div class="folder-pick"><input id="out-dir" class="text" type="text" placeholder="Default: app folder\out"><button class="btn ghost" id="out-dir-browse">Browse</button></div>
     <div class="row"><label>Zernio posting</label></div>
     <p class="hint">Save your API key locally, identify connected channels, and control publishing for finished clips.</p>
     <div class="row"><label>Zernio API key</label><b id="z-key-state">Not saved</b></div>
@@ -1761,6 +1820,14 @@ $("#btn-settings").onclick=openSettings;
 $("#btn-settings-close").onclick=closeSettings;
 settingsOverlay.onclick=e=>{if(e.target===settingsOverlay)closeSettings()};
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!settingsOverlay.hidden)closeSettings()});
+$("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||"";
+function wireFolderPicker(inputId,buttonId,key){
+  const input=$(inputId), button=$(buttonId);
+  input.addEventListener("change",()=>{S[key]=input.value.trim();scheduleSave()});
+  button.onclick=async()=>{button.disabled=true;try{const r=await api("/api/browse_folder");if(r.path){input.value=r.path;S[key]=r.path;scheduleSave();toast("Folder saved","ok")}}catch(e){toast(e.message,"bad")}button.disabled=false};
+}
+wireFolderPicker("#rec-dir","#rec-dir-browse","rec_dir");
+wireFolderPicker("#out-dir","#out-dir-browse","out_dir");
 function confirmBox(title,msg,ok){return new Promise(res=>{
   const done=v=>{m.remove();res(v)};
   const m=h("div",{class:"overlay"},h("div",{class:"dialog"},h("h4",{},title),h("p",{},msg),h("div",{class:"dlg-actions"},h("button",{class:"btn ghost",onclick:()=>done(false)},"Cancel"),h("button",{class:"btn danger",onclick:()=>done(true)},ok||"Delete"))));
@@ -1770,7 +1837,7 @@ function confirmBox(title,msg,ok){return new Promise(res=>{
 let saveT=null;
 function scheduleSave(){clearTimeout(saveT);saveT=setTimeout(()=>{api("/api/settings",S).catch(()=>{})},500)}
 function paintRange(el){const p=(el.value-el.min)/(el.max-el.min)*100;el.style.setProperty("--p",p+"%")}
-const RANGES=[["r-sens","min_score","v-sens",v=>(+v).toFixed(1),true],["r-cpc","clips_per_chunk","v-cpc",v=>v,true],["r-chunk","chunk_min","v-chunk",v=>v+" min",true],
+const RANGES=[["r-sens","min_score","v-sens",v=>Math.round(+v),true],["r-cpc","clips_per_chunk","v-cpc",v=>v,true],["r-chunk","chunk_min","v-chunk",v=>v+" min",true],
  ["r-pre","pre","v-pre",v=>v+" s",true],["r-post","post","v-post",v=>v+" s",true],["r-size","caption_size","v-size",v=>v,true]];
 RANGES.forEach(([id,key,lab,fmt])=>{
   const el=$("#"+id);el.value=S[key];

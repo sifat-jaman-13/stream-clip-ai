@@ -1322,6 +1322,7 @@ select.text option{background:#14161f}
 .hero[data-phase=idle]{--hc:#646a82}.hero[data-phase=waiting]{--hc:#fbbf24}.hero[data-phase=recording]{--hc:#f87171}
 .hero[data-phase=transcribing]{--hc:#8b5cf6}.hero[data-phase=rendering]{--hc:#ec4899}.hero[data-phase=stopping]{--hc:#fbbf24}.hero[data-phase=working]{--hc:#8b5cf6}
 .progress-wrap{padding:10px 2px 0}.progress-meta{display:flex;justify-content:space-between;color:var(--dim);font-size:11px;margin-bottom:5px}.progress-track{height:7px;background:rgba(255,255,255,.1);border-radius:8px;overflow:hidden}.progress-fill{height:100%;width:0;background:var(--grad);border-radius:8px;transition:width .25s ease}
+.local-note{color:var(--mute);font-size:11px;padding:0 22px 8px}.local-note b{color:var(--dim)}
 .rec-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--bad);margin-right:8px;animation:blink 1.2s infinite;vertical-align:1px}
 @keyframes blink{50%{opacity:.25}}
 /* tabs */
@@ -1392,6 +1393,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
   <button class="btn ghost" id="btn-quit" title="Stop everything and close AutoClip"><span data-ico="power"></span>Quit</button>
 </header>
+<div class="local-note">If buttons do not respond, disable your ad blocker for <b>127.0.0.1</b> / <b>localhost</b>.</div>
 
 <div class="main">
 <section class="left">
@@ -1628,8 +1630,8 @@ $("#sub-style").value=S.subtitle_style;$("#sub-style").addEventListener("change"
 $("#sub-text-color").value=S.subtitle_text_color;$("#sub-text-color").addEventListener("input",e=>{S.subtitle_text_color=e.target.value.toUpperCase();scheduleSave();preview()});
 $("#sub-stroke-color").value=S.subtitle_stroke_color;$("#sub-stroke-color").addEventListener("input",e=>{S.subtitle_stroke_color=e.target.value.toUpperCase();scheduleSave();preview()});
 for(const [id,key,lab,fmt] of [["r-sub-size","subtitle_font_size","v-sub-size",v=>v+" px"],["r-sub-nudge","subtitle_nudge","v-sub-nudge",v=>v+" px"]]){
-  const el=$("#"+id);el.value=S[key];const upd=()=>{S[key]=+el.value;$("#"+lab).textContent=fmt(el.value);paintRange(el);preview()};
-  el.addEventListener("input",()=>{upd();scheduleSave()});upd();
+  const el=$("#"+id);el.value=S[key];const upd=()=>{S[key]=+el.value;$("#"+lab).textContent=fmt(el.value);paintRange(el)};
+  el.addEventListener("input",()=>{upd();preview();scheduleSave()});upd();
 }
 function inferStreamerTag(url){
   let m=String(url||"").match(/twitch\.tv\/([^/?#]+)/i);

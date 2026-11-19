@@ -94,6 +94,7 @@ DEFAULTS = {
     "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "Classic",
     "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
+    "streamer_tag": "@lacy", "show_tag_video": True,
     "layout": "Facecam + game (Twitch)", "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
 }
@@ -102,7 +103,7 @@ CAPTION_COLORS = {"Yellow": "00FFFF", "Green": "00FF00", "Cyan": "FFFF00", "Oran
 CAPTION_POS = {"Lower third": 520, "Middle": 800, "Low": 380}      # MarginV (px from bottom of 1920)
 LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)"]
 MODELS = ["distil-large-v3", "large-v3-turbo", "small", "base"]
-STREAM_QUALITY = "1080p60,1080p,720p60,720p"
+STREAM_QUALITY = "1080p60,1080p,720p60,720p,best"
 SUBTITLE_MODES = ["Karaoke", "Classic"]
 SUBTITLE_STYLES = ["Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"]
 SUBTITLE_POSITIONS = ["Top", "Center", "Bottom"]
@@ -136,6 +137,9 @@ def clean_cfg(raw):
     for k, fallback in (("subtitle_text_color", "#FFFFFF"), ("subtitle_stroke_color", "#000000")):
         v = str(raw.get(k, fallback)).strip().upper()
         c[k] = v if re.fullmatch(r"#[0-9A-F]{6}", v) else fallback
+    tag = re.sub(r"[\r\n{}]", "", str(raw.get("streamer_tag", c["streamer_tag"]))).strip()[:80]
+    c["streamer_tag"] = tag
+    c["show_tag_video"] = bool(raw.get("show_tag_video", c["show_tag_video"]))
     f = str(raw.get("font", c["font"])).strip()
     if re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", f): c["font"] = f
     c["delete_rec"] = bool(raw.get("delete_rec", False))
@@ -349,6 +353,10 @@ def make_ass(words, start, end, path, cfg):
                     end_t = min(end_t, groups[gi + 1][0][0])
             text = " ".join((pop + w + r"{\r}") if k == j else w for k, (_, _, w) in enumerate(grp))
             lines.append(f"Dialogue: 0,{ts(s)},{ts(max(end_t, s + 0.08))},Default,,0,0,0,,{text}")
+    tag = str(cfg.get("streamer_tag", "")).strip()
+    if cfg.get("show_tag_video") and tag:
+        lines.append(f"Dialogue: 0,{ts(0)},{ts(max(0.08, end - start))},Default,,0,0,0,,"
+                     f"{{\\an7\\fs38\\bord3\\3c&H000000&}}Clip from {tag}")
     pathlib.Path(path).write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
 
 # ------------------------------------------------------------------ engine
@@ -563,7 +571,10 @@ class Engine:
             raise RuntimeError((r.stderr or "ffmpeg failed").strip()[-400:])
         text = " ".join(clean_word(w).lower() for s, e, w in words if start <= s <= end).strip()
         hook = (text[:110].rstrip() + ("..." if len(text) > 110 else "")) or "Clip"
-        (OUT / f"{name}.txt").write_text(f"{hook}\n\n#shorts #fyp #streamer #funny #clips #viral\n", encoding="utf-8")
+        tag = str(self.cfg.get("streamer_tag", "")).strip()
+        credit = f"Clip from {tag}\n\n" if tag else ""
+        (OUT / f"{name}.txt").write_text(
+            f"{hook}\n\n{credit}#shorts #fyp #streamer #funny #clips #viral\n", encoding="utf-8")
         os.replace(OUT / tmp, OUT / f"{name}.mp4")
         self.emit("clip", f"{name}.mp4")
 
@@ -1425,6 +1436,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Speech model</label></div>
     <select id="model" class="text"></select>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
+    <div class="row"><label>Tag / credit</label></div>
+    <input id="streamer-tag" class="text" type="text" maxlength="80" placeholder="@streamer">
+    <label class="toggle"><span>Show credit on the video</span><input type="checkbox" id="show-tag-video"><i class="sl"></i></label>
   </div>
 
   <div class="card" id="settings-card">
@@ -1571,6 +1585,10 @@ BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large
 $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.target.value;scheduleSave()});
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
 $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
+$("#streamer-tag").value=S.streamer_tag||"";
+$("#streamer-tag").addEventListener("input",e=>{S.streamer_tag=e.target.value.replace(/[\r\n{}]/g,"").slice(0,80);scheduleSave()});
+$("#show-tag-video").checked=!!S.show_tag_video;
+$("#show-tag-video").addEventListener("change",e=>{S.show_tag_video=e.target.checked;scheduleSave()});
 $("#t-sub-custom").checked=!!S.subtitle_custom;
 $("#sub-custom-fields").hidden=!S.subtitle_custom;
 $("#t-sub-custom").addEventListener("change",e=>{S.subtitle_custom=e.target.checked;$("#sub-custom-fields").hidden=!S.subtitle_custom;scheduleSave();preview()});

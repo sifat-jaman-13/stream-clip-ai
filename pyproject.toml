@@ -37,7 +37,8 @@ live = [
   "streamlink",
 ]
 all = [
-  "stream-clip-ai[gpu,live]",
+  "streamlink",
+  "nvidia-cublas-cu12",
 ]
 
 [project.scripts]

@@ -3,7 +3,7 @@
 > **Free, local, AI-powered stream clipper.**  
 > Twitch / YouTube live stream (or any video file) → ready-to-post **9:16 vertical clips** with animated MrBeast-style captions — no cloud, no subscription, no cost.
 
-[![PyPI - Package Name](https://img.shields.io/badge/pypi-stream--clip--ai-blue?logo=pypi)](https://pypi.org/project/stream-clip-ai/)
+[![GitHub](https://img.shields.io/badge/install-from%20source-blue?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker)](https://hub.docker.com/)
@@ -46,7 +46,7 @@ after each clip finishes rendering.
 | 📐 **9:16 output** | Blurred-background or fill-crop layout, 1080 × 1920, ready for Shorts/TikTok/Reels |
 | 🖥️ **Local web UI** | Beautiful dark dashboard — no extra install required |
 | ⚡ **GPU accelerated** | NVIDIA NVENC for encoding + CUDA for Whisper (CPU fallback included) |
-| 🔒 **100% local & free** | Nothing leaves your machine — no API keys needed |
+| 🔒 **100% local & free by default** | Nothing leaves your machine unless optional Zernio posting is enabled |
 
 ---
 
@@ -93,17 +93,17 @@ py -3.11 -m venv venv
 ### Step 4 — Install StreamClipAI
 
 ```powershell
-# CPU only (works on any PC):
-pip install stream-clip-ai
+# CPU only (from this checkout):
+pip install -e .
 
 # + Live stream support (Twitch / YouTube live):
-pip install "stream-clip-ai[live]"
+pip install -e ".[live]"
 
 # + NVIDIA GPU acceleration (fastest — requires CUDA-capable GPU):
-pip install "stream-clip-ai[gpu]"
+pip install -e ".[gpu]"
 
 # Everything at once (recommended):
-pip install "stream-clip-ai[all]"
+pip install -e ".[all]"
 ```
 
 ### Step 5 — Run
@@ -149,13 +149,13 @@ source venv/bin/activate
 
 ```bash
 # CPU only (works on Intel + Apple Silicon):
-pip install stream-clip-ai
+pip install -e .
 
 # + Live stream support:
-pip install "stream-clip-ai[live]"
+pip install -e ".[live]"
 
 # Everything at once:
-pip install "stream-clip-ai[all]"
+pip install -e ".[all]"
 ```
 
 > **Apple Silicon (M1/M2/M3):** GPU acceleration for Whisper uses the MPS backend automatically via `faster-whisper`. The `[gpu]` extra (CUDA) is not needed — CPU + MPS gives excellent speed.
@@ -211,16 +211,16 @@ source venv/bin/activate
 
 ```bash
 # CPU only:
-pip install stream-clip-ai
+pip install -e .
 
 # + Live stream support:
-pip install "stream-clip-ai[live]"
+pip install -e ".[live]"
 
 # + NVIDIA GPU (requires CUDA 11.8+ drivers installed):
-pip install "stream-clip-ai[gpu]"
+pip install -e ".[gpu]"
 
 # Everything:
-pip install "stream-clip-ai[all]"
+pip install -e ".[all]"
 ```
 
 **NVIDIA GPU on Linux — extra step (if CUDA isn't set up):**

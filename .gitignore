@@ -25,6 +25,7 @@ rec/
 settings.json
 custom_words.txt
 zernio.json
+.autoclip.lock
 
 # IDE
 .vscode/

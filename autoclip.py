@@ -57,10 +57,29 @@ SETTINGS_FILE = HERE / "settings.json"
 CUSTOM_FILE = HERE / "custom_words.txt"
 ZERNIO_FILE = HERE / "zernio.json"
 BRAND_LOGO = HERE / "assets" / "brand-logo.png"
+INSTANCE_LOCK_FILE = HERE / ".autoclip.lock"
+_INSTANCE_LOCK_HANDLE = None
 
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
 def run(cmd, **kw):   return subprocess.run(cmd, creationflags=CF, **kw)
 def popen(cmd, **kw): return subprocess.Popen(cmd, creationflags=CF, **kw)
+
+def acquire_instance_lock():
+    """Prevent accidentally launching two AutoClip servers in the same folder."""
+    global _INSTANCE_LOCK_HANDLE
+    h = open(INSTANCE_LOCK_FILE, "a+")
+    try:
+        h.seek(0); h.write("1"); h.flush(); h.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(h.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(h.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, ImportError):
+        h.close()
+        raise RuntimeError("AutoClip is already running from this folder. Close the existing window first.")
+    _INSTANCE_LOCK_HANDLE = h
 
 DEFAULTS = {
     "mode": "live", "target": "",
@@ -1043,6 +1062,11 @@ def open_window(url):
     webbrowser.open(url)
 
 def main():
+    try:
+        acquire_instance_lock()
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
+        return
     if len(sys.argv) >= 3 and sys.argv[1] in ("live", "file"):      # headless mode
         cfg = clean_cfg(dict(load_settings(), mode=sys.argv[1], target=sys.argv[2].strip('"')))
         if cfg["mode"] == "live" and not streamlink_available():
@@ -1068,7 +1092,10 @@ def main():
     except KeyboardInterrupt:
         pass
     CORE.shutdown()
-    time.sleep(0.3)
+    try:
+        time.sleep(0.3)
+    except KeyboardInterrupt:
+        pass
     srv.shutdown()
 
 
@@ -1305,8 +1332,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   </div>
 
   <div class="card">
-    <div class="ch"><span class="num">5</span><h3>Zernio posting</h3></div>
-    <p class="hint">Save your Zernio API key locally, verify your connected channels, then publish selected clips or all clips.</p>
+    <div class="ch"><span class="num">5</span><h3>App settings</h3></div>
+    <div class="row"><label>Zernio posting</label></div>
+    <p class="hint">Save your API key locally, identify connected channels, and control publishing for finished clips.</p>
     <input id="z-api" class="text" type="password" placeholder="Zernio API key (stored locally)">
     <div class="two">
       <div><div class="row"><label>Instagram</label></div><select id="z-ig" class="text"><option value="">Not selected</option></select></div>

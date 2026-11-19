@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "autoclip"
+version = "1.0.0"
+description = "Free live-stream / VOD auto clipper — Twitch/YouTube → 9:16 Shorts with MrBeast-style captions"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+  { name = "Sifat Jaman" },
+]
+keywords = ["twitch", "youtube", "clips", "shorts", "streaming", "auto-clip", "whisper", "captions"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Video",
+]
+dependencies = [
+  "numpy>=1.24",
+  "faster-whisper>=1.0.0",
+]
+
+[project.optional-dependencies]
+gpu = [
+  "nvidia-cublas-cu12",
+]
+live = [
+  "streamlink",
+]
+all = [
+  "autoclip[gpu,live]",
+]
+
+[project.scripts]
+autoclip = "autoclip.app:main"
+
+[project.urls]
+Homepage = "https://github.com/sifat-jaman-13/autoclip"
+Repository = "https://github.com/sifat-jaman-13/autoclip"
+Issues = "https://github.com/sifat-jaman-13/autoclip/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

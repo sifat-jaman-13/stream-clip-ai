@@ -1546,6 +1546,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 <script>
 const BOOT=__BOOT__;
 const TOKEN="__TOKEN__";
+let appClosing=false;
 const S=Object.assign({},BOOT.settings);
 const Z=Object.assign({},BOOT.zernio||{});
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
@@ -1569,6 +1570,11 @@ async function api(path,body){
   if(!r.ok)throw new Error(j.error||("Request failed ("+r.status+")"));
   return j;
 }
+window.addEventListener("pagehide",()=>{
+  if(appClosing)return;
+  appClosing=true;
+  fetch("/api/quit",{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:"{}",keepalive:true}).catch(()=>{});
+});
 function setSelectOptions(el,items,chosen){
   el.replaceChildren(h("option",{value:""},"Not selected"));
   items.forEach(a=>el.append(h("option",{value:a.id},a.name+" ("+a.platform+")")));
@@ -1772,6 +1778,7 @@ $("#btn-stop").onclick=()=>api("/api/stop",{force:false}).then(()=>poll(true)).c
 $("#btn-kill").onclick=()=>api("/api/stop",{force:true}).then(()=>poll(true)).catch(e=>toast(e.message,"bad"));
 $("#btn-quit").onclick=async()=>{
   if(!(await confirmBox("Quit AutoClip?","Any recording in progress will stop. Finished clips stay in the clips folder.","Quit")))return;
+  appClosing=true;
   try{await api("/api/quit")}catch(e){}
   document.body.replaceChildren(h("div",{style:"height:100%;display:grid;place-items:center;text-align:center;color:#9a9fb5"},h("div",{},h("h2",{style:"color:#fff;margin-bottom:8px"},"AutoClip has closed"),h("p",{},"You can close this window."))));
   setTimeout(()=>window.close(),400);

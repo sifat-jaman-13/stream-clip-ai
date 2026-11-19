@@ -91,6 +91,9 @@ DEFAULTS = {
     "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 1.5,
     "model": "distil-large-v3",
     "color": "Yellow", "position": "Lower third", "caption_size": 100, "words_per_line": 3, "font": "Impact",
+    "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "Classic",
+    "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
+    "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "layout": "Facecam + game (Twitch)", "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
 }
@@ -100,6 +103,10 @@ CAPTION_POS = {"Lower third": 520, "Middle": 800, "Low": 380}      # MarginV (px
 LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)"]
 MODELS = ["distil-large-v3", "large-v3-turbo", "small", "base"]
 STREAM_QUALITY = "1080p60,1080p,720p60,720p"
+SUBTITLE_MODES = ["Karaoke", "Classic"]
+SUBTITLE_STYLES = ["Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"]
+SUBTITLE_POSITIONS = ["Top", "Center", "Bottom"]
+SUBTITLE_ALIGNMENTS = ["Left", "Center"]
 
 def clean_cfg(raw):
     """Validate/clamp settings coming from the UI or disk."""
@@ -112,6 +119,7 @@ def clean_cfg(raw):
     num("clips_per_chunk", 1, 10, int); num("chunk_min", 1, 30, int)
     num("pre", 3, 90, int); num("post", 3, 90, int)
     num("min_score", 0.3, 5.0, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
+    num("subtitle_font_size", 60, 180, int); num("subtitle_nudge", -400, 400, int)
     c["min_score"] = round(c["min_score"], 2)
     num("cam_x", 0, 90, float); num("cam_y", 0, 90, float); num("cam_w", 10, 100, float); num("cam_h", 10, 100, float)
     num("game_x", 0, 100, float)
@@ -121,6 +129,13 @@ def clean_cfg(raw):
     c["target"] = str(raw.get("target", "")).strip()[:1000]
     for k, opts in (("color", CAPTION_COLORS), ("position", CAPTION_POS), ("layout", LAYOUTS), ("model", MODELS)):
         if raw.get(k) in opts: c[k] = raw[k]
+    for k, opts in (("subtitle_mode", SUBTITLE_MODES), ("subtitle_style", SUBTITLE_STYLES),
+                    ("subtitle_position", SUBTITLE_POSITIONS), ("subtitle_alignment", SUBTITLE_ALIGNMENTS)):
+        if raw.get(k) in opts: c[k] = raw[k]
+    c["subtitle_custom"] = bool(raw.get("subtitle_custom", False))
+    for k, fallback in (("subtitle_text_color", "#FFFFFF"), ("subtitle_stroke_color", "#000000")):
+        v = str(raw.get(k, fallback)).strip().upper()
+        c[k] = v if re.fullmatch(r"#[0-9A-F]{6}", v) else fallback
     f = str(raw.get("font", c["font"])).strip()
     if re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", f): c["font"] = f
     c["delete_rec"] = bool(raw.get("delete_rec", False))
@@ -274,6 +289,21 @@ def group_words(ws, max_words, max_chars, gap=0.7):
         groups.append(cur)
     return groups
 
+SUBTITLE_PRESETS = {
+    "Classic": {"font": "Impact", "text": "#FFFFFF", "stroke": "#000000", "outline": 9, "shadow": 4, "pop": True},
+    "Hormozi": {"font": "Arial Black", "text": "#FFFFFF", "stroke": "#000000", "outline": 10, "shadow": 4, "pop": True},
+    "Neon": {"font": "Arial Black", "text": "#FFFFFF", "stroke": "#FF40FF", "outline": 7, "shadow": 3, "pop": True},
+    "MrBeast": {"font": "Impact", "text": "#FFFFFF", "stroke": "#000000", "outline": 10, "shadow": 5, "pop": True},
+    "Minimal": {"font": "Segoe UI Black", "text": "#FFFFFF", "stroke": "#000000", "outline": 4, "shadow": 1, "pop": False},
+    "Fire": {"font": "Impact", "text": "#FFFFFF", "stroke": "#7A1200", "outline": 9, "shadow": 4, "pop": True},
+}
+
+def _ass_color(value, fallback):
+    value = str(value or fallback).strip().lstrip("#")
+    if not re.fullmatch(r"[0-9A-Fa-f]{6}", value):
+        value = fallback.lstrip("#")
+    return value[4:6] + value[2:4] + value[0:2]
+
 def make_ass(words, start, end, path, cfg):
     ws = []
     for s, e, w in words:
@@ -281,17 +311,31 @@ def make_ass(words, start, end, path, cfg):
             cw = clean_word(w)
             if cw:
                 ws.append((s - start, e - start, cw))
-    col = CAPTION_COLORS.get(cfg["color"], "00FFFF")
-    mv = CAPTION_POS.get(cfg["position"], 520)
-    size = int(cfg["caption_size"])
+    custom = bool(cfg.get("subtitle_custom"))
+    preset = SUBTITLE_PRESETS.get(cfg.get("subtitle_style", "Classic"), SUBTITLE_PRESETS["Classic"])
+    col = _ass_color(cfg.get("subtitle_text_color"), "#FFFFFF") if custom else CAPTION_COLORS.get(cfg["color"], "00FFFF")
+    stroke = _ass_color(cfg.get("subtitle_stroke_color"), "#000000") if custom else "000000"
+    size = int(cfg.get("subtitle_font_size", cfg["caption_size"])) if custom else int(cfg["caption_size"])
+    font = preset["font"] if custom else cfg["font"]
+    if custom:
+        pos = cfg.get("subtitle_position", "Bottom")
+        align = cfg.get("subtitle_alignment", "Center")
+        alignment = {"Top": 7 if align == "Left" else 8, "Center": 4 if align == "Left" else 5,
+                     "Bottom": 1 if align == "Left" else 2}[pos]
+        mv = max(0, 70 + int(cfg.get("subtitle_nudge", 0))) if pos != "Center" else int(cfg.get("subtitle_nudge", 0))
+        outline, shadow = preset["outline"], preset["shadow"]
+    else:
+        alignment, mv, outline, shadow = 2, CAPTION_POS.get(cfg["position"], 520), 9, 4
     header = (
         "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\n\n"
         "[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,"
         "BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,"
         "Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n"
-        f"Style: Default,{cfg['font']},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,2,0,1,9,4,2,70,70,{mv},1\n\n"
+        f"Style: Default,{font},{size},&H00{col},&H00{col},&H00{stroke},&H64000000,0,0,0,0,100,100,2,0,1,{outline},{shadow},{alignment},70,70,{mv},1\n\n"
         "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n")
-    pop = r"{\1c&H" + col + r"&\fscx120\fscy120\t(0,90,\fscx100\fscy100)}"
+    pop = (r"{\1c&H" + col + r"&\fscx120\fscy120\t(0,90,\fscx100\fscy100)}"
+           if (not custom or (preset["pop"] and cfg.get("subtitle_mode", "Karaoke") == "Karaoke"))
+           else r"{\1c&H" + col + r"&}")
     max_chars = max(8, int(1750 / size))
     lines = []
     groups = group_words(ws, int(cfg["words_per_line"]), max_chars)
@@ -1178,6 +1222,8 @@ header{display:flex;align-items:center;gap:14px;padding:16px 22px}
 .row:first-child{margin-top:0}
 .row label{color:var(--dim);font-size:13px}
 .row b{font-weight:600;font-variant-numeric:tabular-nums}
+.subhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font-weight:600}
+.toggle.compact{margin-top:0;gap:8px}.toggle.compact span{font-size:11px}.color-text{width:100%;height:42px;padding:4px;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:10px;cursor:pointer}
 .ends{display:flex;justify-content:space-between;color:var(--mute);font-size:11px;margin-top:5px}
 input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:6px;outline:0;cursor:pointer;
 background:linear-gradient(90deg,var(--a1),var(--a2)) 0/var(--p,50%) 100% no-repeat,rgba(255,255,255,.1)}
@@ -1345,6 +1391,26 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="font" class="text" list="fonts" spellcheck="false" autocomplete="off">
     <datalist id="fonts"><option value="Impact"><option value="Arial Black"><option value="Segoe UI Black"><option value="Bahnschrift"><option value="Franklin Gothic Heavy"><option value="Verdana"></datalist>
     <p class="hint">Impact is the classic MrBeast look. Any font installed on your PC works.</p>
+    <div class="subhead"><span>Subtitles (customize)</span><label class="toggle compact"><span>Leave off to use server defaults</span><input type="checkbox" id="t-sub-custom"><i class="sl"></i></label></div>
+    <div id="sub-custom-fields" hidden>
+      <div class="two">
+        <div><div class="row"><label>Mode</label></div><select id="sub-mode" class="text"><option>Karaoke</option><option>Classic</option></select></div>
+        <div><div class="row"><label>Style preset</label></div><select id="sub-style" class="text"><option>Classic</option><option>Hormozi</option><option>Neon</option><option>MrBeast</option><option>Minimal</option><option>Fire</option></select></div>
+      </div>
+      <div class="two">
+        <div><div class="row"><label>Font size</label><b id="v-sub-size"></b></div><input type="range" id="r-sub-size" min="60" max="180" step="2"></div>
+        <div><div class="row"><label>Vertical nudge</label><b id="v-sub-nudge"></b></div><input type="range" id="r-sub-nudge" min="-400" max="400" step="1"></div>
+      </div>
+      <div class="two">
+        <div><div class="row"><label>Text color</label></div><input id="sub-text-color" class="color-text" type="color" value="#FFFFFF"></div>
+        <div><div class="row"><label>Stroke color</label></div><input id="sub-stroke-color" class="color-text" type="color" value="#000000"></div>
+      </div>
+      <div class="two">
+        <div><div class="row"><label>Position</label></div><div class="seg" data-key="subtitle_position"><button data-v="Top">Top</button><button data-v="Center">Center</button><button data-v="Bottom">Bottom</button></div></div>
+        <div><div class="row"><label>Alignment</label></div><div class="seg" data-key="subtitle_alignment"><button data-v="Left">Left</button><button data-v="Center">Center</button></div></div>
+      </div>
+      <p class="hint">Presets control the font and animation. Text/stroke colors, position, alignment, and size remain yours to tune.</p>
+    </div>
   </div>
 
   <div class="card">
@@ -1505,6 +1571,17 @@ BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large
 $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.target.value;scheduleSave()});
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
 $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
+$("#t-sub-custom").checked=!!S.subtitle_custom;
+$("#sub-custom-fields").hidden=!S.subtitle_custom;
+$("#t-sub-custom").addEventListener("change",e=>{S.subtitle_custom=e.target.checked;$("#sub-custom-fields").hidden=!S.subtitle_custom;scheduleSave();preview()});
+$("#sub-mode").value=S.subtitle_mode;$("#sub-mode").addEventListener("change",e=>{S.subtitle_mode=e.target.value;scheduleSave()});
+$("#sub-style").value=S.subtitle_style;$("#sub-style").addEventListener("change",e=>{S.subtitle_style=e.target.value;scheduleSave();preview()});
+$("#sub-text-color").value=S.subtitle_text_color;$("#sub-text-color").addEventListener("input",e=>{S.subtitle_text_color=e.target.value.toUpperCase();scheduleSave();preview()});
+$("#sub-stroke-color").value=S.subtitle_stroke_color;$("#sub-stroke-color").addEventListener("input",e=>{S.subtitle_stroke_color=e.target.value.toUpperCase();scheduleSave();preview()});
+for(const [id,key,lab,fmt] of [["r-sub-size","subtitle_font_size","v-sub-size",v=>v+" px"],["r-sub-nudge","subtitle_nudge","v-sub-nudge",v=>v+" px"]]){
+  const el=$("#"+id);el.value=S[key];const upd=()=>{S[key]=+el.value;$("#"+lab).textContent=fmt(el.value);paintRange(el);preview()};
+  el.addEventListener("input",()=>{upd();scheduleSave()});upd();
+}
 $("#target").value=S.target||"";$("#target").addEventListener("input",e=>{S.target=e.target.value;scheduleSave()});
 function onMode(){
   const live=S.mode==="live";
@@ -1524,10 +1601,14 @@ function preview(){
   const ph=$("#phone"),cap=$("#cap");
   ph.classList.toggle("fill",S.layout.startsWith("Fill"));ph.classList.toggle("cam",S.layout.startsWith("Facecam"));
   const k=ph.getBoundingClientRect().width/1080||0.2;
-  const col=BOOT.colors[S.color]||"#FFE600",n=S.words_per_line;
+  const custom=!!S.subtitle_custom;
+  const col=custom?(S.subtitle_text_color||"#FFFFFF"):(BOOT.colors[S.color]||"#FFE600"),n=S.words_per_line;
+  const subFont=custom?({Classic:"Impact",Hormozi:"Arial Black",Neon:"Arial Black",MrBeast:"Impact",Minimal:"Segoe UI Black",Fire:"Impact"}[S.subtitle_style]||"Impact"):S.font;
+  const subPos=custom?S.subtitle_position:"Bottom";
+  const bottom=custom?(subPos==="Bottom"?70:subPos==="Center"?760:null):(BOOT.positions[S.position]||520);
   const idx=tick%FLAT.length,g=Math.floor(idx/n),words=FLAT.slice(g*n,Math.min(FLAT.length,g*n+n));
   const o=Math.max(1,9*k),sh=[];for(let a=0;a<12;a++){const r=a/12*Math.PI*2;sh.push((Math.cos(r)*o).toFixed(1)+"px "+(Math.sin(r)*o).toFixed(1)+"px 0 #000")}
-  cap.style.cssText="bottom:"+(BOOT.positions[S.position]*k)+"px;padding:0 "+(70*k)+"px;font-size:"+(S.caption_size*k)+"px;font-family:'"+S.font+"',Impact,'Arial Black',sans-serif;--cap:"+col+";text-shadow:"+sh.join(",")+";color:#fff";
+  cap.style.cssText=(bottom==null?"top:"+(70+S.subtitle_nudge)*k+"px;":"bottom:"+((bottom+S.subtitle_nudge)*k)+"px;")+"padding:0 "+(70*k)+"px;font-size:"+((custom?S.subtitle_font_size:S.caption_size)*k)+"px;font-family:'"+subFont+"',Impact,'Arial Black',sans-serif;--cap:"+col+";text-shadow:"+sh.join(",")+";color:"+col;
   cap.replaceChildren(...words.map((w,i)=>h("span",{class:(g*n+i===idx)?"hot":""},w)));
 }
 setInterval(()=>{tick++;preview()},430);preview();

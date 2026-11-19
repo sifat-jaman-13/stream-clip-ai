@@ -1822,6 +1822,9 @@ function openCamEditor(){
   gs.addEventListener("input",()=>{gx=+gs.value;paintRange(gs);paint()});
   const msg=h("span",{class:"hint",style:"margin:0"},"");
   const grab=h("button",{class:"btn ghost"},"Grab a frame");
+  const center=h("button",{class:"btn ghost"},"Center crop");
+  const centerCrop=()=>{box.h=100;box.w=Math.min(100,100*targetAr/sourceAr);box.x=(100-box.w)/2;box.y=0;paint();msg.textContent="Crop centered."};
+  center.onclick=centerCrop;
   const doGrab=async()=>{grab.disabled=true;msg.textContent="Grabbing a frame...";try{const r=await api("/api/frame",{mode:S.mode,target:S.target});img.src=r.image;msg.textContent="Drag the pink box over the facecam and pull the corner to resize."}catch(e){msg.textContent=e.message}grab.disabled=false};
   grab.onclick=doGrab;
   const close=()=>{m.remove();document.removeEventListener("keydown",esc)};
@@ -1872,7 +1875,7 @@ function openCropEditor(){
   const m=h("div",{class:"overlay",onclick:e=>{if(e.target===m)close()}},
     h("div",{class:"editor"},h("h4",{},"Select the source segment"),
       h("div",{class:"sub"},"The frame stays in its original aspect ratio. The fixed box matches your selected output format: "+S.output_format+"."),
-      stage,h("div",{class:"erow"},grab,msg),
+      stage,h("div",{class:"erow"},grab,center,msg),
       h("div",{class:"erow",style:"justify-content:flex-end"},h("button",{class:"btn ghost",onclick:close},"Cancel"),h("button",{class:"btn danger",style:"background:var(--a1)",onclick:save},"Save segment"))));
   document.body.append(m);document.addEventListener("keydown",esc);paint();
   if(S.target&&S.target.trim())doGrab();else msg.textContent="Paste a stream link or choose a file first, then press Grab a frame.";

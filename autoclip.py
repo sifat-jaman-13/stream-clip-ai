@@ -775,7 +775,7 @@ class Engine:
         self.procs = [sl, ff]
         done = set()
         idle = f"Recording - a clip batch is made every {self.cfg['chunk_min']} min."
-        self.status(idle, "recording")
+        self.status(idle, "recording", 0)
         t0 = time.time(); last_beat = t0; last_growth = t0; last_total = -1; warned = False
         try:
             while not self.abort:
@@ -789,6 +789,13 @@ class Engine:
                     self.log(f"WARNING: no new video data for {STALL_SECONDS} s - the stream may be stuck on ads. "
                              f"streamlink says: {self._tail(slog_path) or '(nothing)'}")
                     warned = True
+                if recording:
+                    elapsed = int(time.time() - t0)
+                    batch_elapsed = elapsed % self.seg_seconds
+                    left = max(0, self.seg_seconds - batch_elapsed)
+                    self.status(f"Recording... {total / 1048576:.0f} MB captured; next clip batch in about "
+                                f"{left // 60}:{left % 60:02d}.", "recording",
+                                int(batch_elapsed / max(1, self.seg_seconds) * 100))
                 if recording and time.time() - last_beat >= 60:
                     last_beat = time.time()
                     left = max(0, self.seg_seconds - int(time.time() - t0) % self.seg_seconds)
@@ -808,7 +815,7 @@ class Engine:
                     except Exception as e:
                         self.log(f"Error on {os.path.basename(sg)}: {e}")
                     if ff.poll() is None and not self.stop_flag:
-                        self.status(idle, "recording")
+                        self.status(idle, "recording", 0)
                     elif not self.abort:
                         self.status("Wrapping up the clips already recorded...", "stopping")
                 if not recording and set(segs) <= done:
@@ -1957,11 +1964,13 @@ function updateRun(s){
   hero.classList.toggle("live",s.running&&s.phase!=="waiting"||s.phase==="waiting"&&s.running);
   const ph=$("#ph");ph.replaceChildren(...(s.phase==="recording"?[h("span",{class:"rec-dot"})]:[]),PHASES[s.phase]||"Working");
   $("#st").textContent=s.status;$("#st").title=s.status;
-  const showProgress=s.running&&(s.phase==="transcribing"||s.phase==="rendering");
+  const showProgress=s.running&&(s.phase==="recording"||s.phase==="transcribing"||s.phase==="rendering");
   $("#progress-wrap").hidden=!showProgress;
   const progress=Math.max(0,Math.min(100,Number(s.progress)||0));
   $("#progress-fill").style.width=progress+"%";$("#progress-value").textContent=progress+"%";
-  $("#progress-label").textContent=s.phase==="rendering"?"Rendering clips":"Transcribing video";
+  $("#progress-label").textContent=s.phase==="recording"?"Next clip batch":"";
+  if(s.phase==="transcribing")$("#progress-label").textContent="Transcribing video";
+  if(s.phase==="rendering")$("#progress-label").textContent="Rendering clips";
   $("#s-time").textContent=fmtT(s.session.elapsed);$("#s-chunks").textContent=s.session.chunks;$("#s-clips").textContent=s.session.clips;
   $("#startbar").hidden=s.running;$("#stopbar").hidden=!s.running;
   const live=s.mode==="live";

@@ -1530,6 +1530,7 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;bac
 .folder-pick{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
 .update-list{line-height:1.7;white-space:pre-line}
 .about-links{display:flex;flex-wrap:wrap;gap:8px}
+.about-card{margin-top:14px;padding:16px 18px}.about-title{display:flex;align-items:center;gap:12px;margin-bottom:10px}.about-title h3{font-size:16px}.small-mark{width:34px;height:34px;border-radius:10px}.small-mark img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
 .sw{display:flex;gap:10px}
 .sw button{width:30px;height:30px;border-radius:50%;border:2px solid transparent;box-shadow:0 0 0 2px rgba(0,0,0,.5) inset;transition:.15s}
 .sw button.on{border-color:#fff;transform:scale(1.12)}
@@ -1760,9 +1761,6 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
     <div class="hint update-list" id="updates-list"></div>
-    <div class="row"><label>About AutoClip</label></div>
-    <p class="hint">Created by Scarzero. Follow the author for new clips and updates.</p>
-    <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank">Instagram · @scarzero13</a></div>
     <div class="row"><label>Zernio posting</label></div>
     <p class="hint">Save your API key locally, identify connected channels, and control publishing for finished clips.</p>
     <div class="row"><label>Zernio API key</label><b id="z-key-state">Not saved</b></div>
@@ -1819,6 +1817,11 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <div class="hwb"><button class="btn ghost" id="btn-words-save"><span data-ico="check"></span>Save hype words</button><span class="msg" id="words-msg">Saved</span></div>
       <details><summary id="builtin-sum">Built-in hype words</summary><div class="chips" id="chips"></div></details>
     </div>
+  </div>
+  <div class="card about-card">
+    <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="Scarzero Plays"></div><div><h3>AutoClip by Scarzero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
+    <p class="hint">Built for creators who want fast local processing, flexible framing, automatic streamer credit, and direct publishing workflows. Follow the author for new releases, clips, and creator updates.</p>
+    <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a></div>
   </div>
 </section>
 </div>

@@ -56,8 +56,15 @@ def _patch_pyav():
 _patch_pyav()
 
 HERE = pathlib.Path(__file__).resolve().parent
-OUT = HERE / "out"; OUT.mkdir(exist_ok=True)
-REC = HERE / "rec"; REC.mkdir(exist_ok=True)
+OUT = HERE / "out"
+REC = HERE / "rec"
+
+def ensure_runtime_dirs():
+    """Recreate runtime folders if the user, cleanup software, or an installer removed them."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    REC.mkdir(parents=True, exist_ok=True)
+
+ensure_runtime_dirs()
 SETTINGS_FILE = HERE / "settings.json"
 CUSTOM_FILE = HERE / "custom_words.txt"
 ZERNIO_FILE = HERE / "zernio.json"
@@ -763,11 +770,24 @@ class Engine:
         self.log("Recording finished.")
 
     def record_session(self, url):
+        # The recording folder can disappear while AutoClip is running (for example,
+        # after a manual cleanup or an antivirus/cleanup tool removes an empty dir).
+        # Recreate it immediately before opening the stream log and segment files.
+        ensure_runtime_dirs()
         run_id = time.strftime("%m%d_%H%M%S")
         pattern = str(REC / f"seg_{run_id}_%05d.ts")
         slog_path = REC / f"streamlink_{run_id}.log"
-        slog = open(slog_path, "wb")
-        sl = popen(streamlink_cmd() + ["--stdout", url, STREAM_QUALITY], stdout=subprocess.PIPE, stderr=slog, env=streamlink_env())
+        try:
+            slog = open(slog_path, "wb")
+        except FileNotFoundError:
+            # Handle a race where the folder vanished between mkdir and open.
+            ensure_runtime_dirs()
+            slog = open(slog_path, "wb")
+        try:
+            sl = popen(streamlink_cmd() + ["--stdout", url, STREAM_QUALITY], stdout=subprocess.PIPE, stderr=slog, env=streamlink_env())
+        except Exception:
+            slog.close()
+            raise
         ff = popen(["ffmpeg", "-v", "error", "-i", "-", "-c", "copy", "-f", "segment",
                     "-segment_time", str(self.seg_seconds), "-reset_timestamps", "1", pattern],
                    stdin=sl.stdout)

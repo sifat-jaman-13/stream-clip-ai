@@ -1,0 +1,20 @@
+services:
+  streamclipai:
+    build: .
+    image: stream-clip-ai:latest
+    container_name: streamclipai
+    ports:
+      - "8080:8080"      # Web UI  →  open http://localhost:8080 in your browser
+    volumes:
+      - ./out:/data/out        # finished clips land here on your host
+      - ./rec:/data/rec        # raw recordings (temp segments)
+      - ./settings.json:/data/settings.json   # persisted settings (created on first run)
+      - ./custom_words.txt:/data/custom_words.txt  # your custom hype words
+    restart: unless-stopped
+    # Uncomment for headless live-stream mode (no web UI):
+    # command: ["live", "https://www.twitch.tv/your_channel"]
+
+    # Uncomment to process a local file (mount it first):
+    # volumes:
+    #   - ./my_vod.mp4:/data/rec/my_vod.mp4
+    # command: ["file", "/data/rec/my_vod.mp4"]

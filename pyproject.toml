@@ -4,7 +4,7 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "stream-clip-ai"
-version = "1.0.0"
+version = "1.0.1"
 description = "Free AI-powered stream clipper — Twitch/YouTube live & VODs → 9:16 Shorts/TikTok/Reels with animated captions"
 readme = "README.md"
 license = { file = "LICENSE" }

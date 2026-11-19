@@ -96,13 +96,14 @@ DEFAULTS = {
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "streamer_tag": "", "show_tag_video": True,
     "cta_enabled": True, "cta_text": "Subscribe for more clips", "cta_voice_enabled": True,
-    "layout": "Facecam + game (Twitch)", "output_format": "9:16", "delete_rec": False,
+    "layout": "Facecam + game (Twitch)", "output_format": "9:16", "crop_x": 34.2, "crop_y": 0.0,
+    "crop_w": 31.6, "crop_h": 100.0, "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
 }
 # ASS colours are BGR
 CAPTION_COLORS = {"Yellow": "00FFFF", "Green": "00FF00", "Cyan": "FFFF00", "Orange": "0080FF", "Pink": "FF40FF"}
 CAPTION_POS = {"Lower third": 520, "Middle": 800, "Low": 380}      # MarginV (px from bottom of 1920)
-LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)"]
+LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)", "Selected crop"]
 OUTPUT_FORMATS = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080), "4:5": (1080, 1350)}
 MODELS = ["distil-large-v3", "large-v3-turbo", "small", "base"]
 STREAM_QUALITY = "1080p60,1080p,720p60,720p,best"
@@ -126,8 +127,10 @@ def clean_cfg(raw):
     c["min_score"] = round(c["min_score"], 2)
     num("cam_x", 0, 90, float); num("cam_y", 0, 90, float); num("cam_w", 10, 100, float); num("cam_h", 10, 100, float)
     num("game_x", 0, 100, float)
+    num("crop_x", 0, 90, float); num("crop_y", 0, 90, float); num("crop_w", 10, 100, float); num("crop_h", 10, 100, float)
     c["cam_w"] = min(c["cam_w"], 100 - c["cam_x"]); c["cam_h"] = min(c["cam_h"], 100 - c["cam_y"])
-    for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x"): c[k] = round(c[k], 1)
+    c["crop_w"] = min(c["crop_w"], 100 - c["crop_x"]); c["crop_h"] = min(c["crop_h"], 100 - c["crop_y"])
+    for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x", "crop_x", "crop_y", "crop_w", "crop_h"): c[k] = round(c[k], 1)
     if raw.get("mode") in ("live", "file"): c["mode"] = raw["mode"]
     c["target"] = str(raw.get("target", "")).strip()[:1000]
     for k, opts in (("color", CAPTION_COLORS), ("position", CAPTION_POS), ("layout", LAYOUTS),
@@ -627,7 +630,12 @@ class Engine:
                   f"[b]scale={out_w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,"
                   f"setsar=1,subtitles={name}.ass[v]")
         else:
-            vf = (f"[0:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
+            if cfg["layout"].startswith("Selected"):
+                cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("crop_x", "crop_y", "crop_w", "crop_h"))
+                crop = f"crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f},"
+            else:
+                crop = ""
+            vf = (f"[0:v]{crop}scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
                   f"setsar=1,subtitles={name}.ass[v]")
         enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
@@ -1541,7 +1549,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     </select>
     <p class="hint" id="format-hint">9:16 keeps the facecam + game layout.</p>
     <div class="row"><label>Layout</label></div>
-    <div class="seg" data-key="layout"><button data-v="Facecam + game (Twitch)">Facecam + game</button><button data-v="Blur background">Blurred bg</button><button data-v="Fill (crop center)">Fill</button></div>
+    <div class="seg" data-key="layout"><button data-v="Facecam + game (Twitch)">Facecam + game</button><button data-v="Blur background">Blurred bg</button><button data-v="Fill (crop center)">Fill</button><button data-v="Selected crop">Selected crop</button></div>
     <div id="camrow" hidden>
       <div class="row"><label>Facecam area</label><b id="v-cam"></b></div>
       <button class="btn ghost" id="btn-cam" style="width:100%">Set facecam area on a frame</button>
@@ -1549,6 +1557,8 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     </div>
     <div class="row"><label>Speech model</label></div>
     <select id="model" class="text"></select>
+    <button class="btn ghost" id="btn-crop" style="width:100%;margin-top:12px">Select source segment on a frame</button>
+    <p class="hint">Uses the original source frame (normally 16:9). Choose “Selected crop” to capture exactly the segment you select.</p>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
     <div class="row"><label>End-card CTA</label></div>
     <input id="cta-text" class="text" type="text" maxlength="100" placeholder="Subscribe for more clips">
@@ -1710,7 +1720,7 @@ Object.entries(BOOT.colors).forEach(([name,css])=>{sw.append(h("button",{title:n
 function paintSw(){$$("button",sw).forEach(b=>b.classList.toggle("on",b.dataset.v===S.color))}paintSw();
 BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large-v3"?"distil-large-v3 (fast, English)":m==="large-v3-turbo"?"large-v3-turbo (any language)":m==="small"?"small (light)":"base (lightest)")));
 $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.target.value;scheduleSave()});
-$("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;updateFormatUI();preview();scheduleSave()});updateFormatUI();
+$("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}function resetCropForFormat(){const r=({"9:16":9/16,"16:9":16/9,"1:1":1,"4:5":4/5}[S.output_format]||9/16),w=Math.min(100,100*r/(16/9));S.crop_w=+w.toFixed(1);S.crop_h=100;S.crop_x=+( (100-w)/2 ).toFixed(1);S.crop_y=0}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;resetCropForFormat();updateFormatUI();preview();scheduleSave()});updateFormatUI();
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
 $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
 $("#cta-text").value=S.cta_text||"Subscribe for more clips";
@@ -1824,6 +1834,47 @@ function openCamEditor(){
   if(S.target&&S.target.trim())doGrab();else msg.textContent="Paste a stream link or pick a file first, then press Grab a frame. You can still drag the box now.";
 }
 $("#btn-cam").onclick=openCamEditor;
+function openCropEditor(){
+  const box={x:+S.crop_x,y:+S.crop_y,w:+S.crop_w,h:+S.crop_h};let sourceAr=16/9;
+  const img=h("img",{class:"cimg",draggable:false}),hdl=h("i",{class:"hdl"});
+  const rc=h("div",{class:"crect"},h("span",{},"OUTPUT SEGMENT"),hdl);
+  const stage=h("div",{class:"cstage"},img,rc);
+  const targetAr=({"9:16":9/16,"16:9":16/9,"1:1":1,"4:5":4/5}[S.output_format]||9/16);
+  const boxH=w=>w*sourceAr/targetAr;
+  function fit(){
+    box.h=boxH(box.w);
+    if(box.h>100){box.h=100;box.w=box.h*targetAr/sourceAr}
+    box.x=clamp(box.x,0,100-box.w);box.y=clamp(box.y,0,100-box.h);
+  }
+  function paint(){rc.style.cssText="left:"+box.x+"%;top:"+box.y+"%;width:"+box.w+"%;height:"+box.h+"%"}
+  fit();
+  const drag=(el,mode)=>el.addEventListener("pointerdown",e=>{
+    e.preventDefault();e.stopPropagation();el.setPointerCapture(e.pointerId);
+    const r=stage.getBoundingClientRect(),s0={x:box.x,y:box.y,w:box.w,px:e.clientX,py:e.clientY};
+    const mv=ev=>{const dx=(ev.clientX-s0.px)/r.width*100,dy=(ev.clientY-s0.py)/r.height*100;
+      if(mode==="move"){box.x=clamp(s0.x+dx,0,100-box.w);box.y=clamp(s0.y+dy,0,100-box.h)}
+      else{let w=clamp(s0.w+dx,8,100-box.x);let hh=boxH(w);if(hh>100-box.y){hh=100-box.y;w=hh*targetAr/sourceAr}box.w=w;box.h=hh}
+      paint()};
+    const up=()=>{el.removeEventListener("pointermove",mv);el.removeEventListener("pointerup",up)};
+    el.addEventListener("pointermove",mv);el.addEventListener("pointerup",up)});
+  drag(rc,"move");drag(hdl,"resize");
+  img.addEventListener("load",()=>{if(img.naturalWidth){sourceAr=img.naturalWidth/img.naturalHeight;stage.style.aspectRatio=img.naturalWidth+"/"+img.naturalHeight;fit();paint()}});
+  const msg=h("span",{class:"hint",style:"margin:0"},"");
+  const grab=h("button",{class:"btn ghost"},"Grab a frame");
+  const doGrab=async()=>{grab.disabled=true;msg.textContent="Grabbing a frame...";try{const r=await api("/api/frame",{mode:S.mode,target:S.target});img.src=r.image;msg.textContent="Drag the fixed-aspect box to choose the exact source segment."}catch(e){msg.textContent=e.message}grab.disabled=false};
+  grab.onclick=doGrab;
+  const close=()=>{m.remove();document.removeEventListener("keydown",esc)};
+  const esc=e=>{if(e.key==="Escape")close()};
+  const save=()=>{S.crop_x=+box.x.toFixed(1);S.crop_y=+box.y.toFixed(1);S.crop_w=+box.w.toFixed(1);S.crop_h=+box.h.toFixed(1);scheduleSave();close();toast("Source segment saved","ok")};
+  const m=h("div",{class:"overlay",onclick:e=>{if(e.target===m)close()}},
+    h("div",{class:"editor"},h("h4",{},"Select the source segment"),
+      h("div",{class:"sub"},"The frame stays in its original aspect ratio. The fixed box matches your selected output format: "+S.output_format+"."),
+      stage,h("div",{class:"erow"},grab,msg),
+      h("div",{class:"erow",style:"justify-content:flex-end"},h("button",{class:"btn ghost",onclick:close},"Cancel"),h("button",{class:"btn danger",style:"background:var(--a1)",onclick:save},"Save segment"))));
+  document.body.append(m);document.addEventListener("keydown",esc);paint();
+  if(S.target&&S.target.trim())doGrab();else msg.textContent="Paste a stream link or choose a file first, then press Grab a frame.";
+}
+$("#btn-crop").onclick=openCropEditor;
 
 /* ---------- tabs ---------- */
 let wordsLoaded=false;

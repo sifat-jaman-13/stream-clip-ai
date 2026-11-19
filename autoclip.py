@@ -1236,6 +1236,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
                     return self._send(200, CORE.publish_clips([str(n) for n in names]))
+                if path == "/api/delete_many":
+                    names = body.get("names", [])
+                    if not isinstance(names, list): names = []
+                    valid = [str(n) for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
+                    if not valid: return self._send(400, {"error": "No valid clips selected."})
+                    for name in valid:
+                        (OUT / name).unlink(missing_ok=True)
+                        (OUT / name).with_suffix(".txt").unlink(missing_ok=True)
+                    return self._send(200, {"ok": True, "deleted": len(valid)})
                 if path in ("/api/delete", "/api/reveal"):
                     name = str(body.get("name", ""))
                     if not CLIP_RE.match(name) or not (OUT / name).is_file():
@@ -1651,7 +1660,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   </div>
   <div class="panel" id="p-clips">
     <div class="post-progress" id="post-progress" hidden><div class="progress-meta"><span id="post-label">Preparing uploads...</span><span><span id="post-value">0%</span> · <span id="post-time">0:00</span></span></div><div class="progress-track"><div class="progress-fill" id="post-fill"></div></div></div>
-    <div class="prow" style="justify-content:flex-end;margin-bottom:10px"><button class="btn ghost" id="btn-publish-selected">Publish selected</button><button class="btn danger" id="btn-publish-all">Publish all clips</button></div>
+    <div class="prow" style="justify-content:flex-end;margin-bottom:10px"><button class="btn ghost" id="btn-select-all">Select all</button><button class="btn ghost" id="btn-publish-selected">Publish selected (0)</button><button class="btn danger" id="btn-delete-selected">Delete selected (0)</button><button class="btn danger" id="btn-publish-all">Publish all clips</button></div>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty"><div class="big"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h4>No clips yet</h4><p>Paste a Twitch or YouTube live link (or choose a VOD file) and hit Start. Finished 9:16 clips with captions appear here, ready to post.</p></div>
   </div>
@@ -1984,7 +1993,17 @@ function addLogs(list){
   if(stick)pl.scrollTop=pl.scrollHeight;
 }
 function updateSelectedButton(){
-  const b=$("#btn-publish-selected");b.textContent="Publish selected ("+selectedClips.size+")";b.disabled=selectedClips.size===0;
+  const count=selectedClips.size;
+  const b=$("#btn-publish-selected");b.textContent="Publish selected ("+count+")";b.disabled=count===0;
+  const d=$("#btn-delete-selected");d.textContent="Delete selected ("+count+")";d.disabled=count===0;
+  const all=cards.size>0&&count===cards.size;$("#btn-select-all").textContent=all?"Clear selection":"Select all";
+}
+function selectAllClips(){
+  const all=cards.size>0&&selectedClips.size===cards.size;
+  selectedClips.clear();
+  if(!all)for(const name of cards.keys())selectedClips.add(name);
+  cards.forEach(card=>{const pick=card.querySelector(".pick");if(pick)pick.checked=selectedClips.has(card.dataset.name)});
+  updateSelectedButton();
 }
 function toggleClipSelection(name){
   if(selectedClips.has(name))selectedClips.delete(name);else selectedClips.add(name);
@@ -2064,6 +2083,12 @@ async function publishNames(names){
   catch(e){toast(e.message,"bad")}
 }
 $("#btn-publish-selected").onclick=()=>publishNames([...selectedClips]);
+$("#btn-select-all").onclick=selectAllClips;
+$("#btn-delete-selected").onclick=async()=>{
+  const names=[...selectedClips];if(!names.length){toast("Select at least one clip first","bad");return}
+  if(!(await confirmBox("Delete selected clips?","This permanently removes "+names.length+" video(s) and their caption files.","Delete")))return;
+  try{const r=await api("/api/delete_many",{names});selectedClips.clear();toast("Deleted "+r.deleted+" clip(s)","ok");poll(true)}catch(e){toast(e.message,"bad")}
+};
 $("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This can publish up to 60 clips to your connected channels.","Publish all")))return;try{const s=await (await fetch("/api/state?since=0",{cache:"no-store"})).json();publishNames(s.clips.map(c=>c.name))}catch(e){toast(e.message,"bad")}};
 function openClip(c){
   const v=h("video",{src:"/clips/"+encodeURIComponent(c.name),controls:true,autoplay:true,loop:true,playsinline:true});

@@ -21,7 +21,12 @@ Your own hype words: "Hype words" tab in the app (stored in custom_words.txt, re
 import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform
 import http.server, urllib.parse, webbrowser
 import numpy as np
-from zernio_poster import ZernioPublisher
+try:
+    from zernio_poster import ZernioPublisher
+    ZERNIO_AVAILABLE = True
+except Exception:
+    ZernioPublisher = None
+    ZERNIO_AVAILABLE = False
 
 # ------------------------------------------------------------------ setup
 def _add_cuda_dlls():
@@ -78,7 +83,7 @@ def acquire_instance_lock():
             fcntl.flock(h.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except (OSError, ImportError):
         h.close()
-        raise RuntimeError("AutoClip is already running from this folder. Close the existing window first.")
+        raise RuntimeError("AutoClip is already running from this folder. Press Ctrl+C in PowerShell to stop the existing process first.")
     _INSTANCE_LOCK_HANDLE = h
 
 DEFAULTS = {
@@ -94,6 +99,7 @@ CAPTION_COLORS = {"Yellow": "00FFFF", "Green": "00FF00", "Cyan": "FFFF00", "Oran
 CAPTION_POS = {"Lower third": 520, "Middle": 800, "Low": 380}      # MarginV (px from bottom of 1920)
 LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)"]
 MODELS = ["distil-large-v3", "large-v3-turbo", "small", "base"]
+STREAM_QUALITY = "1080p60,1080p,720p60,720p"
 
 def clean_cfg(raw):
     """Validate/clamp settings coming from the UI or disk."""
@@ -555,7 +561,7 @@ class Engine:
         first = True
         while not self.stop_flag:
             try:
-                r = run(streamlink_cmd() + [url, "best", "--stream-url"], capture_output=True, text=True, env=streamlink_env())
+                r = run(streamlink_cmd() + [url, STREAM_QUALITY, "--stream-url"], capture_output=True, text=True, env=streamlink_env())
             except OSError as e:
                 raise RuntimeError(f"Could not start streamlink: {e}")
             if r.returncode == 0:
@@ -602,7 +608,7 @@ class Engine:
         pattern = str(REC / f"seg_{run_id}_%05d.ts")
         slog_path = REC / f"streamlink_{run_id}.log"
         slog = open(slog_path, "wb")
-        sl = popen(streamlink_cmd() + ["--stdout", url, "best"], stdout=subprocess.PIPE, stderr=slog, env=streamlink_env())
+        sl = popen(streamlink_cmd() + ["--stdout", url, STREAM_QUALITY], stdout=subprocess.PIPE, stderr=slog, env=streamlink_env())
         ff = popen(["ffmpeg", "-v", "error", "-i", "-", "-c", "copy", "-f", "segment",
                     "-segment_time", str(self.seg_seconds), "-reset_timestamps", "1", pattern],
                    stdin=sl.stdout)
@@ -685,7 +691,8 @@ class Core:
     def __init__(self):
         self.lock = threading.RLock()
         self.zernio = load_zernio_settings()
-        self.publisher = ZernioPublisher(self.push, dict(self.zernio, enabled=self.zernio.get("auto_post", False)))
+        self.publisher = (ZernioPublisher(self.push, dict(self.zernio, enabled=self.zernio.get("auto_post", False)))
+                          if ZERNIO_AVAILABLE else None)
         self.engine = None
         self.running = False
         self.logs, self.log_id = [], 0
@@ -708,7 +715,11 @@ class Core:
         elif kind == "clip":
             with self.lock: self.session["clips"] += 1
             self.push("Clip ready: " + payload)
-            self.publisher.submit(OUT / payload)
+            if self.publisher:
+                try:
+                    self.publisher.submit(OUT / payload)
+                except Exception as e:
+                    self.push("Zernio error: " + str(e))
         elif kind == "chunk":
             with self.lock: self.session["chunks"] += 1
         elif kind == "done":
@@ -774,6 +785,7 @@ class Core:
     def zernio_status(self):
         cfg = self.zernio
         return {"configured": bool(cfg.get("api_key")), "auto_post": bool(cfg.get("auto_post")),
+                "available": ZERNIO_AVAILABLE,
                 "schedule_minutes": int(cfg.get("schedule_minutes", 0) or 0),
                 "visibility": cfg.get("visibility", "public"),
                 "instagram_id": cfg.get("instagram_id", ""), "youtube_id": cfg.get("youtube_id", ""),
@@ -789,10 +801,14 @@ class Core:
         except (TypeError, ValueError): cfg["schedule_minutes"] = 0
         cfg["visibility"] = str(body.get("visibility", "public")) if body.get("visibility") in ("public", "private", "unlisted") else "public"
         if not cfg.get("api_key"): raise ValueError("Enter a Zernio API key first.")
-        save_zernio_settings(cfg); self.zernio = cfg; self.publisher.configure(dict(cfg, enabled=cfg["auto_post"]))
+        save_zernio_settings(cfg); self.zernio = cfg
+        if self.publisher:
+            self.publisher.configure(dict(cfg, enabled=cfg["auto_post"]))
         return self.zernio_status()
 
     def zernio_accounts(self):
+        if not self.publisher:
+            raise ValueError("Zernio posting unavailable: zernio_poster.py could not be loaded.")
         self.publisher.configure(dict(self.zernio, enabled=False))
         return self.publisher.accounts()
 
@@ -802,9 +818,17 @@ class Core:
         if not (cfg.get("instagram_id") or cfg.get("youtube_id")): raise ValueError("Select at least one connected channel.")
         valid = [n for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
         if not valid: raise ValueError("No valid clips selected.")
-        for name in valid:
-            publisher = ZernioPublisher(self.push, dict(cfg, enabled=False))
-            threading.Thread(target=publisher.publish_one, args=(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), cfg.get("schedule_minutes", 0)), daemon=True).start()
+        if not ZERNIO_AVAILABLE:
+            raise ValueError("Zernio posting unavailable: zernio_poster.py could not be loaded.")
+        def publish_batch():
+            for index, name in enumerate(valid):
+                publisher = ZernioPublisher(self.push, dict(cfg, enabled=False))
+                delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
+                try:
+                    publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay)
+                except Exception as e:
+                    self.push(f"Zernio error for {name}: {e}")
+        threading.Thread(target=publish_batch, daemon=True, name="zernio-batch").start()
         self.push(f"Zernio: queued {len(valid)} clip(s) for publishing.")
         return {"queued": len(valid)}
 
@@ -874,7 +898,7 @@ def grab_frame(mode, target):
                 raise ValueError("Paste the stream link first.")
             if not streamlink_available():
                 raise ValueError("streamlink is not installed.")
-            r = run(streamlink_cmd() + [target, "best", "--stream-url"], capture_output=True, text=True,
+            r = run(streamlink_cmd() + [target, STREAM_QUALITY, "--stream-url"], capture_output=True, text=True,
                     env=streamlink_env(), timeout=45)
             if r.returncode != 0 or not (r.stdout or "").strip():
                 raise ValueError("The stream isn't live right now. Try again when it is, or pick a video file.")
@@ -974,8 +998,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, CORE.state(since))
             if path == "/api/words":
                 return self._send(200, {"text": read_custom_text(), "words": sorted(HYPE_WORDS), "phrases": sorted(HYPE_PHRASES)})
-            if path == "/assets/brand-logo.png" and BRAND_LOGO.is_file():
-                return self._send(200, BRAND_LOGO.read_bytes(), "image/png")
+            if path in ("/assets/brand-logo.png", "/assets/app-icon.png"):
+                asset = BRAND_LOGO if path.endswith("brand-logo.png") else HERE / "assets" / "app-icon.png"
+                if asset.is_file():
+                    return self._send(200, asset.read_bytes(), "image/png")
             if path.startswith("/clips/"):
                 return self._serve_clip(urllib.parse.unquote(path[7:]))
             self._send(404, {"error": "not found"})
@@ -1104,7 +1130,7 @@ HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/png" href="/assets/brand-logo.png">
+<link rel="icon" type="image/png" href="/assets/app-icon.png">
 <title>AutoClip</title>
 <style>
 :root{--bg:#07080d;--card:rgba(255,255,255,.035);--card2:rgba(255,255,255,.07);--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);
@@ -1229,7 +1255,7 @@ select.text option{background:#14161f}
 .cc{font-size:12.5px;line-height:1.35;height:34px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .cr{display:flex;align-items:center;justify-content:space-between;margin-top:8px;color:var(--mute);font-size:11.5px}
 .acts{display:flex;gap:2px;margin-right:-6px}
-.ib{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--dim);transition:.15s}
+.ib{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--dim);transition:.15s}.ib.post{width:auto;min-width:34px;padding:0 7px;font-size:11px;font-weight:600}
 .ib:hover{background:var(--card2);color:var(--tx)}.ib.del:hover{color:var(--bad)}
 .empty{height:100%;min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--dim);gap:8px;border:1px dashed var(--line2);border-radius:18px;padding:30px}
 .empty h4{font-size:17px;color:var(--tx)}.empty p{max-width:44ch;font-size:13px}
@@ -1274,7 +1300,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 <body>
 <div class="app">
 <header>
-  <div class="logo"><div class="mark"><img src="/assets/brand-logo.png" alt="Scarzero Plays"></div>AutoClip<span class="tag">Scarzero Plays &middot; live stream &rarr; viral Shorts</span></div>
+  <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="Scarzero Plays" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>AutoClip<span class="tag">Scarzero Plays &middot; live stream &rarr; viral Shorts</span></div>
   <div class="sp"></div>
   <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
   <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
@@ -1434,6 +1460,7 @@ function setSelectOptions(el,items,chosen){
   if(chosen)el.value=chosen;
 }
 async function loadZernioAccounts(){
+  if(Z.available===false){$("#z-msg").textContent="Posting unavailable: zernio_poster.py is missing or has an error";$("#z-msg").classList.add("show");return}
   const r=await api("/api/zernio/accounts");
   setSelectOptions($("#z-ig"),r.accounts.filter(a=>a.platform==="instagram"),Z.instagram_id);
   setSelectOptions($("#z-yt"),r.accounts.filter(a=>a.platform==="youtube"),Z.youtube_id);
@@ -1580,7 +1607,7 @@ $("#z-delay").value=Z.schedule_minutes||0;$("#z-vis").value=Z.visibility||"publi
 $("#z-check").onclick=async()=>{
   const b=$("#z-check");b.disabled=true;
   try{
-    const r=await api("/api/zernio",{api_key:$("#z-api").value,instagram_id:$("#z-ig").value,youtube_id:$("#z-yt").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
+    const r=await api("/api/zernio",{api_key:$("#z-api").value,instagram_id:$("#z-ig").value||Z.instagram_id,youtube_id:$("#z-yt").value||Z.youtube_id,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
     Object.assign(Z,r);$("#z-api").value="";await loadZernioAccounts();toast("Zernio connected","ok");
   }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
   b.disabled=false;
@@ -1629,7 +1656,7 @@ function clipCard(c){
   const v=h("video",{src:"/clips/"+encodeURIComponent(c.name)+"#t=0.1",loop:true,playsinline:true,preload:"metadata"});v.muted=true;
   const first=(c.caption||"").split("\n")[0]||c.name;
   const when=h("span",{class:"when","data-t":c.mtime},ago(c.mtime));
-  const pick=h("input",{type:"checkbox",title:"Select for publishing"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);
+  const pick=h("input",{class:"pick",type:"checkbox",title:"Select for publishing"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);
   const copy=()=>{navigator.clipboard.writeText(c.caption||"").then(()=>toast("Caption copied","ok"),()=>toast("Couldn't copy","bad"))};
   const post=()=>publishNames([c.name]);
   const del=async()=>{if(await confirmBox("Delete this clip?","This permanently removes the video and its caption file.","Delete")){try{await api("/api/delete",{name:c.name});toast("Clip deleted");poll(true)}catch(e){toast(e.message,"bad")}}};
@@ -1638,7 +1665,7 @@ function clipCard(c){
     h("div",{class:"cm"},h("div",{class:"cc",title:first},first),
       h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB"),
         h("span",{class:"acts"},
-          h("button",{class:"ib",title:"Publish this clip",onclick:post},"Post"),
+          h("button",{class:"ib post",title:"Publish this clip",onclick:post},"Post"),
           h("button",{class:"ib",title:"Copy caption + hashtags",onclick:copy},ico("copy",15)),
           h("a",{class:"ib",title:"Download",href:"/clips/"+encodeURIComponent(c.name),download:c.name},ico("download",15)),
           h("button",{class:"ib",title:"Show in folder",onclick:()=>api("/api/reveal",{name:c.name}).catch(e=>toast(e.message,"bad"))},ico("folder",15)),
@@ -1662,7 +1689,7 @@ async function publishNames(names){
   catch(e){toast(e.message,"bad")}
 }
 $("#btn-publish-selected").onclick=()=>publishNames([...selectedClips]);
-$("#btn-publish-all").onclick=async()=>{try{const s=await (await fetch("/api/state?since=0",{cache:"no-store"})).json();publishNames(s.clips.map(c=>c.name))}catch(e){toast(e.message,"bad")}};
+$("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This can publish up to 60 clips to your connected channels.","Publish all")))return;try{const s=await (await fetch("/api/state?since=0",{cache:"no-store"})).json();publishNames(s.clips.map(c=>c.name))}catch(e){toast(e.message,"bad")}};
 function openClip(c){
   const v=h("video",{src:"/clips/"+encodeURIComponent(c.name),controls:true,autoplay:true,loop:true,playsinline:true});
   const close=()=>{v.pause();m.remove();document.removeEventListener("keydown",esc)};

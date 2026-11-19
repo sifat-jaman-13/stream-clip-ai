@@ -18,7 +18,7 @@ Run:
 Output: the "out" folder. Each clip = .mp4 in the selected format (9:16 by default) + .txt (caption and hashtags to paste).
 Your own hype words: "Hype words" tab in the app (stored in custom_words.txt, re-read for every chunk).
 """
-import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform
+import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64
 import http.server, urllib.parse, webbrowser
 import numpy as np
 try:
@@ -95,6 +95,7 @@ DEFAULTS = {
     "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "streamer_tag": "", "show_tag_video": True,
+    "cta_enabled": True, "cta_text": "Subscribe for more clips", "cta_voice_enabled": True,
     "layout": "Facecam + game (Twitch)", "output_format": "9:16", "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
 }
@@ -142,6 +143,10 @@ def clean_cfg(raw):
     tag = re.sub(r"[\r\n{}\\]", "", str(raw.get("streamer_tag", c["streamer_tag"]))).strip()[:80]
     c["streamer_tag"] = tag
     c["show_tag_video"] = bool(raw.get("show_tag_video", c["show_tag_video"]))
+    c["cta_enabled"] = bool(raw.get("cta_enabled", c["cta_enabled"]))
+    c["cta_voice_enabled"] = bool(raw.get("cta_voice_enabled", c["cta_voice_enabled"]))
+    cta = re.sub(r"[\r\n{}\\]", "", str(raw.get("cta_text", c["cta_text"]))).strip()[:100]
+    c["cta_text"] = cta or DEFAULTS["cta_text"]
     f = str(raw.get("font", c["font"])).strip()
     if re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", f): c["font"] = f
     c["delete_rec"] = bool(raw.get("delete_rec", False))
@@ -327,6 +332,40 @@ def _ass_color(value, fallback):
 def output_size(cfg):
     return OUTPUT_FORMATS.get(cfg.get("output_format", "9:16"), OUTPUT_FORMATS["9:16"])
 
+def make_cta_voice(path, text):
+    """Create a soft, slower female CTA with Windows' built-in SAPI voice when available."""
+    if os.name != "nt":
+        return False
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        return False
+    enc = lambda s: base64.b64encode(str(s).encode("utf-8")).decode("ascii")
+    script = (
+        "Add-Type -AssemblyName System.Speech; "
+        "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + enc(path) + "')); "
+        "$t=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + enc(text) + "')); "
+        "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        "$v=$s.GetInstalledVoices() | Where-Object {$_.VoiceInfo.Gender.ToString() -eq 'Female'} | Select-Object -First 1; "
+        "if($v){$s.SelectVoice($v.VoiceInfo.Name)}; $s.Rate=-3; $s.Volume=72; "
+        "$s.SetOutputToWaveFile($p); $s.Speak($t); $s.Dispose()"
+    )
+    try:
+        r = run([powershell, "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                 base64.b64encode(script.encode("utf-16le")).decode("ascii")],
+                capture_output=True, text=True, timeout=30)
+        return r.returncode == 0 and pathlib.Path(path).is_file() and pathlib.Path(path).stat().st_size > 1000
+    except Exception:
+        return False
+
+def has_audio_stream(path):
+    try:
+        r = run(["ffprobe", "-v", "error", "-select_streams", "a:0",
+                 "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
+                capture_output=True, text=True, timeout=15)
+        return r.returncode == 0 and bool((r.stdout or "").strip())
+    except Exception:
+        return False
+
 def make_ass(words, start, end, path, cfg):
     ws = []
     for s, e, w in words:
@@ -380,6 +419,11 @@ def make_ass(words, start, end, path, cfg):
         tag_margin = round(70 * out_w / 1080)
         lines.append(f"Dialogue: 0,{ts(0)},{ts(max(0.08, end - start))},Default,,0,0,0,,"
                      f"{{\\an7\\fs{tag_size}\\bord3\\3c&H000000&\\pos({tag_margin},{tag_margin})}}Clip from {tag}")
+    if cfg.get("cta_enabled", True) and cfg.get("cta_text"):
+        cta_start = max(0, end - start - 2.8)
+        cta_size = round(48 * out_w / 1080)
+        lines.append(f"Dialogue: 0,{ts(cta_start)},{ts(max(cta_start + 0.08, end - start))},Default,,0,0,0,,"
+                     f"{{\\an8\\fs{cta_size}\\bord4\\3c&H000000&}}{cfg['cta_text']}")
     pathlib.Path(path).write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
 
 # ------------------------------------------------------------------ engine
@@ -597,6 +641,27 @@ class Engine:
         if r.returncode != 0:
             (OUT / tmp).unlink(missing_ok=True)
             raise RuntimeError((r.stderr or "ffmpeg failed").strip()[-400:])
+        if cfg.get("cta_enabled", True) and cfg.get("cta_voice_enabled", True) and os.name == "nt":
+            voice = OUT / f"{name}.cta.wav"
+            if make_cta_voice(voice, cfg.get("cta_text", "Subscribe for more clips")):
+                mixed = OUT / f"{name}.audio.tmp.mp4"
+                delay_ms = max(0, int((end - start - 2.8) * 1000))
+                if has_audio_stream(OUT / tmp):
+                    af = f"[1:a]adelay={delay_ms}:all=1[cta];[0:a][cta]amix=inputs=2:duration=first:dropout_transition=2[a]"
+                else:
+                    af = f"[1:a]adelay={delay_ms}:all=1[a]"
+                mix_cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(OUT / tmp), "-i", str(voice),
+                           "-filter_complex", af, "-map", "0:v:0", "-map", "[a]",
+                           "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", mixed]
+                mr = run(mix_cmd, cwd=OUT, capture_output=True, text=True)
+                if mr.returncode == 0 and mixed.is_file():
+                    os.replace(mixed, OUT / tmp)
+                else:
+                    self.log("CTA voice unavailable for this clip; keeping the original audio.")
+                    mixed.unlink(missing_ok=True)
+            else:
+                self.log("Soft CTA voice unavailable; the on-screen CTA was kept.")
+            voice.unlink(missing_ok=True)
         text = " ".join(clean_word(w).lower() for s, e, w in words if start <= s <= end).strip()
         hook = (text[:110].rstrip() + ("..." if len(text) > 110 else "")) or "Clip"
         tag = streamer_credit(self.cfg)
@@ -1485,6 +1550,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Speech model</label></div>
     <select id="model" class="text"></select>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
+    <div class="row"><label>End-card CTA</label></div>
+    <input id="cta-text" class="text" type="text" maxlength="100" placeholder="Subscribe for more clips">
+    <label class="toggle"><span>Speak CTA with a soft female voice</span><input type="checkbox" id="cta-voice"><i class="sl"></i></label>
     <div class="row"><label>Tag / credit</label></div>
     <input id="streamer-tag" class="text" type="text" maxlength="80" placeholder="Auto-detect from stream URL">
     <p class="hint">Leave blank to tag the Twitch or YouTube handle from the source URL. Enter a value to override it.</p>
@@ -1645,6 +1713,10 @@ $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.ta
 $("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;updateFormatUI();preview();scheduleSave()});updateFormatUI();
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
 $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
+$("#cta-text").value=S.cta_text||"Subscribe for more clips";
+$("#cta-text").addEventListener("input",e=>{S.cta_text=e.target.value.replace(/[\r\n{}\\]/g,"").slice(0,100)||"Subscribe for more clips";scheduleSave()});
+$("#cta-voice").checked=S.cta_voice_enabled!==false;
+$("#cta-voice").addEventListener("change",e=>{S.cta_voice_enabled=e.target.checked;scheduleSave()});
 $("#show-tag-video").checked=!!S.show_tag_video;
 $("#show-tag-video").addEventListener("change",e=>{S.show_tag_video=e.target.checked;scheduleSave()});
 $("#t-sub-custom").checked=!!S.subtitle_custom;

@@ -122,6 +122,8 @@ A browser window opens automatically at `http://127.0.0.1:<port>/`.
 
   If the app opens but its buttons do not respond, disable your ad blocker for 127.0.0.1 / localhost. AutoClip is a local app and does not serve ads.
 
+  New clips include a configurable “Subscribe for more clips” end card. On Windows, the optional soft female voice uses the built-in SAPI voice engine; the text remains available if no female voice is installed.
+
   **Headless (no UI):**
 ```powershell
 autoclip live https://www.twitch.tv/your_channel

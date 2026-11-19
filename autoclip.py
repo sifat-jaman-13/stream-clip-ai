@@ -1145,6 +1145,9 @@ header{display:flex;align-items:center;gap:14px;padding:16px 22px}
 .btn.ghost:hover{background:rgba(255,255,255,.11);border-color:var(--line2)}
 .btn.danger{background:#dc4452;color:#fff}.btn.danger:hover{background:#ec5a68}
 .btn:disabled{opacity:.5;cursor:default}
+.settings-dialog{width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;background:#12141d;border:1px solid var(--line2);border-radius:20px;padding:18px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.settings-dialog .card{margin:0;background:transparent;border:0;padding:0;backdrop-filter:none}
+.settings-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px}.settings-head h2{font-size:18px;letter-spacing:-.2px}.settings-head p{color:var(--dim);font-size:12px;margin-top:2px}
 .row{display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px}
 .row:first-child{margin-top:0}
 .row label{color:var(--dim);font-size:13px}
@@ -1274,6 +1277,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   <div class="logo"><div class="mark"><img src="/assets/brand-logo.png" alt="Scarzero Plays"></div>AutoClip<span class="tag">Scarzero Plays &middot; live stream &rarr; viral Shorts</span></div>
   <div class="sp"></div>
   <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
+  <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
   <button class="btn ghost" id="btn-quit" title="Stop everything and close AutoClip"><span data-ico="power"></span>Quit</button>
 </header>
 
@@ -1331,7 +1335,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
   </div>
 
-  <div class="card">
+  <div class="card" id="settings-card">
     <div class="ch"><span class="num">5</span><h3>App settings</h3></div>
     <div class="row"><label>Zernio posting</label></div>
     <p class="hint">Save your API key locally, identify connected channels, and control publishing for finished clips.</p>
@@ -1389,6 +1393,12 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 </section>
 </div>
 </div>
+<div class="overlay" id="settings-overlay" hidden>
+ <div class="settings-dialog">
+  <div class="settings-head"><div><h2>App settings</h2><p>Configure clipping defaults and Zernio publishing.</p></div><button class="btn ghost" id="btn-settings-close">Close</button></div>
+  <div id="settings-slot"></div>
+ </div>
+</div>
 <div id="toasts"></div>
 <div id="offline" hidden>Lost connection to AutoClip - is it still running?</div>
 
@@ -1406,6 +1416,7 @@ const ICON={
  play:'<path d="M8 5v14l11-7z" fill="currentColor"/>',
  bolt:'<path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor"/>',
  power:'<path d="M12 3v9"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>',
+ settings:'<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="m4.9 4.9 1.4 1.4M17.7 17.7l1.4 1.4M4 12H2M22 12h-2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4M12 4V2M12 22v-2"/>',
  check:'<path d="m5 12 5 5 9-10"/>'
 };
 function ico(n,s){const e=document.createElementNS("http://www.w3.org/2000/svg","svg");e.setAttribute("viewBox","0 0 24 24");e.setAttribute("width",s||16);e.setAttribute("height",s||16);e.setAttribute("fill","none");e.setAttribute("stroke","currentColor");e.setAttribute("stroke-width","2");e.setAttribute("stroke-linecap","round");e.setAttribute("stroke-linejoin","round");e.innerHTML=ICON[n];return e}
@@ -1430,6 +1441,14 @@ async function loadZernioAccounts(){
   $("#z-msg").classList.add("show");
 }
 function toast(msg,kind){const t=h("div",{class:"toast "+(kind||"")},msg);$("#toasts").append(t);setTimeout(()=>{t.classList.add("out");setTimeout(()=>t.remove(),300)},3200)}
+const settingsOverlay=$("#settings-overlay");
+$("#settings-slot").append($("#settings-card"));
+function closeSettings(){settingsOverlay.hidden=true}
+function openSettings(){settingsOverlay.hidden=false;$("#z-api").focus()}
+$("#btn-settings").onclick=openSettings;
+$("#btn-settings-close").onclick=closeSettings;
+settingsOverlay.onclick=e=>{if(e.target===settingsOverlay)closeSettings()};
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!settingsOverlay.hidden)closeSettings()});
 function confirmBox(title,msg,ok){return new Promise(res=>{
   const done=v=>{m.remove();res(v)};
   const m=h("div",{class:"overlay"},h("div",{class:"dialog"},h("h4",{},title),h("p",{},msg),h("div",{class:"dlg-actions"},h("button",{class:"btn ghost",onclick:()=>done(false)},"Cancel"),h("button",{class:"btn danger",onclick:()=>done(true)},ok||"Delete"))));

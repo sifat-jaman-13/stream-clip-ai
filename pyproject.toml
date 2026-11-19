@@ -3,16 +3,16 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
-name = "autoclip"
+name = "stream-clip-ai"
 version = "1.0.0"
-description = "Free live-stream / VOD auto clipper — Twitch/YouTube → 9:16 Shorts with MrBeast-style captions"
+description = "Free AI-powered stream clipper — Twitch/YouTube live & VODs → 9:16 Shorts/TikTok/Reels with animated captions"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [
   { name = "Sifat Jaman" },
 ]
-keywords = ["twitch", "youtube", "clips", "shorts", "streaming", "auto-clip", "whisper", "captions"]
+keywords = ["twitch", "youtube", "clips", "shorts", "tiktok", "reels", "streaming", "auto-clip", "ai-clipper", "whisper", "captions", "stream-clipper", "highlight-detection", "vertical-video"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: End Users/Desktop",
@@ -44,9 +44,9 @@ all = [
 autoclip = "autoclip.app:main"
 
 [project.urls]
-Homepage = "https://github.com/sifat-jaman-13/autoclip"
-Repository = "https://github.com/sifat-jaman-13/autoclip"
-Issues = "https://github.com/sifat-jaman-13/autoclip/issues"
+Homepage = "https://github.com/sifat-jaman-13/stream-clip-ai"
+Repository = "https://github.com/sifat-jaman-13/stream-clip-ai"
+Issues = "https://github.com/sifat-jaman-13/stream-clip-ai/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

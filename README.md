@@ -1,11 +1,14 @@
-# 🎬 AutoClip
+# 🎬 StreamClipAI
 
-> **Free, local, fully-automated stream clipper.**  
+> **Free, local, AI-powered stream clipper.**  
 > Twitch / YouTube live stream (or any video file) → ready-to-post **9:16 vertical clips** with animated MrBeast-style captions — no cloud, no subscription, no cost.
 
+[![PyPI - Package Name](https://img.shields.io/badge/pypi-stream--clip--ai-blue?logo=pypi)](https://pypi.org/project/stream-clip-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)]()
+
+**Keywords:** `twitch auto clipper` · `youtube stream clipper` · `ai clip maker` · `stream to shorts` · `auto highlight detection` · `tiktok clip generator` · `reels maker` · `whisper captions`
 
 ---
 
@@ -20,7 +23,7 @@
 | 📐 **9:16 output** | Blurred-background or fill-crop layout, 1080 × 1920, ready for Shorts/TikTok/Reels |
 | 🖥️ **Local web UI** | Beautiful dark dashboard — no extra install required |
 | ⚡ **GPU accelerated** | NVIDIA NVENC for encoding + CUDA for Whisper (CPU fallback included) |
-| 🔒 **100% local** | Nothing leaves your machine |
+| 🔒 **100% local & free** | Nothing leaves your machine — no API keys needed |
 
 ---
 
@@ -33,40 +36,40 @@
 | **Python 3.10+** | [python.org](https://www.python.org/downloads/) |
 | **FFmpeg** | `winget install Gyan.FFmpeg` (Windows) · `brew install ffmpeg` (macOS) · `sudo apt install ffmpeg` (Linux) |
 
-### 2 — Install AutoClip
+### 2 — Install StreamClipAI
 
 **From PyPI (recommended):**
 ```bash
-pip install autoclip
+pip install stream-clip-ai
 ```
 
-**With GPU support (NVIDIA CUDA — recommended for speed):**
+**With GPU support (NVIDIA CUDA — fastest transcription):**
 ```bash
-pip install "autoclip[gpu]"
+pip install "stream-clip-ai[gpu]"
 ```
 
 **With live-stream support (Twitch / YouTube live):**
 ```bash
-pip install "autoclip[live]"
+pip install "stream-clip-ai[live]"
 ```
 
-**Everything at once:**
+**Everything at once (recommended for streamers):**
 ```bash
-pip install "autoclip[all]"
+pip install "stream-clip-ai[all]"
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/sifat-jaman-13/autoclip.git
-cd autoclip
+git clone https://github.com/sifat-jaman-13/stream-clip-ai.git
+cd stream-clip-ai
 pip install -e ".[all]"
 ```
 
 > **Windows venv tip** (avoids permission issues):
 > ```powershell
-> py -3.14 -m venv venv
+> py -3.11 -m venv venv
 > .\venv\Scripts\Activate.ps1
-> pip install "autoclip[all]"
+> pip install "stream-clip-ai[all]"
 > ```
 
 ---
@@ -82,7 +85,7 @@ python -m autoclip
 Opens a local web dashboard at `http://127.0.0.1:<port>/` automatically.  
 Paste a stream URL or browse to a video file and hit **Start clipping**.
 
-### Headless — Live stream
+### Headless — Live stream (Twitch / YouTube)
 ```bash
 autoclip live https://www.twitch.tv/your_channel
 autoclip live https://www.youtube.com/watch?v=LIVE_VIDEO_ID
@@ -91,13 +94,14 @@ autoclip live https://www.youtube.com/watch?v=LIVE_VIDEO_ID
 ### Headless — Video file / VOD
 ```bash
 autoclip file path/to/recording.mp4
+autoclip file path/to/vod.mkv
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-All settings are adjusted live in the UI and persisted to `settings.json` next to the script (or in your working directory when installed).
+All settings are adjusted live in the UI and persisted to `settings.json` in your working directory.
 
 | Setting | Default | Description |
 |---|---|---|
@@ -128,7 +132,7 @@ Changes are picked up **without restarting** — mid-stream edits work.
 
 ```
 out/
-  streamname_143022_clip1.mp4   ← 9:16 vertical clip
+  streamname_143022_clip1.mp4   ← 9:16 vertical clip (1080×1920)
   streamname_143022_clip1.txt   ← caption + hashtags to paste
 ```
 
@@ -147,10 +151,10 @@ Stream / file
      ▼ faster-whisper (GPU/CPU)
   Word-level timestamps
      │
-     ▼ Hype scorer
-  RMS audio peaks + words/sec + hype-word hits + custom phrases
+     ▼ AI Hype Scorer
+  Audio RMS peaks + words/sec bursts + 150+ hype-word hits + custom phrases
      │
-     ▼ ffmpeg (NVENC/x264) + ASS subtitles
+     ▼ ffmpeg (NVENC/x264) + ASS animated subtitles
   9:16 MP4 clips → out/
 ```
 
@@ -163,7 +167,7 @@ Stream / file
 | `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` |
 | `streamlink isn't installed` | `pip install streamlink` |
 | `faster-whisper isn't installed` | `pip install --only-binary=:all: faster-whisper` |
-| GPU/CUDA errors | AutoClip automatically falls back to CPU — or reinstall: `pip install --only-binary=:all: nvidia-cublas-cu12` |
+| GPU/CUDA errors | StreamClipAI automatically falls back to CPU; or reinstall: `pip install --only-binary=:all: nvidia-cublas-cu12` |
 | No clips generated | Lower the **Strictness** slider in the UI; check the Activity log |
 
 ---
@@ -193,11 +197,11 @@ Stream / file
 | **Claude** (Anthropic) | AI pair-programming assistant |
 | **Antigravity** (Google DeepMind) | AI development environment |
 
-Built on top of amazing open-source projects:
+Built on top of amazing open-source projects:  
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) ·
 [streamlink](https://github.com/streamlink/streamlink) ·
 [FFmpeg](https://ffmpeg.org/)
 
 ---
 
-*AutoClip is not affiliated with Twitch, YouTube, or any streaming platform.*
+*StreamClipAI is not affiliated with Twitch, YouTube, or any streaming platform.*

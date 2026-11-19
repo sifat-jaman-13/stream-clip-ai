@@ -1288,7 +1288,15 @@ def main():
         time.sleep(0.3)
     except KeyboardInterrupt:
         pass
-    srv.shutdown()
+    try:
+        srv.shutdown()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            srv.server_close()
+        except Exception:
+            pass
 
 
 HTML = r"""<!doctype html>

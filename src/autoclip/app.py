@@ -34,6 +34,21 @@ def _add_cuda_dlls():
             os.environ["PATH"] = str(d) + os.pathsep + os.environ["PATH"]
 _add_cuda_dlls()
 
+def _patch_pyav():
+    """PyAV 14+ removed metadata_errors parameter from av.open().
+    faster-whisper still calls av.open(..., metadata_errors='ignore').
+    This patch intercepts av.open to strip metadata_errors if present."""
+    try:
+        import av
+        _orig_open = av.open
+        def _compat_open(*args, **kwargs):
+            kwargs.pop("metadata_errors", None)
+            return _orig_open(*args, **kwargs)
+        av.open = _compat_open
+    except Exception:
+        pass
+_patch_pyav()
+
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "out"; OUT.mkdir(exist_ok=True)
 REC = HERE / "rec"; REC.mkdir(exist_ok=True)

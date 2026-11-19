@@ -16,7 +16,7 @@ if (Test-Path dist) { Remove-Item dist -Recurse -Force }
     --noconfirm `
     --clean `
     --onedir `
-    --noconsole `
+    --console `
     --name AutoClip `
     --icon assets\app-icon.png `
     --add-data "assets;assets" `

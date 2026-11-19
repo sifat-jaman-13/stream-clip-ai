@@ -1,7 +1,7 @@
-# 🎬 StreamClipAI
+# 🚀 StreamClip AI — Twitch & YouTube to Shorts
 
-> **Free, local, AI-powered stream clipper.**  
-> Twitch / YouTube live stream (or any video file) → ready-to-post **9:16 vertical clips** with animated MrBeast-style captions — no cloud, no subscription, no cost.
+> **Turn Twitch and YouTube streams into viral Shorts, Reels, and TikToks automatically.**
+> Local AI highlight detection, animated captions, facecam/game layouts, and optional multi-platform publishing.
 
 [![GitHub](https://img.shields.io/badge/install-from%20source-blue?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
@@ -9,7 +9,7 @@
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker)](https://hub.docker.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey)]()
 
-**Keywords:** `twitch auto clipper` · `youtube stream clipper` · `ai clip maker` · `stream to shorts` · `auto highlight detection` · `tiktok clip generator` · `reels maker` · `whisper captions`
+**Keywords:** `twitch clipper` · `youtube clipper` · `stream to shorts` · `AI clip maker` · `viral shorts generator` · `TikTok clip generator` · `Instagram Reels maker` · `YouTube Shorts automation` · `Whisper captions`
 
 ### Optional Zernio posting
 
@@ -158,7 +158,7 @@ pip install -e ".[live]"
 pip install -e ".[all]"
 ```
 
-> **Apple Silicon (M1/M2/M3):** GPU acceleration for Whisper uses the MPS backend automatically via `faster-whisper`. The `[gpu]` extra (CUDA) is not needed — CPU + MPS gives excellent speed.
+> **Apple Silicon (M1/M2/M3/M4):** this app currently uses the compatible CPU path (`faster-whisper`/CTranslate2 with INT8 fallback). The app does not currently select the experimental CTranslate2 MPS backend, so do not describe Apple Silicon as automatically using MPS. Use Python 3.11 or 3.12, native arm64 Python, FFmpeg, and `pip install -e ".[live]"`.
 
 ### Step 5 — Run
 
@@ -216,21 +216,24 @@ pip install -e .
 # + Live stream support:
 pip install -e ".[live]"
 
-# + NVIDIA GPU (requires CUDA 11.8+ drivers installed):
+# + NVIDIA GPU (use a driver/runtime compatible with CUDA 12.x):
 pip install -e ".[gpu]"
 
 # Everything:
 pip install -e ".[all]"
 ```
 
-**NVIDIA GPU on Linux — extra step (if CUDA isn't set up):**
+**NVIDIA GPU on Linux — compatible stack:**
 ```bash
-# Check your driver:
+# Recommended: Python 3.11/3.12, an NVIDIA driver supporting CUDA 12.x,
+# and the project GPU extra. CTranslate2 provides the inference runtime.
 nvidia-smi
-
-# Install CUDA toolkit (Ubuntu example):
-sudo apt install -y nvidia-cuda-toolkit
+pip install -e ".[all]"
 ```
+
+The app uses CUDA `float16` first and falls back to CPU `int8` if CUDA cannot
+load. See the [CTranslate2 installation guide](https://opennmt.net/CTranslate2/installation.html)
+for current CUDA support details.
 
 ### Step 4 — Run
 
@@ -351,13 +354,13 @@ All settings are persisted to `settings.json` automatically.
 | Setting | Default | Description |
 |---|---|---|
 | `clips_per_chunk` | 2 | Clips extracted per recording segment |
-| `chunk_min` | 5 | Live recording segment length (minutes) |
+| `chunk_min` | 3 | Live recording segment length (minutes) |
 | `pre` / `post` | 20 / 15 s | Context before / after the peak moment |
-| `min_score` | 2.0 | Hype-score threshold (higher = stricter) |
+| `min_score` | 1.5 | Hype-score threshold (higher = stricter) |
 | `model` | `distil-large-v3` | Whisper model for speech recognition |
 | `color` | Yellow | Caption highlight colour |
 | `position` | Lower third | Caption vertical position |
-| `layout` | Blur background | Video layout (blur bg or fill-crop) |
+| `layout` | Facecam + game (Twitch) | Video layout (facecam/game, blur bg, or fill-crop) |
 | `font` | Impact | Caption font |
 
 ### Custom hype words
@@ -391,7 +394,7 @@ Stream / file
      ▼ streamlink → ffmpeg (segments)
   .ts chunks (every N minutes for live)
      │
-     ▼ faster-whisper (GPU / Apple MPS / CPU)
+     ▼ faster-whisper (CUDA GPU / CPU)
   Word-level timestamps
      │
      ▼ AI Hype Scorer
@@ -410,7 +413,7 @@ Stream / file
 | `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` |
 | `streamlink isn't installed` | `pip install streamlink` |
 | `faster-whisper isn't installed` | `pip install --only-binary=:all: faster-whisper` |
-| GPU / CUDA errors | Falls back to CPU automatically; or: `pip install --only-binary=:all: nvidia-cublas-cu12` |
+| GPU / CUDA errors | Falls back to CPU automatically; NVIDIA users can run `pip install -e ".[all]"` |
 | No clips generated | Lower the **Strictness** slider; check the Activity log |
 | Docker: port already in use | Change `-p 8081:8080` and open `http://localhost:8081` |
 | macOS: browser doesn't open | Copy the URL printed in the terminal and open it manually |
@@ -423,7 +426,7 @@ Stream / file
 - Python **3.10+** (native installs) — not needed for Docker
 - FFmpeg (on `PATH`) — bundled in Docker
 - `numpy >= 1.24`
-- `faster-whisper >= 1.0`
+- `faster-whisper >= 1.0` / CTranslate2
 - *(optional)* `streamlink` — for live Twitch / YouTube clipping
 - *(optional)* `nvidia-cublas-cu12` — NVIDIA GPU acceleration
 
@@ -440,8 +443,9 @@ Stream / file
 | Contributor | Role |
 |---|---|
 | **Sifat Jaman** | Creator & maintainer |
+| **ChatGPT 5.6 Luna** (OpenAI) | AI product, coding, and documentation collaborator |
 | **Claude** (Anthropic) | AI pair-programming assistant |
-| **Antigravity** (Google DeepMind) | AI development environment |
+| **Antigravity** (Google DeepMind) | AI development environment and coding collaborator |
 
 Built on top of amazing open-source projects:  
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) ·

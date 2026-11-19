@@ -51,4 +51,4 @@ Repository = "https://github.com/sifat-jaman-13/stream-clip-ai"
 Issues = "https://github.com/sifat-jaman-13/stream-clip-ai/issues"
 
 [tool.setuptools]
-py-modules = ["autoclip"]
+py-modules = ["autoclip", "zernio_poster"]

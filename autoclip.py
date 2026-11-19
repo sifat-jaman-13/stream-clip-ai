@@ -1551,14 +1551,12 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Layout</label></div>
     <div class="seg" data-key="layout"><button data-v="Facecam + game (Twitch)">Facecam + game</button><button data-v="Blur background">Blurred bg</button><button data-v="Fill (crop center)">Fill</button><button data-v="Selected crop">Selected crop</button></div>
     <div id="camrow" hidden>
-      <div class="row"><label>Facecam area</label><b id="v-cam"></b></div>
+      <div class="row" id="cam-area-row"><label>Facecam area</label><b id="v-cam"></b></div>
       <button class="btn ghost" id="btn-cam" style="width:100%">Set facecam area on a frame</button>
-      <p class="hint">Like Twitch: the facecam fills the top 40% of the clip and the game fills the bottom 60%.</p>
+      <p class="hint" id="cam-hint">Like Twitch: the facecam fills the top 40% of the clip and the game fills the bottom 60%.</p>
     </div>
     <div class="row"><label>Speech model</label></div>
     <select id="model" class="text"></select>
-    <button class="btn ghost" id="btn-crop" style="width:100%;margin-top:12px">Select source segment on a frame</button>
-    <p class="hint">Uses the original source frame (normally 16:9). Choose “Selected crop” to capture exactly the segment you select.</p>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
     <div class="row"><label>End-card CTA</label></div>
     <input id="cta-text" class="text" type="text" maxlength="100" placeholder="Subscribe for more clips">
@@ -1757,7 +1755,13 @@ $("#target").addEventListener("input",e=>{S.target=e.target.value;syncStreamerTa
 $("#streamer-tag").addEventListener("input",e=>{tagManual=true;S.streamer_tag=e.target.value.replace(/[\r\n{}\\]/g,"").slice(0,80);scheduleSave()});
 function onMode(){
   const live=S.mode==="live";
-  $("#camrow").hidden=!S.layout.startsWith("Facecam");$("#v-cam").textContent="x"+S.cam_x+"% y"+S.cam_y+"% size "+S.cam_w+"%";
+  const facecam=S.layout.startsWith("Facecam"),selected=S.layout.startsWith("Selected");
+  $("#camrow").hidden=!(facecam||selected);
+  $("#cam-area-row").hidden=!facecam;
+  $("#v-cam").textContent="x"+S.cam_x+"% y"+S.cam_y+"% size "+S.cam_w+"%";
+  $("#btn-cam").textContent=facecam?"Set facecam area on a frame":"Select source segment on a frame";
+  $("#cam-hint").textContent=facecam?"Like Twitch: the facecam fills the top 40% of the clip and the game fills the bottom 60%.":"Uses the original source frame (normally 16:9). The selected format box captures exactly the segment you choose.";
+  $("#btn-cam").onclick=facecam?openCamEditor:openCropEditor;
   $("#target").placeholder=live?"https://www.twitch.tv/channel":"Path to a .mp4 / .mkv recording";
   $("#btn-browse").hidden=live;
   $("#src-hint").textContent=live?"Works with Twitch and YouTube live links. If the stream is offline, AutoClip waits and starts when it goes live.":"Clips are cut from the whole file. Long VODs get more clips automatically.";
@@ -1833,7 +1837,6 @@ function openCamEditor(){
   document.body.append(m);document.addEventListener("keydown",esc);paint();
   if(S.target&&S.target.trim())doGrab();else msg.textContent="Paste a stream link or pick a file first, then press Grab a frame. You can still drag the box now.";
 }
-$("#btn-cam").onclick=openCamEditor;
 function openCropEditor(){
   const box={x:+S.crop_x,y:+S.crop_y,w:+S.crop_w,h:+S.crop_h};let sourceAr=16/9;
   const img=h("img",{class:"cimg",draggable:false}),hdl=h("i",{class:"hdl"});
@@ -1874,7 +1877,6 @@ function openCropEditor(){
   document.body.append(m);document.addEventListener("keydown",esc);paint();
   if(S.target&&S.target.trim())doGrab();else msg.textContent="Paste a stream link or choose a file first, then press Grab a frame.";
 }
-$("#btn-crop").onclick=openCropEditor;
 
 /* ---------- tabs ---------- */
 let wordsLoaded=false;

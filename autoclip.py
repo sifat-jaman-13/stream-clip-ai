@@ -750,24 +750,33 @@ def list_clips(limit=60):
     return items[:limit]
 
 def reveal(path):
-    path = pathlib.Path(path)
+    path = pathlib.Path(path).resolve()
     try:
         if os.name == "nt":
-            subprocess.Popen(["explorer", "/select," + str(path)])
+            subprocess.Popen(["explorer.exe", "/select," + str(path)], creationflags=CF)
         elif platform.system() == "Darwin":
             subprocess.Popen(["open", "-R", str(path)])
         else:
             subprocess.Popen(["xdg-open", str(path.parent)])
-    except Exception:
-        pass
+    except Exception as e:
+        raise RuntimeError(f"Couldn't open the clip folder: {e}") from e
 
 def open_folder(path):
+    path = pathlib.Path(path).resolve()
     try:
-        if os.name == "nt": os.startfile(str(path))
-        elif platform.system() == "Darwin": subprocess.Popen(["open", str(path)])
-        else: subprocess.Popen(["xdg-open", str(path)])
-    except Exception:
-        pass
+        path.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            try:
+                os.startfile(str(path))
+            except (AttributeError, OSError):
+                # Some embedded Python builds do not expose os.startfile.
+                subprocess.Popen(["explorer.exe", str(path)], creationflags=CF)
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception as e:
+        raise RuntimeError(f"Couldn't open the clips folder: {e}") from e
 
 BROWSE_PY = (
     "import tkinter as tk\nfrom tkinter import filedialog\n"
@@ -1425,7 +1434,7 @@ $("#btn-words-save").onclick=saveWords;
 $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveWords()}});
 
 /* ---------- actions ---------- */
-$("#btn-folder").onclick=()=>api("/api/open_folder").catch(()=>{});
+$("#btn-folder").onclick=()=>api("/api/open_folder").then(()=>toast("Clips folder opened","ok")).catch(e=>toast(e.message,"bad"));
 $("#btn-start").onclick=async()=>{
   if(!S.target.trim()){toast(S.mode==="live"?"Paste a stream link first":"Choose a video file first","bad");$("#target").focus();return}
   const b=$("#btn-start");b.disabled=true;

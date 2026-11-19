@@ -94,7 +94,7 @@ DEFAULTS = {
     "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "Classic",
     "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
-    "streamer_tag": "@lacy", "show_tag_video": True,
+    "streamer_tag": "", "show_tag_video": True,
     "layout": "Facecam + game (Twitch)", "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
 }
@@ -137,13 +137,27 @@ def clean_cfg(raw):
     for k, fallback in (("subtitle_text_color", "#FFFFFF"), ("subtitle_stroke_color", "#000000")):
         v = str(raw.get(k, fallback)).strip().upper()
         c[k] = v if re.fullmatch(r"#[0-9A-F]{6}", v) else fallback
-    tag = re.sub(r"[\r\n{}]", "", str(raw.get("streamer_tag", c["streamer_tag"]))).strip()[:80]
+    tag = re.sub(r"[\r\n{}\\]", "", str(raw.get("streamer_tag", c["streamer_tag"]))).strip()[:80]
     c["streamer_tag"] = tag
     c["show_tag_video"] = bool(raw.get("show_tag_video", c["show_tag_video"]))
     f = str(raw.get("font", c["font"])).strip()
     if re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", f): c["font"] = f
     c["delete_rec"] = bool(raw.get("delete_rec", False))
     return c
+
+def streamer_credit(cfg):
+    """Use an explicit credit when supplied; otherwise infer common channel handles."""
+    override = re.sub(r"[\r\n{}]", "", str(cfg.get("streamer_tag", "")).strip())[:80]
+    if override:
+        return override
+    target = str(cfg.get("target", "")).strip().strip('"')
+    m = re.search(r"(?:twitch\.tv)/([^/?#]+)", target, re.I)
+    if m and m.group(1).lower() not in {"videos", "directory", "search"}:
+        return "@" + m.group(1)
+    m = re.search(r"(?:youtube\.com)/@([^/?#]+)", target, re.I)
+    if m:
+        return "@" + m.group(1)
+    return ""
 
 def load_settings():
     try:
@@ -353,7 +367,7 @@ def make_ass(words, start, end, path, cfg):
                     end_t = min(end_t, groups[gi + 1][0][0])
             text = " ".join((pop + w + r"{\r}") if k == j else w for k, (_, _, w) in enumerate(grp))
             lines.append(f"Dialogue: 0,{ts(s)},{ts(max(end_t, s + 0.08))},Default,,0,0,0,,{text}")
-    tag = str(cfg.get("streamer_tag", "")).strip()
+    tag = streamer_credit(cfg)
     if cfg.get("show_tag_video") and tag:
         lines.append(f"Dialogue: 0,{ts(0)},{ts(max(0.08, end - start))},Default,,0,0,0,,"
                      f"{{\\an7\\fs38\\bord3\\3c&H000000&}}Clip from {tag}")
@@ -417,7 +431,7 @@ class Engine:
         self.seg_seconds = int(cfg["chunk_min"]) * 60
 
     def log(self, msg):                      self.emit("log", msg)
-    def status(self, text, phase="working"): self.emit("status", (phase, text))
+    def status(self, text, phase="working", progress=None): self.emit("status", (phase, text, progress))
 
     def stop(self, force=False):
         """Live: graceful (finish what is recorded) unless force. File: always immediate."""
@@ -471,10 +485,14 @@ class Engine:
                 model = self.get_model(self.cfg["model"])
                 segs, _ = model.transcribe(src, word_timestamps=True, vad_filter=True, language=lang)
                 words = []
+                self.status("Transcribing audio... 0%", "transcribing", 0)
                 for s in segs:
                     self.check()
                     for w in (s.words or []):
                         words.append((w.start, w.end, w.word.strip()))
+                    if self.dur_audio:
+                        self.status(f"Transcribing audio... {min(99, int((s.end / self.dur_audio) * 100))}%",
+                                    "transcribing", min(99, int((s.end / self.dur_audio) * 100)))
                 return words
             except Stopped:
                 raise
@@ -571,7 +589,7 @@ class Engine:
             raise RuntimeError((r.stderr or "ffmpeg failed").strip()[-400:])
         text = " ".join(clean_word(w).lower() for s, e, w in words if start <= s <= end).strip()
         hook = (text[:110].rstrip() + ("..." if len(text) > 110 else "")) or "Clip"
-        tag = str(self.cfg.get("streamer_tag", "")).strip()
+        tag = streamer_credit(self.cfg)
         credit = f"Clip from {tag}\n\n" if tag else ""
         (OUT / f"{name}.txt").write_text(
             f"{hook}\n\n{credit}#shorts #fyp #streamer #funny #clips #viral\n", encoding="utf-8")
@@ -581,11 +599,11 @@ class Engine:
     def process(self, path):
         pth = pathlib.Path(path)
         stem = re.sub(r"[^A-Za-z0-9_-]", "_", pth.stem)[:40] or "stream"
-        self.status(f"Transcribing {pth.name}...", "transcribing")
+        self.status(f"Transcribing {pth.name}...", "transcribing", 0)
         self.log(f"Processing {pth.name}")
         words = self.transcribe(path)
         self.check()
-        self.status("Finding the hype moments...", "transcribing")
+        self.status("Finding the hype moments...", "transcribing", 100)
         peaks, dur = self.find_peaks(path, words)
         self.log(f"Heard {len(words)} words in {dur}s of video. Best moment score {getattr(self, 'best_score', 0):.1f} "
                  f"(clips need {self.cfg['min_score']}).")
@@ -601,9 +619,12 @@ class Engine:
             if begs: start = max(0, min(begs, key=lambda w: abs(w[0] - start))[0] - 0.25)
             ends = [w for w in words if w[1] >= end]
             if ends: end = min(dur, ends[0][1] + 0.35)
-            self.status(f"Rendering clip {i} of {len(peaks)} (hype score {sc:.1f})...", "rendering")
+            self.status(f"Rendering clip {i} of {len(peaks)} (hype score {sc:.1f})...", "rendering",
+                        int((i - 1) / max(1, len(peaks)) * 100))
             try:
                 self.render(path, start, end, words, f"{stem}_{stamp}_clip{i}")
+                self.status(f"Rendered clip {i} of {len(peaks)}.", "rendering",
+                            int(i / max(1, len(peaks)) * 100))
             except Exception as e:
                 self.log(f"Render error: {e}")
         self.emit("chunk", "")
@@ -752,6 +773,7 @@ class Core:
         self.running = False
         self.logs, self.log_id = [], 0
         self.phase, self.status = "idle", "Ready when you are."
+        self.progress = 0
         self.session = {"clips": 0, "chunks": 0, "started": None, "ended": None}
         self.settings = load_settings()
 
@@ -766,7 +788,10 @@ class Core:
         if kind == "log":
             self.push(payload)
         elif kind == "status":
-            with self.lock: self.phase, self.status = payload
+            with self.lock:
+                self.phase, self.status = payload[0], payload[1]
+                if len(payload) > 2 and payload[2] is not None:
+                    self.progress = max(0, min(100, int(payload[2])))
         elif kind == "clip":
             with self.lock: self.session["clips"] += 1
             self.push("Clip ready: " + payload)
@@ -781,6 +806,7 @@ class Core:
             with self.lock:
                 self.running = False
                 self.phase, self.status = "idle", "Ready when you are."
+                self.progress = 0
                 self.session["ended"] = time.time()
 
     def start(self, cfg):
@@ -804,6 +830,7 @@ class Core:
             self.engine = Engine(cfg, self.emit)
             self.running = True
             self.phase, self.status = "waiting", "Starting..."
+            self.progress = 0
             self.session = {"clips": 0, "chunks": 0, "started": time.time(), "ended": None}
             self.push("Started (" + ("live stream" if cfg["mode"] == "live" else "video file") + ").")
             threading.Thread(target=self.engine.run, daemon=True).start()
@@ -826,6 +853,7 @@ class Core:
                 "stopping": bool(eng and self.running and eng.stop_flag),
                 "mode": eng.cfg["mode"] if eng else None,
                 "phase": self.phase, "status": self.status,
+                "progress": self.progress,
                 "logs": [{"id": i, "t": t, "m": m} for (i, t, m) in self.logs if i > since],
                 "last_id": self.log_id,
                 "session": {"clips": s["clips"], "chunks": s["chunks"], "elapsed": el},
@@ -1293,6 +1321,7 @@ select.text option{background:#14161f}
 .stat{text-align:right}.stat b{display:block;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}.stat span{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.8px}
 .hero[data-phase=idle]{--hc:#646a82}.hero[data-phase=waiting]{--hc:#fbbf24}.hero[data-phase=recording]{--hc:#f87171}
 .hero[data-phase=transcribing]{--hc:#8b5cf6}.hero[data-phase=rendering]{--hc:#ec4899}.hero[data-phase=stopping]{--hc:#fbbf24}.hero[data-phase=working]{--hc:#8b5cf6}
+.progress-wrap{padding:10px 2px 0}.progress-meta{display:flex;justify-content:space-between;color:var(--dim);font-size:11px;margin-bottom:5px}.progress-track{height:7px;background:rgba(255,255,255,.1);border-radius:8px;overflow:hidden}.progress-fill{height:100%;width:0;background:var(--grad);border-radius:8px;transition:width .25s ease}
 .rec-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--bad);margin-right:8px;animation:blink 1.2s infinite;vertical-align:1px}
 @keyframes blink{50%{opacity:.25}}
 /* tabs */
@@ -1437,7 +1466,8 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <select id="model" class="text"></select>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
     <div class="row"><label>Tag / credit</label></div>
-    <input id="streamer-tag" class="text" type="text" maxlength="80" placeholder="@streamer">
+    <input id="streamer-tag" class="text" type="text" maxlength="80" placeholder="Auto-detect from stream URL">
+    <p class="hint">Leave blank to tag the Twitch or YouTube handle from the source URL. Enter a value to override it.</p>
     <label class="toggle"><span>Show credit on the video</span><input type="checkbox" id="show-tag-video"><i class="sl"></i></label>
   </div>
 
@@ -1477,6 +1507,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <div class="stat"><b id="s-clips">0</b><span>New clips</span></div>
     </div>
   </div>
+  <div class="progress-wrap" id="progress-wrap" hidden><div class="progress-meta"><span id="progress-label">Preparing...</span><span id="progress-value">0%</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div></div>
   <div class="tabs" id="tabs">
     <button class="tab on" data-t="clips">Clips<em id="cnt" hidden></em></button>
     <button class="tab" data-t="log">Activity</button>
@@ -1585,8 +1616,6 @@ BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large
 $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.target.value;scheduleSave()});
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
 $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
-$("#streamer-tag").value=S.streamer_tag||"";
-$("#streamer-tag").addEventListener("input",e=>{S.streamer_tag=e.target.value.replace(/[\r\n{}]/g,"").slice(0,80);scheduleSave()});
 $("#show-tag-video").checked=!!S.show_tag_video;
 $("#show-tag-video").addEventListener("change",e=>{S.show_tag_video=e.target.checked;scheduleSave()});
 $("#t-sub-custom").checked=!!S.subtitle_custom;
@@ -1600,7 +1629,21 @@ for(const [id,key,lab,fmt] of [["r-sub-size","subtitle_font_size","v-sub-size",v
   const el=$("#"+id);el.value=S[key];const upd=()=>{S[key]=+el.value;$("#"+lab).textContent=fmt(el.value);paintRange(el);preview()};
   el.addEventListener("input",()=>{upd();scheduleSave()});upd();
 }
-$("#target").value=S.target||"";$("#target").addEventListener("input",e=>{S.target=e.target.value;scheduleSave()});
+function inferStreamerTag(url){
+  let m=String(url||"").match(/twitch\.tv\/([^/?#]+)/i);
+  if(m&&!/^(videos|directory|search)$/i.test(m[1]))return "@"+m[1];
+  m=String(url||"").match(/youtube\.com\/@([^/?#]+)/i);
+  return m?"@"+m[1]:"";
+}
+let tagManual=!!S.streamer_tag&&S.streamer_tag!==inferStreamerTag(S.target);
+function syncStreamerTag(){
+  if(tagManual)return;
+  S.streamer_tag=inferStreamerTag(S.target);
+  $("#streamer-tag").value=S.streamer_tag;
+}
+$("#target").value=S.target||"";syncStreamerTag();
+$("#target").addEventListener("input",e=>{S.target=e.target.value;syncStreamerTag();scheduleSave()});
+$("#streamer-tag").addEventListener("input",e=>{tagManual=true;S.streamer_tag=e.target.value.replace(/[\r\n{}\\]/g,"").slice(0,80);scheduleSave()});
 function onMode(){
   const live=S.mode==="live";
   $("#camrow").hidden=!S.layout.startsWith("Facecam");$("#v-cam").textContent="x"+S.cam_x+"% y"+S.cam_y+"% size "+S.cam_w+"%";
@@ -1744,6 +1787,11 @@ function updateRun(s){
   hero.classList.toggle("live",s.running&&s.phase!=="waiting"||s.phase==="waiting"&&s.running);
   const ph=$("#ph");ph.replaceChildren(...(s.phase==="recording"?[h("span",{class:"rec-dot"})]:[]),PHASES[s.phase]||"Working");
   $("#st").textContent=s.status;$("#st").title=s.status;
+  const showProgress=s.running&&(s.phase==="transcribing"||s.phase==="rendering");
+  $("#progress-wrap").hidden=!showProgress;
+  const progress=Math.max(0,Math.min(100,Number(s.progress)||0));
+  $("#progress-fill").style.width=progress+"%";$("#progress-value").textContent=progress+"%";
+  $("#progress-label").textContent=s.phase==="rendering"?"Rendering clips":"Transcribing video";
   $("#s-time").textContent=fmtT(s.session.elapsed);$("#s-chunks").textContent=s.session.chunks;$("#s-clips").textContent=s.session.clips;
   $("#startbar").hidden=s.running;$("#stopbar").hidden=!s.running;
   const live=s.mode==="live";

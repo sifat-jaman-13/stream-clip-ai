@@ -15,7 +15,7 @@ Run:
     python autoclip.py live URL        -> headless, no UI
     python autoclip.py file video.mp4  -> headless, no UI
 
-Output: the "out" folder. Each clip = .mp4 (1080x1920) + .txt (caption and hashtags to paste).
+Output: the "out" folder. Each clip = .mp4 in the selected format (9:16 by default) + .txt (caption and hashtags to paste).
 Your own hype words: "Hype words" tab in the app (stored in custom_words.txt, re-read for every chunk).
 """
 import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform
@@ -95,13 +95,14 @@ DEFAULTS = {
     "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "streamer_tag": "", "show_tag_video": True,
-    "layout": "Facecam + game (Twitch)", "delete_rec": False,
+    "layout": "Facecam + game (Twitch)", "output_format": "9:16", "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
 }
 # ASS colours are BGR
 CAPTION_COLORS = {"Yellow": "00FFFF", "Green": "00FF00", "Cyan": "FFFF00", "Orange": "0080FF", "Pink": "FF40FF"}
 CAPTION_POS = {"Lower third": 520, "Middle": 800, "Low": 380}      # MarginV (px from bottom of 1920)
 LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)"]
+OUTPUT_FORMATS = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080), "4:5": (1080, 1350)}
 MODELS = ["distil-large-v3", "large-v3-turbo", "small", "base"]
 STREAM_QUALITY = "1080p60,1080p,720p60,720p,best"
 SUBTITLE_MODES = ["Karaoke", "Classic"]
@@ -128,7 +129,8 @@ def clean_cfg(raw):
     for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x"): c[k] = round(c[k], 1)
     if raw.get("mode") in ("live", "file"): c["mode"] = raw["mode"]
     c["target"] = str(raw.get("target", "")).strip()[:1000]
-    for k, opts in (("color", CAPTION_COLORS), ("position", CAPTION_POS), ("layout", LAYOUTS), ("model", MODELS)):
+    for k, opts in (("color", CAPTION_COLORS), ("position", CAPTION_POS), ("layout", LAYOUTS),
+                    ("output_format", OUTPUT_FORMATS), ("model", MODELS)):
         if raw.get(k) in opts: c[k] = raw[k]
     for k, opts in (("subtitle_mode", SUBTITLE_MODES), ("subtitle_style", SUBTITLE_STYLES),
                     ("subtitle_position", SUBTITLE_POSITIONS), ("subtitle_alignment", SUBTITLE_ALIGNMENTS)):
@@ -322,6 +324,9 @@ def _ass_color(value, fallback):
         value = fallback.lstrip("#")
     return value[4:6] + value[2:4] + value[0:2]
 
+def output_size(cfg):
+    return OUTPUT_FORMATS.get(cfg.get("output_format", "9:16"), OUTPUT_FORMATS["9:16"])
+
 def make_ass(words, start, end, path, cfg):
     ws = []
     for s, e, w in words:
@@ -330,6 +335,7 @@ def make_ass(words, start, end, path, cfg):
             if cw:
                 ws.append((s - start, e - start, cw))
     custom = bool(cfg.get("subtitle_custom"))
+    out_w, out_h = output_size(cfg)
     preset = SUBTITLE_PRESETS.get(cfg.get("subtitle_style", "Classic"), SUBTITLE_PRESETS["Classic"])
     col = _ass_color(cfg.get("subtitle_text_color"), "#FFFFFF") if custom else CAPTION_COLORS.get(cfg["color"], "00FFFF")
     stroke = _ass_color(cfg.get("subtitle_stroke_color"), "#000000") if custom else "000000"
@@ -340,16 +346,17 @@ def make_ass(words, start, end, path, cfg):
         align = cfg.get("subtitle_alignment", "Center")
         alignment = {"Top": 7 if align == "Left" else 8, "Center": 4 if align == "Left" else 5,
                      "Bottom": 1 if align == "Left" else 2}[pos]
-        mv = max(0, 70 + int(cfg.get("subtitle_nudge", 0))) if pos != "Center" else int(cfg.get("subtitle_nudge", 0))
+        nudge = round(int(cfg.get("subtitle_nudge", 0)) * out_h / 1920)
+        mv = max(0, round(70 * out_h / 1920) + nudge) if pos != "Center" else nudge
         outline, shadow = preset["outline"], preset["shadow"]
     else:
-        alignment, mv, outline, shadow = 2, CAPTION_POS.get(cfg["position"], 520), 9, 4
+        alignment, mv, outline, shadow = 2, round(CAPTION_POS.get(cfg["position"], 520) * out_h / 1920), 9, 4
     header = (
-        "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\n\n"
+        f"[Script Info]\nScriptType: v4.00+\nPlayResX: {out_w}\nPlayResY: {out_h}\nWrapStyle: 0\n\n"
         "[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,"
         "BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,"
         "Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n"
-        f"Style: Default,{font},{size},&H00{col},&H00{col},&H00{stroke},&H64000000,0,0,0,0,100,100,2,0,1,{outline},{shadow},{alignment},70,70,{mv},1\n\n"
+        f"Style: Default,{font},{size},&H00{col},&H00{col},&H00{stroke},&H64000000,0,0,0,0,100,100,2,0,1,{outline},{shadow},{alignment},{round(70 * out_w / 1080)},{round(70 * out_w / 1080)},{mv},1\n\n"
         "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n")
     pop = (r"{\1c&H" + col + r"&\fscx120\fscy120\t(0,90,\fscx100\fscy100)}"
            if (not custom or (preset["pop"] and cfg.get("subtitle_mode", "Karaoke") == "Karaoke"))
@@ -369,8 +376,10 @@ def make_ass(words, start, end, path, cfg):
             lines.append(f"Dialogue: 0,{ts(s)},{ts(max(end_t, s + 0.08))},Default,,0,0,0,,{text}")
     tag = streamer_credit(cfg)
     if cfg.get("show_tag_video") and tag:
+        tag_size = round(38 * out_w / 1080)
+        tag_margin = round(70 * out_w / 1080)
         lines.append(f"Dialogue: 0,{ts(0)},{ts(max(0.08, end - start))},Default,,0,0,0,,"
-                     f"{{\\an7\\fs38\\bord3\\3c&H000000&}}Clip from {tag}")
+                     f"{{\\an7\\fs{tag_size}\\bord3\\3c&H000000&\\pos({tag_margin},{tag_margin})}}Clip from {tag}")
     pathlib.Path(path).write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
 
 # ------------------------------------------------------------------ engine
@@ -556,8 +565,9 @@ class Engine:
     # ---- render
     def render(self, src, start, end, words, name):
         cfg = self.cfg
+        out_w, out_h = output_size(cfg)
         make_ass(words, start, end, OUT / f"{name}.ass", cfg)
-        if cfg["layout"].startswith("Facecam"):
+        if cfg["layout"].startswith("Facecam") and cfg.get("output_format", "9:16") == "9:16":
             # Twitch-style portrait: facecam on the top 40% (1080x768), game on the bottom 60% (1080x1152)
             cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("cam_x", "cam_y", "cam_w", "cam_h"))
             gx = float(cfg["game_x"]) / 100
@@ -569,11 +579,11 @@ class Engine:
                   f"[cam][game]vstack=inputs=2,setsar=1,subtitles={name}.ass[v]")
         elif cfg["layout"].startswith("Blur"):
             vf = ("[0:v]split=2[a][b];"
-                  "[a]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=8:2,scale=1080:1920[bg];"
-                  "[b]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,"
+                  f"[a]scale={round(out_w/4)}:{round(out_h/4)}:force_original_aspect_ratio=increase,crop={out_w//4}:{out_h//4},boxblur=8:2,scale={out_w}:{out_h}[bg];"
+                  f"[b]scale={out_w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,"
                   f"setsar=1,subtitles={name}.ass[v]")
         else:
-            vf = ("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+            vf = (f"[0:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
                   f"setsar=1,subtitles={name}.ass[v]")
         enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
@@ -1457,6 +1467,14 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 
   <div class="card">
     <div class="ch"><span class="num">4</span><h3>Output</h3></div>
+    <div class="row"><label>Video format</label></div>
+    <select id="output-format" class="text">
+      <option value="9:16">9:16 Portrait (Shorts / Reels)</option>
+      <option value="16:9">16:9 Landscape (YouTube)</option>
+      <option value="1:1">1:1 Square</option>
+      <option value="4:5">4:5 Portrait (Instagram)</option>
+    </select>
+    <p class="hint" id="format-hint">9:16 keeps the facecam + game layout.</p>
     <div class="row"><label>Layout</label></div>
     <div class="seg" data-key="layout"><button data-v="Facecam + game (Twitch)">Facecam + game</button><button data-v="Blur background">Blurred bg</button><button data-v="Fill (crop center)">Fill</button></div>
     <div id="camrow" hidden>
@@ -1624,6 +1642,7 @@ Object.entries(BOOT.colors).forEach(([name,css])=>{sw.append(h("button",{title:n
 function paintSw(){$$("button",sw).forEach(b=>b.classList.toggle("on",b.dataset.v===S.color))}paintSw();
 BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large-v3"?"distil-large-v3 (fast, English)":m==="large-v3-turbo"?"large-v3-turbo (any language)":m==="small"?"small (light)":"base (lightest)")));
 $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.target.value;scheduleSave()});
+$("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;updateFormatUI();preview();scheduleSave()});updateFormatUI();
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
 $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
 $("#show-tag-video").checked=!!S.show_tag_video;
@@ -1670,6 +1689,8 @@ const FLAT="NO WAY BRO THIS IS INSANE LET HIM COOK ARE YOU MAD".split(" ");
 let tick=0;
 function preview(){
   const ph=$("#phone"),cap=$("#cap");
+  const formatRatio={"9:16":"9/16","16:9":"16/9","1:1":"1/1","4:5":"4/5"}[S.output_format]||"9/16";
+  ph.style.aspectRatio=formatRatio;
   ph.classList.toggle("fill",S.layout.startsWith("Fill"));ph.classList.toggle("cam",S.layout.startsWith("Facecam"));
   const k=ph.getBoundingClientRect().width/1080||0.2;
   const custom=!!S.subtitle_custom;

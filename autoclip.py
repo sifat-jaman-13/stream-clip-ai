@@ -1475,7 +1475,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="ch"><span class="num">5</span><h3>App settings</h3></div>
     <div class="row"><label>Zernio posting</label></div>
     <p class="hint">Save your API key locally, identify connected channels, and control publishing for finished clips.</p>
-    <input id="z-api" class="text" type="password" placeholder="Zernio API key (stored locally)">
+    <div class="row"><label>Zernio API key</label><b id="z-key-state">Not saved</b></div>
+    <input id="z-api" class="text" type="password" placeholder="Enter a new key to replace the saved key">
+    <p class="hint">The key is stored locally in this app folder and is never shown back in the browser.</p>
     <div class="two">
       <div><div class="row"><label>Instagram</label></div><select id="z-ig" class="text"><option value="">Not selected</option></select></div>
       <div><div class="row"><label>YouTube</label></div><select id="z-yt" class="text"><option value="">Not selected</option></select></div>
@@ -1746,11 +1748,13 @@ $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLo
 
 /* ---------- actions ---------- */
 $("#z-delay").value=Z.schedule_minutes||0;$("#z-vis").value=Z.visibility||"public";$("#z-auto").checked=!!Z.auto_post;
+$("#z-key-state").textContent=Z.api_key_set?"Saved locally":"Not saved";
+$("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";
 $("#z-check").onclick=async()=>{
   const b=$("#z-check");b.disabled=true;
   try{
     const r=await api("/api/zernio",{api_key:$("#z-api").value,instagram_id:$("#z-ig").value||Z.instagram_id,youtube_id:$("#z-yt").value||Z.youtube_id,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
-    Object.assign(Z,r);$("#z-api").value="";await loadZernioAccounts();toast("Zernio connected","ok");
+    Object.assign(Z,r);$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadZernioAccounts();toast("Zernio settings saved locally","ok");
   }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
   b.disabled=false;
 };

@@ -1986,6 +1986,13 @@ function addLogs(list){
 function updateSelectedButton(){
   const b=$("#btn-publish-selected");b.textContent="Publish selected ("+selectedClips.size+")";b.disabled=selectedClips.size===0;
 }
+function toggleClipSelection(name){
+  if(selectedClips.has(name))selectedClips.delete(name);else selectedClips.add(name);
+  const card=cards.get(name),pick=card&&card.querySelector(".pick");
+  if(pick)pick.checked=selectedClips.has(name);
+  updateSelectedButton();
+  toast(selectedClips.has(name)?"Clip selected for publishing":"Clip removed from selection","ok");
+}
 function updatePosting(p){
   if(!p)return;
   const total=Number(p.total)||0,done=Number(p.completed)||0,active=!!p.active;
@@ -2027,7 +2034,7 @@ function clipCard(c){
   const copy=()=>{navigator.clipboard.writeText(c.caption||"").then(()=>toast("Caption copied","ok"),()=>toast("Couldn't copy","bad"))};
   const post=()=>publishNames([c.name]);
   const del=async()=>{if(await confirmBox("Delete this clip?","This permanently removes the video and its caption file.","Delete")){try{await api("/api/delete",{name:c.name});toast("Clip deleted");poll(true)}catch(e){toast(e.message,"bad")}}};
-  return h("div",{class:"clip","data-name":c.name,onmouseenter:()=>{v.play().catch(()=>{})},onmouseleave:()=>v.pause()},
+  return h("div",{class:"clip","data-name":c.name,title:"Double-click this clip to select it for publishing",ondblclick:e=>{if(!e.target.closest("button,a,input"))toggleClipSelection(c.name)},onmouseenter:()=>{v.play().catch(()=>{})},onmouseleave:()=>v.pause()},
     h("div",{class:"thumb",onclick:()=>openClip(c)},v,h("div",{class:"pb"},ico("play",15))),
     h("div",{class:"cm"},h("div",{class:"cc",title:first},first),
       h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB"),

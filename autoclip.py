@@ -1247,7 +1247,7 @@ def open_window(url):
     for exe in cands:
         if exe and os.path.exists(exe):
             try:
-                subprocess.Popen([exe, f"--app={url}", "--window-size=1360,880"])
+                subprocess.Popen([exe, f"--app={url}", "--start-maximized"])
                 return
             except Exception:
                 pass

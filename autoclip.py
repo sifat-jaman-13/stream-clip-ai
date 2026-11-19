@@ -61,15 +61,16 @@ def popen(cmd, **kw): return subprocess.Popen(cmd, creationflags=CF, **kw)
 
 DEFAULTS = {
     "mode": "live", "target": "",
-    "clips_per_chunk": 2, "chunk_min": 5, "pre": 20, "post": 15, "min_score": 1.5,
+    "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 1.5,
     "model": "distil-large-v3",
     "color": "Yellow", "position": "Lower third", "caption_size": 100, "words_per_line": 3, "font": "Impact",
-    "layout": "Blur background", "delete_rec": False,
+    "layout": "Facecam + game (Twitch)", "delete_rec": False,
+    "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
 }
 # ASS colours are BGR
 CAPTION_COLORS = {"Yellow": "00FFFF", "Green": "00FF00", "Cyan": "FFFF00", "Orange": "0080FF", "Pink": "FF40FF"}
 CAPTION_POS = {"Lower third": 520, "Middle": 800, "Low": 380}      # MarginV (px from bottom of 1920)
-LAYOUTS = ["Blur background", "Fill (crop center)"]
+LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)"]
 MODELS = ["distil-large-v3", "large-v3-turbo", "small", "base"]
 
 def clean_cfg(raw):
@@ -84,6 +85,10 @@ def clean_cfg(raw):
     num("pre", 3, 90, int); num("post", 3, 90, int)
     num("min_score", 0.3, 5.0, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
     c["min_score"] = round(c["min_score"], 2)
+    num("cam_x", 0, 90, float); num("cam_y", 0, 90, float); num("cam_w", 10, 100, float); num("cam_h", 10, 100, float)
+    num("game_x", 0, 100, float)
+    c["cam_w"] = min(c["cam_w"], 100 - c["cam_x"]); c["cam_h"] = min(c["cam_h"], 100 - c["cam_y"])
+    for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x"): c[k] = round(c[k], 1)
     if raw.get("mode") in ("live", "file"): c["mode"] = raw["mode"]
     c["target"] = str(raw.get("target", "")).strip()[:1000]
     for k, opts in (("color", CAPTION_COLORS), ("position", CAPTION_POS), ("layout", LAYOUTS), ("model", MODELS)):
@@ -308,6 +313,8 @@ def streamlink_available():
 def z(x):
     return (x - x.mean()) / (x.std() + 1e-9)
 
+STALL_SECONDS = 90
+
 class Stopped(Exception):
     pass
 
@@ -432,13 +439,26 @@ class Engine:
                 break
             picks.append((i, float(s[i])))
             s[max(0, i - 40): i + 40] = -99          # never pick overlapping moments
+        if not picks and self.best_score > 0:        # nothing passed the bar: still deliver the best moment of the chunk
+            picks = [(int(score.argmax()), self.best_score)]
+            self.log("No moment passed the threshold - using the best available moment of this chunk instead.")
         return picks, n
 
     # ---- render
     def render(self, src, start, end, words, name):
         cfg = self.cfg
         make_ass(words, start, end, OUT / f"{name}.ass", cfg)
-        if cfg["layout"].startswith("Blur"):
+        if cfg["layout"].startswith("Facecam"):
+            # Twitch-style portrait: facecam on the top 40% (1080x768), game on the bottom 60% (1080x1152)
+            cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("cam_x", "cam_y", "cam_w", "cam_h"))
+            gx = float(cfg["game_x"]) / 100
+            vf = ("[0:v]split=2[a][b];"
+                  f"[a]crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f},"
+                  "scale=1080:768:force_original_aspect_ratio=increase,crop=1080:768[cam];"
+                  f"[b]crop=min(iw\\,ih*1080/1152):ih:(iw-min(iw\\,ih*1080/1152))*{gx:.4f}:0,"
+                  "scale=1080:1152[game];"
+                  f"[cam][game]vstack=inputs=2,setsar=1,subtitles={name}.ass[v]")
+        elif cfg["layout"].startswith("Blur"):
             vf = ("[0:v]split=2[a][b];"
                   "[a]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=8:2,scale=1080:1920[bg];"
                   "[b]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,"
@@ -478,7 +498,7 @@ class Engine:
         if not words:
             self.log("WARNING: no speech was transcribed - check the speech model / GPU messages above.")
         if not peaks:
-            self.log("No moment passed the threshold - lower 'Strictness' toward 'More clips' if this keeps happening.")
+            self.log("Chunk too short or silent - nothing to clip.")
         stamp = time.strftime("%H%M%S")
         for i, (p, sc) in enumerate(peaks, 1):
             self.check()
@@ -520,13 +540,36 @@ class Engine:
                 time.sleep(1)
         return False
 
+    def _tail(self, path, n=3):
+        try:
+            lines = [l.strip() for l in pathlib.Path(path).read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()]
+            return " | ".join(lines[-n:])[:300]
+        except Exception:
+            return ""
+
     def live(self, url):
-        if not self.wait_live(url):
-            return
-        self.log("Stream is live - recording.")
+        """Record -> cut into chunks -> clip each chunk. Reconnects automatically if the stream drops."""
+        attempt = 0
+        while not self.stop_flag:
+            if not self.wait_live(url):
+                return
+            attempt += 1
+            self.log("Stream is live - recording." if attempt == 1 else f"Reconnected (#{attempt}) - recording again.")
+            self.record_session(url)
+            if self.stop_flag or self.abort:
+                break
+            self.log("The stream ended or dropped - checking again in 10 s.")
+            for _ in range(10):
+                if self.stop_flag: break
+                time.sleep(1)
+        self.log("Recording finished.")
+
+    def record_session(self, url):
         run_id = time.strftime("%m%d_%H%M%S")
         pattern = str(REC / f"seg_{run_id}_%05d.ts")
-        sl = popen(streamlink_cmd() + ["--stdout", url, "best"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=streamlink_env())
+        slog_path = REC / f"streamlink_{run_id}.log"
+        slog = open(slog_path, "wb")
+        sl = popen(streamlink_cmd() + ["--stdout", url, "best"], stdout=subprocess.PIPE, stderr=slog, env=streamlink_env())
         ff = popen(["ffmpeg", "-v", "error", "-i", "-", "-c", "copy", "-f", "segment",
                     "-segment_time", str(self.seg_seconds), "-reset_timestamps", "1", pattern],
                    stdin=sl.stdout)
@@ -535,30 +578,55 @@ class Engine:
         done = set()
         idle = f"Recording - a clip batch is made every {self.cfg['chunk_min']} min."
         self.status(idle, "recording")
-        while not self.abort:
-            segs = sorted(glob.glob(str(REC / f"seg_{run_id}_*.ts")))
-            recording = ff.poll() is None and not self.stop_flag
-            finished = segs if not recording else segs[:-1]
-            for s in finished:
-                if s in done: continue
-                done.add(s)
-                try:
-                    if os.path.getsize(s) > 200_000:
-                        self.process(s)
-                    else:
-                        os.remove(s)
-                except Stopped:
-                    return
-                except Exception as e:
-                    self.log(f"Error on {os.path.basename(s)}: {e}")
-                if ff.poll() is None and not self.stop_flag:
-                    self.status(idle, "recording")
-                elif not self.abort:
-                    self.status("Wrapping up the clips already recorded...", "stopping")
-            if not recording and set(segs) <= done:
-                break
-            time.sleep(3)
-        self.log("Recording finished.")
+        t0 = time.time(); last_beat = t0; last_growth = t0; last_total = -1; warned = False
+        try:
+            while not self.abort:
+                segs = sorted(glob.glob(str(REC / f"seg_{run_id}_*.ts")))
+                recording = ff.poll() is None and not self.stop_flag
+                # progress heartbeat + stall detection
+                total = sum(os.path.getsize(x) for x in segs if os.path.exists(x))
+                if total > last_total:
+                    last_total = total; last_growth = time.time(); warned = False
+                if recording and not warned and time.time() - last_growth > STALL_SECONDS:
+                    self.log(f"WARNING: no new video data for {STALL_SECONDS} s - the stream may be stuck on ads. "
+                             f"streamlink says: {self._tail(slog_path) or '(nothing)'}")
+                    warned = True
+                if recording and time.time() - last_beat >= 60:
+                    last_beat = time.time()
+                    left = max(0, self.seg_seconds - int(time.time() - t0) % self.seg_seconds)
+                    self.log(f"Recording... {total / 1048576:.0f} MB captured, next clip batch in about {left // 60}:{left % 60:02d}.")
+                finished = segs if not recording else segs[:-1]
+                for sg in finished:
+                    if sg in done: continue
+                    done.add(sg)
+                    try:
+                        if os.path.getsize(sg) > 200_000:
+                            self.process(sg)
+                        else:
+                            self.log(f"Skipped a tiny recording piece ({os.path.basename(sg)}).")
+                            os.remove(sg)
+                    except Stopped:
+                        return
+                    except Exception as e:
+                        self.log(f"Error on {os.path.basename(sg)}: {e}")
+                    if ff.poll() is None and not self.stop_flag:
+                        self.status(idle, "recording")
+                    elif not self.abort:
+                        self.status("Wrapping up the clips already recorded...", "stopping")
+                if not recording and set(segs) <= done:
+                    break
+                time.sleep(3)
+            if time.time() - t0 < 20 and not self.stop_flag:
+                self.log(f"Recording stopped after a few seconds. streamlink says: {self._tail(slog_path) or '(nothing)'}")
+        finally:
+            for pr in (sl, ff):
+                try: pr.terminate()
+                except Exception: pass
+            try: slog.close()
+            except Exception: pass
+            for fpath in glob.glob(str(REC / f"streamlink_{run_id}.log")):
+                try: os.remove(fpath)
+                except Exception: pass
 
     def run(self):
         try:
@@ -714,6 +782,34 @@ def browse_file():
     except Exception:
         return ""
 
+def grab_frame(mode, target):
+    """One JPEG frame (as a data URL) from the live stream or a video file - used by the facecam-area picker."""
+    import base64
+    target = (target or "").strip().strip('"')
+    try:
+        if mode == "live":
+            if not re.match(r"https?://", target):
+                raise ValueError("Paste the stream link first.")
+            if not streamlink_available():
+                raise ValueError("streamlink is not installed.")
+            r = run(streamlink_cmd() + [target, "best", "--stream-url"], capture_output=True, text=True,
+                    env=streamlink_env(), timeout=45)
+            if r.returncode != 0 or not (r.stdout or "").strip():
+                raise ValueError("The stream isn't live right now. Try again when it is, or pick a video file.")
+            attempts = [["-i", r.stdout.strip().splitlines()[-1].strip()]]
+        else:
+            if not target or not pathlib.Path(target).is_file():
+                raise ValueError("Choose a video file first.")
+            attempts = [["-ss", "5", "-i", target], ["-i", target]]
+        for a in attempts:
+            r = run(["ffmpeg", "-v", "error", *a, "-frames:v", "1", "-vf", "scale=960:-2",
+                     "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "4", "-"], capture_output=True, timeout=60)
+            if r.stdout:
+                return "data:image/jpeg;base64," + base64.b64encode(r.stdout).decode("ascii")
+    except subprocess.TimeoutExpired:
+        raise ValueError("Grabbing a frame took too long.")
+    raise ValueError("Couldn't read a frame from that source.")
+
 CORE = Core()
 TOKEN = secrets.token_urlsafe(24)
 
@@ -839,6 +935,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True})
                 if path == "/api/open_folder":
                     open_folder(OUT); return self._send(200, {"ok": True})
+                if path == "/api/frame":
+                    return self._send(200, {"image": grab_frame(str(body.get("mode", "live")), str(body.get("target", "")))})
                 if path == "/api/browse":
                     return self._send(200, {"path": browse_file()})
                 if path == "/api/quit":
@@ -880,7 +978,12 @@ def main():
         try: eng.run()
         except KeyboardInterrupt: eng.stop(force=True)
         return
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    class QuietServer(http.server.ThreadingHTTPServer):
+        def handle_error(self, request, client_address):      # browser closed a connection: harmless, don't print a traceback
+            if isinstance(sys.exc_info()[1], (ConnectionError, BrokenPipeError, TimeoutError)):
+                return
+            super().handle_error(request, client_address)
+    srv = QuietServer(("127.0.0.1", 0), Handler)
     srv.daemon_threads = True
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -973,7 +1076,22 @@ select.text option{background:#14161f}
 .cap span{display:inline-block}
 .cap .hot{color:var(--cap);animation:pop .16s ease-out}
 @keyframes pop{from{transform:scale(1.22)}to{transform:scale(1)}}
+.camv{display:none}
+.phone.cam .bg,.phone.cam .vid{display:none}
+.phone.cam .camv{display:block;position:absolute;inset:0}
+.camv .ct{position:absolute;left:0;right:0;top:0;height:40%;background:linear-gradient(160deg,#5b3ea8,#2a1c52);display:grid;place-items:center;color:rgba(255,255,255,.35);border-bottom:2px solid #000}
+.camv .cb{position:absolute;left:0;right:0;top:40%;bottom:0;background:linear-gradient(160deg,#323863,#141725)}
 .pvl{text-align:center;color:var(--mute);font-size:11px;margin:8px 0 4px}
+.editor{width:min(940px,95vw);max-height:94vh;overflow:auto;background:#12141d;border:1px solid var(--line2);border-radius:20px;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.editor h4{font-size:17px;margin-bottom:4px}.editor .sub{color:var(--dim);font-size:13px;margin-bottom:14px}
+.cstage{position:relative;width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,#2c3150,#12141f);border-radius:12px;overflow:hidden;touch-action:none;user-select:none}
+.cstage .cimg{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;pointer-events:none}
+.crect{position:absolute;border:2px solid #ff40ff;background:rgba(255,64,255,.12);cursor:move}
+.crect span{position:absolute;left:4px;top:3px;font-size:10px;font-weight:700;letter-spacing:.8px;color:#fff;text-shadow:0 1px 3px #000}
+.crect.game{border:2px dashed #22d3ee;background:rgba(34,211,238,.07);cursor:default;pointer-events:none}
+.crect .hdl{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;background:#fff;border:2px solid #ff40ff;border-radius:3px;cursor:nwse-resize}
+.erow{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}
+.erow .grow{flex:1;min-width:220px}
 /* hero */
 .hero{display:flex;align-items:center;gap:18px;padding:18px 20px;margin:0;background:var(--card);border:1px solid var(--line);border-radius:18px;position:relative;overflow:hidden}
 .hero:before{content:"";position:absolute;inset:0;background:radial-gradient(500px 120px at 0 0,var(--hc,transparent),transparent 70%);opacity:.18;pointer-events:none;transition:.4s}
@@ -1083,7 +1201,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 
   <div class="card">
     <div class="ch"><span class="num">3</span><h3>Captions</h3></div>
-    <div class="pv"><div class="phone" id="phone"><div class="bg"></div><div class="vid"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div><div class="cap" id="cap"></div></div></div>
+    <div class="pv"><div class="phone" id="phone"><div class="bg"></div><div class="vid"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div><div class="camv"><div class="ct"><svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0z"/></svg></div><div class="cb"></div></div><div class="cap" id="cap"></div></div></div>
     <div class="pvl">Live preview of your caption style</div>
     <div class="row"><label>Highlight colour</label><div class="sw" id="sw"></div></div>
     <div class="row"><label>Position</label></div>
@@ -1101,7 +1219,12 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   <div class="card">
     <div class="ch"><span class="num">4</span><h3>Output</h3></div>
     <div class="row"><label>Layout</label></div>
-    <div class="seg" data-key="layout"><button data-v="Blur background">Blurred background</button><button data-v="Fill (crop center)">Fill (crop)</button></div>
+    <div class="seg" data-key="layout"><button data-v="Facecam + game (Twitch)">Facecam + game</button><button data-v="Blur background">Blurred bg</button><button data-v="Fill (crop center)">Fill</button></div>
+    <div id="camrow" hidden>
+      <div class="row"><label>Facecam area</label><b id="v-cam"></b></div>
+      <button class="btn ghost" id="btn-cam" style="width:100%">Set facecam area on a frame</button>
+      <p class="hint">Like Twitch: the facecam fills the top 40% of the clip and the game fills the bottom 60%.</p>
+    </div>
     <div class="row"><label>Speech model</label></div>
     <select id="model" class="text"></select>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
@@ -1207,6 +1330,7 @@ $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.d
 $("#target").value=S.target||"";$("#target").addEventListener("input",e=>{S.target=e.target.value;scheduleSave()});
 function onMode(){
   const live=S.mode==="live";
+  $("#camrow").hidden=!S.layout.startsWith("Facecam");$("#v-cam").textContent="x"+S.cam_x+"% y"+S.cam_y+"% size "+S.cam_w+"%";
   $("#target").placeholder=live?"https://www.twitch.tv/channel":"Path to a .mp4 / .mkv recording";
   $("#btn-browse").hidden=live;
   $("#src-hint").textContent=live?"Works with Twitch and YouTube live links. If the stream is offline, AutoClip waits and starts when it goes live.":"Clips are cut from the whole file. Long VODs get more clips automatically.";
@@ -1220,7 +1344,7 @@ const FLAT="NO WAY BRO THIS IS INSANE LET HIM COOK ARE YOU MAD".split(" ");
 let tick=0;
 function preview(){
   const ph=$("#phone"),cap=$("#cap");
-  ph.classList.toggle("fill",!S.layout.startsWith("Blur"));
+  ph.classList.toggle("fill",S.layout.startsWith("Fill"));ph.classList.toggle("cam",S.layout.startsWith("Facecam"));
   const k=ph.getBoundingClientRect().width/1080||0.2;
   const col=BOOT.colors[S.color]||"#FFE600",n=S.words_per_line;
   const idx=tick%FLAT.length,g=Math.floor(idx/n),words=FLAT.slice(g*n,Math.min(FLAT.length,g*n+n));
@@ -1229,6 +1353,54 @@ function preview(){
   cap.replaceChildren(...words.map((w,i)=>h("span",{class:(g*n+i===idx)?"hot":""},w)));
 }
 setInterval(()=>{tick++;preview()},430);preview();
+
+/* ---------- facecam area editor ---------- */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function openCamEditor(){
+  const box={x:+S.cam_x,y:+S.cam_y,w:+S.cam_w,h:+S.cam_h};let gx=+S.game_x,ar=16/9;
+  const img=h("img",{class:"cimg",draggable:false});
+  const hdl=h("i",{class:"hdl"});
+  const rc=h("div",{class:"crect"},h("span",{},"FACECAM"),hdl);
+  const rg=h("div",{class:"crect game"},h("span",{},"GAME"));
+  const stage=h("div",{class:"cstage"},img,rg,rc);
+  const hh=w=>w*ar/(1080/768);                       /* keeps the box the same shape as the top 40% area */
+  function paint(){
+    rc.style.cssText="left:"+box.x+"%;top:"+box.y+"%;width:"+box.w+"%;height:"+box.h+"%";
+    const gw=Math.min(100,(1080/1152)/ar*100);rg.style.cssText="left:"+((100-gw)*gx/100)+"%;top:0;width:"+gw+"%;height:100%";
+  }
+  function fit(){box.h=hh(box.w);if(box.y+box.h>100){box.h=100-box.y;box.w=box.h*(1080/768)/ar}if(box.x+box.w>100){box.w=100-box.x;box.h=hh(box.w)}}
+  fit();
+  const drag=(el,mode)=>el.addEventListener("pointerdown",e=>{
+    e.preventDefault();e.stopPropagation();el.setPointerCapture(e.pointerId);
+    const r=stage.getBoundingClientRect(),s0={x:box.x,y:box.y,w:box.w,px:e.clientX,py:e.clientY};
+    const mv=ev=>{const dx=(ev.clientX-s0.px)/r.width*100,dy=(ev.clientY-s0.py)/r.height*100;
+      if(mode==="move"){box.x=clamp(s0.x+dx,0,100-box.w);box.y=clamp(s0.y+dy,0,100-box.h)}
+      else{let w=clamp(s0.w+dx,8,100-box.x);if(hh(w)>100-box.y)w=(100-box.y)*(1080/768)/ar;box.w=w;box.h=hh(w)}
+      paint()};
+    const up=()=>{el.removeEventListener("pointermove",mv);el.removeEventListener("pointerup",up)};
+    el.addEventListener("pointermove",mv);el.addEventListener("pointerup",up)});
+  drag(rc,"move");drag(hdl,"resize");
+  img.addEventListener("load",()=>{if(img.naturalWidth){ar=img.naturalWidth/img.naturalHeight;stage.style.aspectRatio=img.naturalWidth+"/"+img.naturalHeight;fit();paint()}});
+  const gs=h("input",{type:"range",min:0,max:100,step:1,value:Math.round(gx)});paintRange(gs);
+  gs.addEventListener("input",()=>{gx=+gs.value;paintRange(gs);paint()});
+  const msg=h("span",{class:"hint",style:"margin:0"},"");
+  const grab=h("button",{class:"btn ghost"},"Grab a frame");
+  const doGrab=async()=>{grab.disabled=true;msg.textContent="Grabbing a frame...";try{const r=await api("/api/frame",{mode:S.mode,target:S.target});img.src=r.image;msg.textContent="Drag the pink box over the facecam and pull the corner to resize."}catch(e){msg.textContent=e.message}grab.disabled=false};
+  grab.onclick=doGrab;
+  const close=()=>{m.remove();document.removeEventListener("keydown",esc)};
+  const esc=e=>{if(e.key==="Escape")close()};
+  const save=()=>{S.cam_x=+box.x.toFixed(1);S.cam_y=+box.y.toFixed(1);S.cam_w=+box.w.toFixed(1);S.cam_h=+box.h.toFixed(1);S.game_x=gx;onMode();scheduleSave();close();toast("Facecam area saved","ok")};
+  const m=h("div",{class:"overlay",onclick:e=>{if(e.target===m)close()}},
+    h("div",{class:"editor"},h("h4",{},"Set the facecam area"),
+      h("div",{class:"sub"},"Pink = the facecam (becomes the top 40% of the clip). Dashed blue = the part of the game that fills the bottom 60%."),
+      stage,
+      h("div",{class:"erow"},grab,msg),
+      h("div",{class:"erow"},h("div",{class:"grow"},h("div",{class:"row",style:"margin:0 0 8px"},h("label",{},"Game crop position (left to right)")),gs)),
+      h("div",{class:"erow",style:"justify-content:flex-end"},h("button",{class:"btn ghost",onclick:close},"Cancel"),h("button",{class:"btn danger",style:"background:var(--a1)",onclick:save},"Save area"))));
+  document.body.append(m);document.addEventListener("keydown",esc);paint();
+  if(S.target&&S.target.trim())doGrab();else msg.textContent="Paste a stream link or pick a file first, then press Grab a frame. You can still drag the box now.";
+}
+$("#btn-cam").onclick=openCamEditor;
 
 /* ---------- tabs ---------- */
 let wordsLoaded=false;

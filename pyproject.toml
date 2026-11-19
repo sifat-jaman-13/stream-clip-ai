@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "stream-clip-ai"
@@ -37,16 +37,17 @@ live = [
   "streamlink",
 ]
 all = [
-  "autoclip[gpu,live]",
+  "stream-clip-ai[gpu,live]",
 ]
 
 [project.scripts]
-autoclip = "autoclip.app:main"
+autoclip = "autoclip:main"
+streamclip = "autoclip:main"
 
 [project.urls]
 Homepage = "https://github.com/sifat-jaman-13/stream-clip-ai"
 Repository = "https://github.com/sifat-jaman-13/stream-clip-ai"
 Issues = "https://github.com/sifat-jaman-13/stream-clip-ai/issues"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+py-modules = ["autoclip"]

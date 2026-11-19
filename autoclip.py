@@ -61,7 +61,7 @@ def popen(cmd, **kw): return subprocess.Popen(cmd, creationflags=CF, **kw)
 
 DEFAULTS = {
     "mode": "live", "target": "",
-    "clips_per_chunk": 2, "chunk_min": 5, "pre": 20, "post": 15, "min_score": 2.0,
+    "clips_per_chunk": 2, "chunk_min": 5, "pre": 20, "post": 15, "min_score": 1.5,
     "model": "distil-large-v3",
     "color": "Yellow", "position": "Lower third", "caption_size": 100, "words_per_line": 3, "font": "Impact",
     "layout": "Blur background", "delete_rec": False,
@@ -94,7 +94,10 @@ def clean_cfg(raw):
     return c
 
 def load_settings():
-    try: return clean_cfg(json.loads(SETTINGS_FILE.read_text(encoding="utf-8")))
+    try:
+        raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        if raw.get("min_score") == 2.0: raw["min_score"] = 1.5      # old default was too strict
+        return clean_cfg(raw)
     except Exception: return dict(DEFAULTS)
 
 def save_settings(cfg):
@@ -352,13 +355,23 @@ class Engine:
         self.log("Using CPU for speech (slower).")
         return _model
 
+    def load_audio(self, path):
+        """Decode to 16 kHz mono float32 with ffmpeg (bypasses PyAV completely)."""
+        r = run(["ffmpeg", "-v", "quiet", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
+                capture_output=True)
+        a = np.frombuffer(r.stdout, dtype=np.float32)
+        return a if len(a) > 16000 else None
+
     def transcribe(self, path):
         global _model, _model_key
         lang = "en" if self.cfg["model"].startswith("distil") else None
+        audio = self.load_audio(path)
+        src = audio if audio is not None else str(path)
+        self.dur_audio = (len(audio) / 16000) if audio is not None else 0
         for attempt in range(2):
             try:
                 model = self.get_model(self.cfg["model"])
-                segs, _ = model.transcribe(str(path), word_timestamps=True, vad_filter=True, language=lang)
+                segs, _ = model.transcribe(src, word_timestamps=True, vad_filter=True, language=lang)
                 words = []
                 for s in segs:
                     self.check()
@@ -410,6 +423,7 @@ class Engine:
         kern = np.ones(5) / 5
         score = z(np.convolve(rms, kern, "same")) + 0.5 * z(np.convolve(wps, kern, "same")) \
                 + 0.8 * z(np.convolve(hype, kern, "same"))
+        self.best_score = float(score.max())
         n_clips = max(1, round(n / self.seg_seconds * int(self.cfg["clips_per_chunk"])))
         picks, s = [], score.copy()
         for _ in range(n_clips):
@@ -459,8 +473,12 @@ class Engine:
         self.check()
         self.status("Finding the hype moments...", "transcribing")
         peaks, dur = self.find_peaks(path, words)
+        self.log(f"Heard {len(words)} words in {dur}s of video. Best moment score {getattr(self, 'best_score', 0):.1f} "
+                 f"(clips need {self.cfg['min_score']}).")
+        if not words:
+            self.log("WARNING: no speech was transcribed - check the speech model / GPU messages above.")
         if not peaks:
-            self.log("No strong moments in this chunk.")
+            self.log("No moment passed the threshold - lower 'Strictness' toward 'More clips' if this keeps happening.")
         stamp = time.strftime("%H%M%S")
         for i, (p, sc) in enumerate(peaks, 1):
             self.check()

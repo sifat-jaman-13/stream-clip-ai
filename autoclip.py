@@ -55,6 +55,7 @@ OUT = HERE / "out"; OUT.mkdir(exist_ok=True)
 REC = HERE / "rec"; REC.mkdir(exist_ok=True)
 SETTINGS_FILE = HERE / "settings.json"
 CUSTOM_FILE = HERE / "custom_words.txt"
+ZERNIO_FILE = HERE / "zernio.json"
 
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
 def run(cmd, **kw):   return subprocess.run(cmd, creationflags=CF, **kw)
@@ -109,6 +110,17 @@ def load_settings():
 def save_settings(cfg):
     try: SETTINGS_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     except Exception: pass
+
+def load_zernio_settings():
+    try:
+        raw = json.loads(ZERNIO_FILE.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+def save_zernio_settings(cfg):
+    # This file is local-only and ignored by Git. Never send the API key to the browser.
+    ZERNIO_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 # ------------------------------------------------------------------ hype words
 HYPE_WORDS = {
@@ -652,7 +664,8 @@ QUIT = threading.Event()
 class Core:
     def __init__(self):
         self.lock = threading.RLock()
-        self.publisher = ZernioPublisher(self.push)
+        self.zernio = load_zernio_settings()
+        self.publisher = ZernioPublisher(self.push, dict(self.zernio, enabled=self.zernio.get("auto_post", False)))
         self.engine = None
         self.running = False
         self.logs, self.log_id = [], 0
@@ -737,6 +750,43 @@ class Core:
         with self.lock:
             if self.engine and self.running:
                 self.engine.stop(force=True)
+
+    def zernio_status(self):
+        cfg = self.zernio
+        return {"configured": bool(cfg.get("api_key")), "auto_post": bool(cfg.get("auto_post")),
+                "schedule_minutes": int(cfg.get("schedule_minutes", 0) or 0),
+                "visibility": cfg.get("visibility", "public"),
+                "instagram_id": cfg.get("instagram_id", ""), "youtube_id": cfg.get("youtube_id", ""),
+                "api_key_set": bool(cfg.get("api_key"))}
+
+    def zernio_save(self, body):
+        cfg = dict(self.zernio)
+        if str(body.get("api_key", "")).strip(): cfg["api_key"] = str(body["api_key"]).strip()
+        cfg["instagram_id"] = str(body.get("instagram_id", cfg.get("instagram_id", ""))).strip()
+        cfg["youtube_id"] = str(body.get("youtube_id", cfg.get("youtube_id", ""))).strip()
+        cfg["auto_post"] = bool(body.get("auto_post", False))
+        try: cfg["schedule_minutes"] = max(0, int(body.get("schedule_minutes", 0)))
+        except (TypeError, ValueError): cfg["schedule_minutes"] = 0
+        cfg["visibility"] = str(body.get("visibility", "public")) if body.get("visibility") in ("public", "private", "unlisted") else "public"
+        if not cfg.get("api_key"): raise ValueError("Enter a Zernio API key first.")
+        save_zernio_settings(cfg); self.zernio = cfg; self.publisher.configure(dict(cfg, enabled=cfg["auto_post"]))
+        return self.zernio_status()
+
+    def zernio_accounts(self):
+        self.publisher.configure(dict(self.zernio, enabled=False))
+        return self.publisher.accounts()
+
+    def publish_clips(self, names):
+        cfg = self.zernio
+        if not cfg.get("api_key"): raise ValueError("Save and verify a Zernio API key first.")
+        if not (cfg.get("instagram_id") or cfg.get("youtube_id")): raise ValueError("Select at least one connected channel.")
+        valid = [n for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
+        if not valid: raise ValueError("No valid clips selected.")
+        for name in valid:
+            publisher = ZernioPublisher(self.push, dict(cfg, enabled=False))
+            threading.Thread(target=publisher.publish_one, args=(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), cfg.get("schedule_minutes", 0)), daemon=True).start()
+        self.push(f"Zernio: queued {len(valid)} clip(s) for publishing.")
+        return {"queued": len(valid)}
 
 def list_clips(limit=60):
     items = []
@@ -894,7 +944,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             path = u.path
             if path == "/":
                 boot = {"settings": CORE.settings, "colors": {k: "#" + v[4:6] + v[2:4] + v[0:2] for k, v in CAPTION_COLORS.items()},
-                        "positions": CAPTION_POS, "models": MODELS, "layouts": LAYOUTS}
+                        "positions": CAPTION_POS, "models": MODELS, "layouts": LAYOUTS, "zernio": CORE.zernio_status()}
                 html = HTML.replace("__BOOT__", json.dumps(boot).replace("</", "<\\/")).replace("__TOKEN__", TOKEN)
                 return self._send(200, html, "text/html; charset=utf-8")
             if path == "/api/state":
@@ -935,6 +985,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     text = str(body.get("text", ""))[:100_000]
                     CUSTOM_FILE.write_text(text, encoding="utf-8")
                     return self._send(200, {"ok": True, "entries": len(parse_custom(text))})
+                if path == "/api/zernio":
+                    return self._send(200, CORE.zernio_save(body))
+                if path == "/api/zernio/accounts":
+                    return self._send(200, {"accounts": CORE.zernio_accounts()})
+                if path == "/api/zernio/publish":
+                    names = body.get("names", [])
+                    if not isinstance(names, list): names = []
+                    return self._send(200, CORE.publish_clips([str(n) for n in names]))
                 if path in ("/api/delete", "/api/reveal"):
                     name = str(body.get("name", ""))
                     if not CLIP_RE.match(name) or not (OUT / name).is_file():
@@ -1241,6 +1299,22 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <select id="model" class="text"></select>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
   </div>
+
+  <div class="card">
+    <div class="ch"><span class="num">5</span><h3>Zernio posting</h3></div>
+    <p class="hint">Save your Zernio API key locally, verify your connected channels, then publish selected clips or all clips.</p>
+    <input id="z-api" class="text" type="password" placeholder="Zernio API key (stored locally)">
+    <div class="two">
+      <div><div class="row"><label>Instagram</label></div><select id="z-ig" class="text"><option value="">Not selected</option></select></div>
+      <div><div class="row"><label>YouTube</label></div><select id="z-yt" class="text"><option value="">Not selected</option></select></div>
+    </div>
+    <div class="two">
+      <div><div class="row"><label>Schedule delay (minutes)</label></div><input id="z-delay" class="text" type="number" min="0" value="0"></div>
+      <div><div class="row"><label>YouTube visibility</label></div><select id="z-vis" class="text"><option>public</option><option>unlisted</option><option>private</option></select></div>
+    </div>
+    <label class="toggle"><span>Auto-post new clips</span><input type="checkbox" id="z-auto"><i class="sl"></i></label>
+    <div class="prow" style="margin-top:12px"><button class="btn ghost" id="z-check">Save &amp; identify channels</button><span class="msg" id="z-msg">Not connected</span></div>
+  </div>
  </div>
  <div class="startbar" id="startbar">
    <button class="go" id="btn-start"><span data-ico="bolt" data-s="20"></span><span id="go-label">Start clipping</span></button>
@@ -1267,6 +1341,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <button class="tab" data-t="words">Hype words</button>
   </div>
   <div class="panel" id="p-clips">
+    <div class="prow" style="justify-content:flex-end;margin-bottom:10px"><button class="btn ghost" id="btn-publish-selected">Publish selected</button><button class="btn danger" id="btn-publish-all">Publish all clips</button></div>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty"><div class="big"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h4>No clips yet</h4><p>Paste a Twitch or YouTube live link (or choose a VOD file) and hit Start. Finished 9:16 clips with captions appear here, ready to post.</p></div>
   </div>
@@ -1289,6 +1364,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 const BOOT=__BOOT__;
 const TOKEN="__TOKEN__";
 const S=Object.assign({},BOOT.settings);
+const Z=Object.assign({},BOOT.zernio||{});
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
 const ICON={
  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
@@ -1308,6 +1384,18 @@ async function api(path,body){
   let j={};try{j=await r.json()}catch(e){}
   if(!r.ok)throw new Error(j.error||("Request failed ("+r.status+")"));
   return j;
+}
+function setSelectOptions(el,items,chosen){
+  el.replaceChildren(h("option",{value:""},"Not selected"));
+  items.forEach(a=>el.append(h("option",{value:a.id},a.name+" ("+a.platform+")")));
+  if(chosen)el.value=chosen;
+}
+async function loadZernioAccounts(){
+  const r=await api("/api/zernio/accounts");
+  setSelectOptions($("#z-ig"),r.accounts.filter(a=>a.platform==="instagram"),Z.instagram_id);
+  setSelectOptions($("#z-yt"),r.accounts.filter(a=>a.platform==="youtube"),Z.youtube_id);
+  $("#z-msg").textContent=r.accounts.length?"Connected channels identified":"No Instagram/YouTube channels found";
+  $("#z-msg").classList.add("show");
 }
 function toast(msg,kind){const t=h("div",{class:"toast "+(kind||"")},msg);$("#toasts").append(t);setTimeout(()=>{t.classList.add("out");setTimeout(()=>t.remove(),300)},3200)}
 function confirmBox(title,msg,ok){return new Promise(res=>{
@@ -1437,6 +1525,16 @@ $("#btn-words-save").onclick=saveWords;
 $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveWords()}});
 
 /* ---------- actions ---------- */
+$("#z-delay").value=Z.schedule_minutes||0;$("#z-vis").value=Z.visibility||"public";$("#z-auto").checked=!!Z.auto_post;
+$("#z-check").onclick=async()=>{
+  const b=$("#z-check");b.disabled=true;
+  try{
+    const r=await api("/api/zernio",{api_key:$("#z-api").value,instagram_id:$("#z-ig").value,youtube_id:$("#z-yt").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
+    Object.assign(Z,r);$("#z-api").value="";await loadZernioAccounts();toast("Zernio connected","ok");
+  }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
+  b.disabled=false;
+};
+if(Z.api_key_set)loadZernioAccounts().catch(e=>{$("#z-msg").textContent=e.message});
 $("#btn-folder").onclick=()=>api("/api/open_folder").then(()=>toast("Clips folder opened","ok")).catch(e=>toast(e.message,"bad"));
 $("#btn-start").onclick=async()=>{
   if(!S.target.trim()){toast(S.mode==="live"?"Paste a stream link first":"Choose a video file first","bad");$("#target").focus();return}
@@ -1455,7 +1553,7 @@ $("#btn-quit").onclick=async()=>{
 
 /* ---------- state polling ---------- */
 const PHASES={idle:"Ready",waiting:"Waiting for the stream",recording:"Recording live",transcribing:"Listening for hype",rendering:"Rendering clips",stopping:"Wrapping up",working:"Working"};
-let lastLog=0,fails=0,busy=false,order="",cards=new Map();
+let lastLog=0,fails=0,busy=false,order="",cards=new Map(),selectedClips=new Set();
 const fmtT=s=>{const m=Math.floor(s/60),h2=Math.floor(m/60);return h2?h2+":"+String(m%60).padStart(2,"0")+":"+String(s%60).padStart(2,"0"):m+":"+String(s%60).padStart(2,"0")};
 function ago(t){const s=Math.max(0,Date.now()/1000-t);if(s<60)return"just now";if(s<3600)return Math.floor(s/60)+" min ago";if(s<86400)return Math.floor(s/3600)+" h ago";return Math.floor(s/86400)+" d ago"}
 function addLogs(list){
@@ -1480,13 +1578,16 @@ function clipCard(c){
   const v=h("video",{src:"/clips/"+encodeURIComponent(c.name)+"#t=0.1",loop:true,playsinline:true,preload:"metadata"});v.muted=true;
   const first=(c.caption||"").split("\n")[0]||c.name;
   const when=h("span",{class:"when","data-t":c.mtime},ago(c.mtime));
+  const pick=h("input",{type:"checkbox",title:"Select for publishing"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);
   const copy=()=>{navigator.clipboard.writeText(c.caption||"").then(()=>toast("Caption copied","ok"),()=>toast("Couldn't copy","bad"))};
+  const post=()=>publishNames([c.name]);
   const del=async()=>{if(await confirmBox("Delete this clip?","This permanently removes the video and its caption file.","Delete")){try{await api("/api/delete",{name:c.name});toast("Clip deleted");poll(true)}catch(e){toast(e.message,"bad")}}};
   return h("div",{class:"clip","data-name":c.name,onmouseenter:()=>{v.play().catch(()=>{})},onmouseleave:()=>v.pause()},
     h("div",{class:"thumb",onclick:()=>openClip(c)},v,h("div",{class:"pb"},ico("play",15))),
     h("div",{class:"cm"},h("div",{class:"cc",title:first},first),
-      h("div",{class:"cr"},h("span",{},when," · "+c.size_mb+" MB"),
+      h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB"),
         h("span",{class:"acts"},
+          h("button",{class:"ib",title:"Publish this clip",onclick:post},"Post"),
           h("button",{class:"ib",title:"Copy caption + hashtags",onclick:copy},ico("copy",15)),
           h("a",{class:"ib",title:"Download",href:"/clips/"+encodeURIComponent(c.name),download:c.name},ico("download",15)),
           h("button",{class:"ib",title:"Show in folder",onclick:()=>api("/api/reveal",{name:c.name}).catch(e=>toast(e.message,"bad"))},ico("folder",15)),
@@ -1505,6 +1606,12 @@ function renderClips(list){
   }
   $$(".when").forEach(w=>w.textContent=ago(+w.dataset.t));
 }
+async function publishNames(names){
+  try{const r=await api("/api/zernio/publish",{names});toast("Queued "+r.queued+" clip(s) for Zernio","ok");selectedClips.clear();$$('.pick').forEach(x=>x.checked=false);}
+  catch(e){toast(e.message,"bad")}
+}
+$("#btn-publish-selected").onclick=()=>publishNames([...selectedClips]);
+$("#btn-publish-all").onclick=async()=>{try{const s=await (await fetch("/api/state?since=0",{cache:"no-store"})).json();publishNames(s.clips.map(c=>c.name))}catch(e){toast(e.message,"bad")}};
 function openClip(c){
   const v=h("video",{src:"/clips/"+encodeURIComponent(c.name),controls:true,autoplay:true,loop:true,playsinline:true});
   const close=()=>{v.pause();m.remove();document.removeEventListener("keydown",esc)};

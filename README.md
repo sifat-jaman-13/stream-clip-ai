@@ -13,10 +13,16 @@
 
 ### Optional Zernio posting
 
-AutoClip can optionally upload each finished MP4 to Zernio and publish it to
-connected Instagram and/or YouTube accounts. It is disabled by default.
+AutoClip includes a Zernio panel for identifying connected Instagram and
+YouTube channels, publishing selected clips, publishing all clips, and
+optionally auto-posting each newly finished MP4. It is disabled by default.
 
-Set these environment variables locally before starting AutoClip:
+Open the app, enter your Zernio API key in the **Zernio posting** section, and
+click **Save & identify channels**. The key is stored only in the local,
+Git-ignored `zernio.json` file. Each clip's `.txt` file supplies its caption;
+the first caption line becomes the YouTube title.
+
+For headless/background use, set these environment variables locally before starting AutoClip:
 
 ```powershell
 $env:ZERNIO_ENABLED="true"

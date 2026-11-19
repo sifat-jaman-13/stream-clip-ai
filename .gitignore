@@ -24,6 +24,7 @@ out/
 rec/
 settings.json
 custom_words.txt
+zernio.json
 
 # IDE
 .vscode/

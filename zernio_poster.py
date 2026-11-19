@@ -22,17 +22,21 @@ def _truthy(value):
 class ZernioPublisher:
     """Uploads and publishes clips in background threads when explicitly enabled."""
 
-    def __init__(self, log):
+    def __init__(self, log, config=None):
         self.log = log
-        self.api_key = os.environ.get("ZERNIO_API_KEY", "").strip()
-        self.instagram_id = os.environ.get("ZERNIO_INSTAGRAM_ACCOUNT_ID", "").strip()
-        self.youtube_id = os.environ.get("ZERNIO_YOUTUBE_ACCOUNT_ID", "").strip()
-        self.enabled = _truthy(os.environ.get("ZERNIO_ENABLED"))
+        self.configure(config or {})
+
+    def configure(self, config):
+        config = config if isinstance(config, dict) else {}
+        self.api_key = str(config.get("api_key", os.environ.get("ZERNIO_API_KEY", ""))).strip()
+        self.instagram_id = str(config.get("instagram_id", os.environ.get("ZERNIO_INSTAGRAM_ACCOUNT_ID", ""))).strip()
+        self.youtube_id = str(config.get("youtube_id", os.environ.get("ZERNIO_YOUTUBE_ACCOUNT_ID", ""))).strip()
+        self.enabled = bool(config.get("enabled", _truthy(os.environ.get("ZERNIO_ENABLED"))))
         try:
-            self.schedule_minutes = max(0, int(os.environ.get("ZERNIO_SCHEDULE_MINUTES", "0")))
-        except ValueError:
+            self.schedule_minutes = max(0, int(config.get("schedule_minutes", os.environ.get("ZERNIO_SCHEDULE_MINUTES", "0"))))
+        except (TypeError, ValueError):
             self.schedule_minutes = 0
-        self.visibility = os.environ.get("ZERNIO_YOUTUBE_VISIBILITY", "public").strip().lower()
+        self.visibility = str(config.get("visibility", os.environ.get("ZERNIO_YOUTUBE_VISIBILITY", "public"))).strip().lower()
         if self.visibility not in {"public", "private", "unlisted"}:
             self.visibility = "public"
 
@@ -70,6 +74,25 @@ class ZernioPublisher:
         except (ValueError, UnicodeDecodeError) as e:
             raise RuntimeError("Zernio returned invalid JSON.") from e
 
+    def accounts(self):
+        """Return connected Instagram/YouTube accounts visible to this API key."""
+        result = self._json_request("GET", f"{API_ROOT}/accounts?status=connected")
+        data = result.get("data", result) if isinstance(result, dict) else result
+        if isinstance(data, dict):
+            data = data.get("accounts", data.get("items", data.get("data", [])))
+        if not isinstance(data, list):
+            raise RuntimeError("Zernio returned an unexpected accounts response.")
+        out = []
+        for account in data:
+            if not isinstance(account, dict) or account.get("platform") not in ("instagram", "youtube"):
+                continue
+            aid = account.get("accountId") or account.get("id") or account.get("_id")
+            if aid:
+                out.append({"id": str(aid), "platform": account.get("platform"),
+                            "name": account.get("displayName") or account.get("username") or str(aid),
+                            "username": account.get("username", "")})
+        return out
+
     def _upload(self, path):
         size = path.stat().st_size
         presigned = self._json_request("POST", f"{API_ROOT}/media/presign", {
@@ -92,6 +115,17 @@ class ZernioPublisher:
         except urllib.error.URLError as e:
             raise RuntimeError(f"Zernio media upload failed: {e.reason}") from e
         return public_url
+
+    def publish_one(self, path, instagram_id=None, youtube_id=None, schedule_minutes=None):
+        old = (self.instagram_id, self.youtube_id, self.schedule_minutes)
+        self.instagram_id = (instagram_id if instagram_id is not None else self.instagram_id).strip()
+        self.youtube_id = (youtube_id if youtube_id is not None else self.youtube_id).strip()
+        if schedule_minutes is not None:
+            self.schedule_minutes = max(0, int(schedule_minutes))
+        try:
+            self._publish(path)
+        finally:
+            self.instagram_id, self.youtube_id, self.schedule_minutes = old
 
     def _publish(self, path):
         path = pathlib.Path(path)

@@ -56,6 +56,7 @@ REC = HERE / "rec"; REC.mkdir(exist_ok=True)
 SETTINGS_FILE = HERE / "settings.json"
 CUSTOM_FILE = HERE / "custom_words.txt"
 ZERNIO_FILE = HERE / "zernio.json"
+BRAND_LOGO = HERE / "assets" / "brand-logo.png"
 
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
 def run(cmd, **kw):   return subprocess.run(cmd, creationflags=CF, **kw)
@@ -954,6 +955,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, CORE.state(since))
             if path == "/api/words":
                 return self._send(200, {"text": read_custom_text(), "words": sorted(HYPE_WORDS), "phrases": sorted(HYPE_PHRASES)})
+            if path == "/assets/brand-logo.png" and BRAND_LOGO.is_file():
+                return self._send(200, BRAND_LOGO.read_bytes(), "image/png")
             if path.startswith("/clips/"):
                 return self._serve_clip(urllib.parse.unquote(path[7:]))
             self._send(404, {"error": "not found"})
@@ -1074,6 +1077,7 @@ HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="/assets/brand-logo.png">
 <title>AutoClip</title>
 <style>
 :root{--bg:#07080d;--card:rgba(255,255,255,.035);--card2:rgba(255,255,255,.07);--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);
@@ -1088,8 +1092,8 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
 .app{position:relative;height:100%;display:grid;grid-template-rows:auto 1fr}
 header{display:flex;align-items:center;gap:14px;padding:16px 22px}
 .logo{display:flex;align-items:center;gap:11px;font-weight:700;font-size:18px;letter-spacing:-.2px}
-.mark{width:34px;height:34px;border-radius:11px;background:var(--grad);display:grid;place-items:center;box-shadow:0 6px 22px rgba(139,92,246,.45)}
-.mark svg{color:#fff}
+.mark{width:34px;height:34px;border-radius:11px;background:#0b0000;display:grid;place-items:center;overflow:hidden;box-shadow:0 6px 22px rgba(139,92,246,.45);border:1px solid rgba(255,255,255,.12)}
+.mark img{width:100%;height:100%;object-fit:cover;object-position:center 38%;transform:scale(1.5)}
 .tag{color:var(--dim);font-weight:400;font-size:13px;margin-left:2px}
 .sp{flex:1}
 .main{position:relative;display:grid;grid-template-columns:430px minmax(0,1fr);gap:18px;padding:0 22px 22px;min-height:0}
@@ -1240,7 +1244,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 <body>
 <div class="app">
 <header>
-  <div class="logo"><div class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div>AutoClip<span class="tag">live stream &rarr; viral Shorts</span></div>
+  <div class="logo"><div class="mark"><img src="/assets/brand-logo.png" alt="Scarzero Plays"></div>AutoClip<span class="tag">Scarzero Plays &middot; live stream &rarr; viral Shorts</span></div>
   <div class="sp"></div>
   <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
   <button class="btn ghost" id="btn-quit" title="Stop everything and close AutoClip"><span data-ico="power"></span>Quit</button>

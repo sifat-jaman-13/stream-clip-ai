@@ -1433,7 +1433,9 @@ select.text option{background:#14161f}
 .crect{position:absolute;border:2px solid #ff40ff;background:rgba(255,64,255,.12);cursor:move}
 .crect span{position:absolute;left:4px;top:3px;font-size:10px;font-weight:700;letter-spacing:.8px;color:#fff;text-shadow:0 1px 3px #000}
 .crect.game{border:2px dashed #22d3ee;background:rgba(34,211,238,.07);cursor:default;pointer-events:none}
-.crect .hdl{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;background:#fff;border:2px solid #ff40ff;border-radius:3px;cursor:nwse-resize}
+.crect .hdl{position:absolute;width:14px;height:14px;background:#fff;border:2px solid #ff40ff;border-radius:3px}
+.crect .hdl.nw{left:-7px;top:-7px;cursor:nwse-resize}.crect .hdl.ne{right:-7px;top:-7px;cursor:nesw-resize}
+.crect .hdl.sw{left:-7px;bottom:-7px;cursor:nesw-resize}.crect .hdl.se{right:-7px;bottom:-7px;cursor:nwse-resize}
 .erow{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}
 .erow .grow{flex:1;min-width:220px}
 /* hero */
@@ -1844,8 +1846,8 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function openCamEditor(){
   const box={x:+S.cam_x,y:+S.cam_y,w:+S.cam_w,h:+S.cam_h};let gx=+S.game_x,ar=16/9;
   const img=h("img",{class:"cimg",draggable:false});
-  const hdl=h("i",{class:"hdl"});
-  const rc=h("div",{class:"crect"},h("span",{},"FACECAM"),hdl);
+  const handles=["nw","ne","sw","se"].map(pos=>h("i",{class:"hdl "+pos}));
+  const rc=h("div",{class:"crect"},h("span",{},"FACECAM"),handles);
   const rg=h("div",{class:"crect game"},h("span",{},"GAME"));
   const stage=h("div",{class:"cstage"},img,rg,rc);
   const hh=w=>w*ar/(1080/768);                       /* keeps the box the same shape as the top 40% area */
@@ -1855,16 +1857,24 @@ function openCamEditor(){
   }
   function fit(){box.h=hh(box.w);if(box.y+box.h>100){box.h=100-box.y;box.w=box.h*(1080/768)/ar}if(box.x+box.w>100){box.w=100-box.x;box.h=hh(box.w)}}
   fit();
-  const drag=(el,mode)=>el.addEventListener("pointerdown",e=>{
+  const drag=(el,mode,corner)=>el.addEventListener("pointerdown",e=>{
     e.preventDefault();e.stopPropagation();el.setPointerCapture(e.pointerId);
     const r=stage.getBoundingClientRect(),s0={x:box.x,y:box.y,w:box.w,px:e.clientX,py:e.clientY};
     const mv=ev=>{const dx=(ev.clientX-s0.px)/r.width*100,dy=(ev.clientY-s0.py)/r.height*100;
       if(mode==="move"){box.x=clamp(s0.x+dx,0,100-box.w);box.y=clamp(s0.y+dy,0,100-box.h)}
-      else{let w=clamp(s0.w+dx,8,100-box.x);if(hh(w)>100-box.y)w=(100-box.y)*(1080/768)/ar;box.w=w;box.h=hh(w)}
+      else{
+        const left=corner.includes("w"),top=corner.includes("n"),right=s0.x+s0.w,bottom=s0.y+s0.h;
+        let w=clamp(s0.w+(left?-dx:dx),8,100),h=hh(w),x=left?right-w:s0.x,y=top?bottom-h:s0.y;
+        if(x<0){x=0;w=right;h=hh(w);y=top?bottom-h:y}
+        if(x+w>100){x=left?0:s0.x;w=100-x;h=hh(w);y=top?bottom-h:y}
+        if(y<0){y=0;h=bottom;w=h*(1080/768)/ar;x=left?right-w:x}
+        if(y+h>100){y=top?0:s0.y;h=100-y;w=h*(1080/768)/ar;x=left?right-w:x}
+        box.x=clamp(x,0,100-w);box.y=clamp(y,0,100-h);box.w=w;box.h=h
+      }
       paint()};
     const up=()=>{el.removeEventListener("pointermove",mv);el.removeEventListener("pointerup",up)};
     el.addEventListener("pointermove",mv);el.addEventListener("pointerup",up)});
-  drag(rc,"move");drag(hdl,"resize");
+  drag(rc,"move");handles.forEach(hdl=>drag(hdl,"resize",hdl.classList[1]));
   img.addEventListener("load",()=>{if(img.naturalWidth){ar=img.naturalWidth/img.naturalHeight;stage.style.aspectRatio=img.naturalWidth+"/"+img.naturalHeight;fit();paint()}});
   const gs=h("input",{type:"range",min:0,max:100,step:1,value:Math.round(gx)});paintRange(gs);
   gs.addEventListener("input",()=>{gx=+gs.value;paintRange(gs);paint()});

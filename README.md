@@ -11,6 +11,28 @@
 
 **Keywords:** `twitch auto clipper` · `youtube stream clipper` · `ai clip maker` · `stream to shorts` · `auto highlight detection` · `tiktok clip generator` · `reels maker` · `whisper captions`
 
+### Optional Zernio posting
+
+AutoClip can optionally upload each finished MP4 to Zernio and publish it to
+connected Instagram and/or YouTube accounts. It is disabled by default.
+
+Set these environment variables locally before starting AutoClip:
+
+```powershell
+$env:ZERNIO_ENABLED="true"
+$env:ZERNIO_API_KEY="your-zernio-api-key"
+$env:ZERNIO_INSTAGRAM_ACCOUNT_ID="your-instagram-account-id"
+$env:ZERNIO_YOUTUBE_ACCOUNT_ID="your-youtube-account-id"
+$env:ZERNIO_SCHEDULE_MINUTES="0"       # 0 = publish now; e.g. 120 = schedule 2 hours later
+$env:ZERNIO_YOUTUBE_VISIBILITY="public" # public, private, or unlisted
+python autoclip.py
+```
+
+You may set only one platform account ID. Keep the API key in your local
+environment; never put it in `settings.json`, source code, or Git. Instagram
+must be a Business or Creator account. Zernio receives the video and caption
+after each clip finishes rendering.
+
 ---
 
 ## ✨ Features

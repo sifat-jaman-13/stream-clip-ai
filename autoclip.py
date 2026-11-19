@@ -21,6 +21,7 @@ Your own hype words: "Hype words" tab in the app (stored in custom_words.txt, re
 import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform
 import http.server, urllib.parse, webbrowser
 import numpy as np
+from zernio_poster import ZernioPublisher
 
 # ------------------------------------------------------------------ setup
 def _add_cuda_dlls():
@@ -651,6 +652,7 @@ QUIT = threading.Event()
 class Core:
     def __init__(self):
         self.lock = threading.RLock()
+        self.publisher = ZernioPublisher(self.push)
         self.engine = None
         self.running = False
         self.logs, self.log_id = [], 0
@@ -673,6 +675,7 @@ class Core:
         elif kind == "clip":
             with self.lock: self.session["clips"] += 1
             self.push("Clip ready: " + payload)
+            self.publisher.submit(OUT / payload)
         elif kind == "chunk":
             with self.lock: self.session["chunks"] += 1
         elif kind == "done":

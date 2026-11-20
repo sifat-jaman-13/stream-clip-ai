@@ -17,14 +17,17 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy autoclip script
-COPY autoclip.py .
+# Copy application modules used by optional publishing integrations.
+COPY autoclip.py ai_highlights.py zernio_poster.py selfhost_publishers.py ./
 
-RUN mkdir -p /app/out /app/rec
+RUN mkdir -p /data/out /data/rec
 
 EXPOSE 8080
 
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    STREAMSNIP_DATA_DIR=/data \
+    STREAMSNIP_BIND_HOST=0.0.0.0 \
+    STREAMSNIP_PORT=8080
 
 ENTRYPOINT ["python", "autoclip.py"]
 CMD []

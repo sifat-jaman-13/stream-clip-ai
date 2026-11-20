@@ -16,22 +16,7 @@ if (Test-Path build) { Remove-Item build -Recurse -Force }
 if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 New-Item -ItemType Directory -Force -Path build | Out-Null
 
-& $py -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --specpath (Join-Path $PSScriptRoot "build") `
-    --onedir `
-    --console `
-    --name AutoClip `
-    --icon (Join-Path $PSScriptRoot "assets\app-icon.png") `
-    --add-data "$($PSScriptRoot)\assets;assets" `
-    --collect-all faster_whisper `
-    --collect-all ctranslate2 `
-    --collect-all nvidia.cublas `
-    --collect-submodules streamlink `
-    --collect-submodules streamlink_cli `
-    --collect-submodules zernio_poster `
-    (Join-Path $PSScriptRoot "autoclip.py")
+& $py -m PyInstaller --noconfirm --clean --distpath (Join-Path $PSScriptRoot "dist") --workpath (Join-Path $PSScriptRoot "build\work") (Join-Path $PSScriptRoot "AutoClip.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller could not build the AutoClip application." }
 
 & $py -m PyInstaller --noconfirm --clean --specpath (Join-Path $PSScriptRoot "build") --onefile --console --name StreamSnipAI --icon (Join-Path $PSScriptRoot "assets\app-icon.png") (Join-Path $PSScriptRoot "launcher.py")
@@ -63,6 +48,7 @@ if (-not $iscc) { $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).S
 if ($iscc) {
     & $iscc "installer\AutoClip.iss"
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup could not create the StreamSnip AI installer." }
+    if (-not (Test-Path "dist\installer\StreamSnipAI-Setup.exe")) { throw "The installer build finished without producing StreamSnipAI-Setup.exe." }
     Write-Host "Installer created in dist\installer" -ForegroundColor Green
 } else {
     Write-Warning "Inno Setup is not installed; no installer EXE was created."

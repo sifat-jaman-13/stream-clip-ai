@@ -40,6 +40,7 @@ while recording, rendering, or publishing. Closing that terminal or choosing Qui
 - Supports Facecam + game, blurred background, fill crop, and manually selected source crop.
 - Provides a four-corner draggable facecam selector with reset-to-center behavior.
 - Transcribes with distil-large-v3, large-v3-turbo, medium, large-v3, small, or base.
+- Finds viral moments with built-in/custom hook words, local Ollama models, Gemini, or Hugging Face hosted models; Gemini quota exhaustion automatically tries Ollama.
 - Renders Karaoke/Classic subtitles with Classic, Hormozi, Neon, MrBeast, Minimal, and Fire presets.
 - Adds streamer credit from the source URL, optional on-video credit, and a configurable CTA.
 - Shows render/transcription and Zernio publishing progress bars, selection, bulk delete, and activity history.
@@ -82,9 +83,9 @@ Plan for approximately **4–6 GB** for the complete first-time installation. `m
 can use additional model storage. FFmpeg is not downloaded by the installer; install FFmpeg separately
 and place it on PATH. CPU mode remains available when CUDA is unavailable.
 
-Docker files are included. The current app binds its UI to a local ephemeral port and prints that port
-at startup; use Docker as a packaging/headless starting point, or adapt the bind/port setup when you
-need browser access from outside the container.
+Docker Compose exposes the UI at [http://localhost:8080](http://localhost:8080). Persistent settings,
+custom words, clips, and recordings are stored under `./data` on the host; place a source video at
+`./data/rec` to process it from the container.
 
 ## Manual installation
 
@@ -215,6 +216,10 @@ Settings includes:
 - App version check with a link to the latest release
 - FFmpeg, faster-whisper, Streamlink, CTranslate2, NumPy, and speech-model checks
 - Component update and selected speech-model download controls
+
+## AI highlight providers
+
+The default hook-word detector runs locally and supports the built-in list plus custom phrases. Ollama analysis also runs locally: install Ollama, download a model with Ollama, then use **Detect models** in AI settings. Gemini and Hugging Face hosted analysis send the timestamped transcript to that provider; enter the matching API key or access token. Provider quota/rate-limit errors appear in the activity log. When Gemini reports quota exhaustion, StreamSnip AI automatically checks Ollama and uses an installed local model when available. Whisper speech models are free open models downloaded from Hugging Face and run locally. Hugging Face model weights are open, though hosted inference providers may charge for usage.
 
 The app update control opens the release page; it does not replace files during a running recording.
 

@@ -74,6 +74,12 @@ def _caption(path):
     title = (lines[0] if lines else pathlib.Path(path).stem).replace("#", "").strip()[:100]
     return caption[:2200] or title or "StreamSnip AI clip", title or "StreamSnip AI clip"
 
+def _auto_publish(publisher, path):
+    try:
+        publisher.publish_one(path)
+    except Exception as exc:
+        publisher.log(f"{publisher.name} auto-post error for {pathlib.Path(path).name}: {exc}")
+
 
 class PostizPublisher:
     name = "Postiz"
@@ -107,7 +113,7 @@ class PostizPublisher:
     def submit(self, video_path):
         if not (self.enabled and self.key and (self.instagram_id or self.youtube_id)):
             return
-        threading.Thread(target=self.publish_one, args=(video_path,), daemon=True, name="postiz-publisher").start()
+        threading.Thread(target=_auto_publish, args=(self, video_path), daemon=True, name="postiz-publisher").start()
 
     def _upload(self, path):
         result = self.http.multipart(_url(self.base, "/public/v1/upload"), "file", path)
@@ -175,7 +181,7 @@ class MixpostPublisher:
     def submit(self, video_path):
         if not (self.enabled and self.key and self.base and self.workspace and (self.instagram_id or self.youtube_id)):
             return
-        threading.Thread(target=self.publish_one, args=(video_path,), daemon=True, name="mixpost-publisher").start()
+        threading.Thread(target=_auto_publish, args=(self, video_path), daemon=True, name="mixpost-publisher").start()
 
     def _upload(self, path):
         result = self.http.multipart(self._path("media"), "file", path)

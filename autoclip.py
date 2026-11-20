@@ -2,7 +2,8 @@ r"""
 AutoClip - free live-stream / VOD auto clipper.
 Twitch / YouTube live (or a video file)  ->  ready-to-post 9:16 clips with MrBeast-style captions.
 
-Everything runs locally and is 100% free: streamlink + ffmpeg + faster-whisper on your GPU.
+The default workflow runs locally and free: streamlink + ffmpeg + faster-whisper on your GPU.
+Optional Gemini and Hugging Face hosted AI providers analyze transcripts over the internet.
 
 Setup (Windows 11, PowerShell):
     winget install Gyan.FFmpeg
@@ -24,7 +25,8 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-APP_VERSION = "1.1.5"
+from ai_highlights import AIProviderError, ollama_models, select_moments
+APP_VERSION = "1.1.6"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -80,7 +82,9 @@ _patch_pyav()
 
 HERE = pathlib.Path(__file__).resolve().parent
 _in_site_packages = any(part.lower() in {"site-packages", "dist-packages"} for part in HERE.parts)
-_data_root = (pathlib.Path(os.environ.get("LOCALAPPDATA") or pathlib.Path.home()) / "StreamSnip AI"
+_data_override = os.environ.get("STREAMSNIP_DATA_DIR")
+_data_root = (pathlib.Path(_data_override).expanduser() if _data_override else
+              pathlib.Path(os.environ.get("LOCALAPPDATA") or pathlib.Path.home()) / "StreamSnip AI"
               if _in_site_packages else HERE)
 OUT = _data_root / "out"
 REC = _data_root / "rec"
@@ -127,10 +131,11 @@ def check_updates():
         add(package, current, latest)
     model = str(load_settings().get("model", "distil-large-v3"))
     cache_root = pathlib.Path(os.environ.get("HF_HOME", pathlib.Path.home() / ".cache" / "huggingface")) / "hub"
-    repo_names = {"distil-large-v3": "faster-distil-whisper-large-v3",
-                  "large-v3-turbo": "faster-whisper-large-v3-turbo"}
-    repo_name = repo_names.get(model, "faster-whisper-" + model)
-    cached = (cache_root / ("models--Systran--" + repo_name)).is_dir() if cache_root.is_dir() else False
+    repo_ids = {"distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+                "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo"}
+    repo_id = repo_ids.get(model, "Systran/faster-whisper-" + model)
+    repo_cache = "models--" + repo_id.replace("/", "--")
+    cached = (cache_root / repo_cache).is_dir() if cache_root.is_dir() else False
     add("Speech model: " + model, "Cached" if cached else "Not downloaded", "",
         "Selected model is " + ("available locally." if cached else "downloaded on first use."))
     return {"checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "items": result}
@@ -144,7 +149,9 @@ def check_app_update():
     with urllib.request.urlopen(req, timeout=8) as response:
         data = json.loads(response.read())
     latest = str(data.get("tag_name", "")).lstrip("v") or APP_VERSION
-    return {"current": APP_VERSION, "latest": latest, "update": latest != APP_VERSION,
+    current_key = tuple(int(part) for part in re.findall(r"\d+", APP_VERSION))
+    latest_key = tuple(int(part) for part in re.findall(r"\d+", latest))
+    return {"current": APP_VERSION, "latest": latest, "update": latest_key > current_key,
             "url": data.get("html_url") or APP_RELEASES_URL,
             "name": data.get("name") or ("AutoClip v" + latest)}
 
@@ -175,6 +182,7 @@ SETTINGS_FILE = _data_root / "settings.json"
 CUSTOM_FILE = _data_root / "custom_words.txt"
 ZERNIO_FILE = _data_root / "zernio.json"
 PUBLISHING_FILE = _data_root / "publishing.json"
+AI_SETTINGS_FILE = _data_root / "ai_settings.json"
 BRAND_LOGO = HERE / "assets" / "brand-logo.png"
 INSTANCE_LOCK_FILE = _data_root / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
@@ -197,7 +205,7 @@ def acquire_instance_lock():
             fcntl.flock(h.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except (OSError, ImportError):
         h.close()
-        raise RuntimeError("AutoClip is already running from this folder. Press Ctrl+C in PowerShell to stop the existing process first.")
+        raise RuntimeError("StreamSnip AI is already running from this data folder. Quit the other app window or stop its terminal process first.")
     _INSTANCE_LOCK_HANDLE = h
 
 DEFAULTS = {
@@ -358,6 +366,43 @@ def load_publishing_settings():
 
 def save_publishing_settings(cfg):
     PUBLISHING_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+def load_ai_settings():
+    defaults = {"provider": "hooks", "ollama_url": "http://127.0.0.1:11434", "ollama_model": "",
+                "gemini_model": "gemini-3.8-flash", "huggingface_model": "Qwen/Qwen2.5-7B-Instruct-1M",
+                "gemini_api_key": "", "huggingface_token": ""}
+    try:
+        data = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict): defaults.update({k: str(v) for k, v in data.items() if k in defaults})
+    except Exception:
+        pass
+    if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
+        defaults["provider"] = "hooks"
+    return defaults
+
+def public_ai_settings():
+    cfg = load_ai_settings()
+    return {"provider": cfg["provider"], "ollama_url": cfg["ollama_url"],
+            "ollama_model": cfg["ollama_model"], "gemini_model": cfg["gemini_model"],
+            "huggingface_model": cfg["huggingface_model"],
+            "gemini_key_set": bool(cfg["gemini_api_key"]),
+            "huggingface_token_set": bool(cfg["huggingface_token"])}
+
+def save_ai_settings(body):
+    cfg = load_ai_settings()
+    provider = str(body.get("provider", cfg["provider"]))
+    if provider not in {"hooks", "ollama", "gemini", "huggingface"}:
+        raise ValueError("Unknown AI highlight provider.")
+    cfg["provider"] = provider
+    for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model"):
+        if key in body:
+            cfg[key] = str(body[key]).strip()[:500]
+    for key in ("gemini_api_key", "huggingface_token"):
+        if body.get(key): cfg[key] = str(body[key]).strip()[:1000]
+    if body.get("clear_gemini_key"): cfg["gemini_api_key"] = ""
+    if body.get("clear_huggingface_token"): cfg["huggingface_token"] = ""
+    AI_SETTINGS_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    return public_ai_settings()
 
 # ------------------------------------------------------------------ hype words
 HYPE_WORDS = {
@@ -659,6 +704,24 @@ STALL_SECONDS = 90
 class Stopped(Exception):
     pass
 
+def clip_bounds(peak, duration, before, after, words, limit=60):
+    """Choose a bounded clip window that always contains its detected peak."""
+    start = max(0, peak - before)
+    end = min(duration, peak + after)
+    if end - start > limit:
+        start = max(0, min(peak - limit / 2, duration - limit))
+        end = min(duration, start + limit)
+    starts = [w for w in words if abs(w[0] - start) < 3 and w[0] <= peak]
+    if starts:
+        start = max(0, min(starts, key=lambda w: abs(w[0] - start))[0] - 0.25)
+    start = min(start, peak)
+    max_end = min(duration, start + limit)
+    end = min(max(end, peak), max_end)
+    ends = [w for w in words if w[1] >= end]
+    if ends:
+        end = min(max_end, max(end, ends[0][1] + 0.35))
+    return start, end
+
 class Engine:
     def __init__(self, cfg, emit):
         self.cfg, self.emit = cfg, emit
@@ -780,6 +843,23 @@ class Engine:
         raw_score = z(np.convolve(rms, kern, "same")) + 0.5 * z(np.convolve(wps, kern, "same")) \
                 + 0.8 * z(np.convolve(hype, kern, "same"))
         score = np.clip(50 + 20 * raw_score, 0, 100)
+        ai_cfg = load_ai_settings()
+        provider = ai_cfg["provider"]
+        if provider != "hooks":
+            self.status(f"Finding viral moments with {provider.title()}...", "transcribing", 100)
+            try:
+                ai_picks = select_moments(provider, words, n, ai_cfg, self.log)
+                if ai_picks:
+                    ai_score = np.zeros(n, dtype=float)
+                    for second, value in ai_picks:
+                        if 0 <= int(second) < n:
+                            ai_score[int(second)] = max(ai_score[int(second)], float(value))
+                    score = ai_score
+                    self.log(f"{provider.title()} identified {len(ai_picks)} transcript highlights.")
+                else:
+                    self.log(f"{provider.title()} found no moments; using hook-word and audio scoring.")
+            except AIProviderError as exc:
+                self.log(f"{provider.title()} highlight analysis failed: {exc}. Using hook-word and audio scoring.")
         self.best_score = float(score.max())
         requested = int(self.cfg["clips_per_chunk"])
         # Zero means unlimited: keep selecting non-overlapping moments while they
@@ -827,8 +907,8 @@ class Engine:
         enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if cfg.get("compute_device", "gpu") == "gpu" and has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
         tmp = f"{name}.tmp.mp4"
-        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}",
-               "-i", str(pathlib.Path(src).resolve()), "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
+        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", str(pathlib.Path(src).resolve()),
+               "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}", "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
                *enc, "-pix_fmt", "yuv420p", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
                "-c:a", "aac", "-b:a", "160k", "-r", "30", "-movflags", "+faststart", tmp]
         r = run(cmd, cwd=OUT, capture_output=True, text=True)
@@ -889,13 +969,7 @@ class Engine:
         stamp = time.strftime("%H%M%S")
         for i, (p, sc) in enumerate(peaks, 1):
             self.check()
-            start, end = max(0, p - self.cfg["pre"]), min(dur, p + self.cfg["post"])
-            begs = [w for w in words if abs(w[0] - start) < 3]          # snap to word edges: never cut mid-word
-            if begs: start = max(0, min(begs, key=lambda w: abs(w[0] - start))[0] - 0.25)
-            max_end = min(dur, start + 60)
-            end = min(end, max_end)
-            ends = [w for w in words if w[1] >= end]
-            if ends: end = min(max_end, ends[0][1] + 0.35)
+            start, end = clip_bounds(p, dur, self.cfg["pre"], self.cfg["post"], words)
             self.status(f"Rendering clip {i} of {len(peaks)} (hype score {sc:.1f})...", "rendering",
                         int((i - 1) / max(1, len(peaks)) * 100))
             try:
@@ -1218,6 +1292,8 @@ class Core:
         if provider not in {"zernio", "postiz", "mixpost"}: raise ValueError("Unknown publishing provider.")
         cfg = dict(self._config_for(provider))
         for key in ("api_key", "base_url", "workspace", "instagram_id", "youtube_id"):
+            if key in {"instagram_id", "youtube_id"} and key not in body:
+                continue
             value = str(body.get(key, cfg.get(key, ""))).strip()
             if value: cfg[key] = value
             elif key in {"base_url", "workspace", "instagram_id", "youtube_id"}: cfg[key] = ""
@@ -1302,7 +1378,7 @@ def reveal(path):
     path = pathlib.Path(path).resolve()
     try:
         if os.name == "nt":
-            subprocess.Popen(["explorer.exe", "/select," + str(path)], creationflags=CF)
+            subprocess.Popen(["explorer.exe", str(path.parent)], creationflags=CF)
         elif platform.system() == "Darwin":
             subprocess.Popen(["open", "-R", str(path)])
         else:
@@ -1453,7 +1529,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if path == "/":
                 boot = {"settings": CORE.settings, "colors": {k: "#" + v[4:6] + v[2:4] + v[0:2] for k, v in CAPTION_COLORS.items()},
                         "positions": CAPTION_POS, "models": MODELS, "layouts": LAYOUTS,
-                        "zernio": CORE.zernio_status(), "publishing": CORE.publishing_status()}
+                        "zernio": CORE.zernio_status(), "publishing": CORE.publishing_status(),
+                        "ai": public_ai_settings()}
                 html = HTML.replace("__BOOT__", json.dumps(boot).replace("</", "<\\/")).replace("__TOKEN__", TOKEN)
                 return self._send(200, html, "text/html; charset=utf-8")
             if path == "/api/state":
@@ -1479,9 +1556,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             if not self._host_ok() or not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
+                self.close_connection = True
                 return self._send(403, {"error": "forbidden"})
             n = int(self.headers.get("Content-Length", "0") or 0)
             if n > 400_000:
+                self.close_connection = True
                 return self._send(413, {"error": "too large"})
             try: body = json.loads(self.rfile.read(n) or b"{}")
             except ValueError: body = {}
@@ -1520,6 +1599,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
                     return self._send(200, CORE.publish_clips([str(n) for n in names]))
+                if path == "/api/ai/settings":
+                    return self._send(200, save_ai_settings(body))
+                if path == "/api/ai/ollama/models":
+                    cfg = load_ai_settings()
+                    base = str(body.get("ollama_url", cfg["ollama_url"]))
+                    return self._send(200, {"models": ollama_models(base)})
                 if path == "/api/delete_many":
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
@@ -1609,12 +1694,16 @@ def main():
             if isinstance(sys.exc_info()[1], (ConnectionError, BrokenPipeError, TimeoutError)):
                 return
             super().handle_error(request, client_address)
-    srv = QuietServer(("127.0.0.1", 0), Handler)
+    bind_host = os.environ.get("STREAMSNIP_BIND_HOST", "127.0.0.1")
+    bind_port = int(os.environ.get("STREAMSNIP_PORT", "0"))
+    srv = QuietServer((bind_host, bind_port), Handler)
     srv.daemon_threads = True
-    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    public_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
+    url = f"http://{public_host}:{srv.server_address[1]}/"
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    print(f"{PRODUCT_NAME} by ScarZero is running at {url}\nClose this window (or press Ctrl+C) to quit.")
-    open_window(url)
+    print(f"{PRODUCT_NAME} by ScarZero is running at {url}\nChoose Quit in the app, or keep this terminal open while it runs.")
+    if bind_host in ("127.0.0.1", "localhost", "::1"):
+        open_window(url)
     try:
         while not QUIT.wait(0.5):
             pass
@@ -1924,6 +2013,18 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 
   <div class="card" id="settings-card">
     <div class="ch"><span class="num">5</span><h3>App settings</h3></div>
+    <div class="row"><label>AI highlight selection</label></div>
+    <p class="hint">Whisper creates the transcript with free Hugging Face speech models. Choose how the app identifies shareable moments.</p>
+    <select id="ai-provider" class="text"><option value="hooks">Built-in and custom hook words (free, offline)</option><option value="ollama">Ollama local AI (free, private)</option><option value="huggingface">Hugging Face open model (hosted)</option><option value="gemini">Gemini API</option></select>
+    <div id="ollama-ai-fields" hidden>
+      <div class="row"><label>Ollama address</label></div><input id="ollama-url" class="text" value="http://127.0.0.1:11434">
+      <div class="row"><label>Installed Ollama model</label><button class="btn ghost" id="ai-detect-ollama">Detect models</button></div>
+      <select id="ollama-model" class="text"><option value="">Click Detect models</option></select>
+      <p class="hint">Install Ollama and at least one model first. The app only uses models already installed on this computer.</p>
+    </div>
+    <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><b id="gemini-key-state">Not saved</b></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><p class="hint">Quota and rate-limit errors are reported in the activity log. On quota exhaustion, analysis switches to Ollama when available.</p></div>
+    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="Qwen/Qwen2.5-7B-Instruct-1M"><div class="row"><label>Hugging Face access token</label><b id="hf-token-state">Not saved</b></div><input id="hf-token" class="text" type="password" placeholder="Token with Inference Providers access"><p class="hint">Open model weights are free; hosted inference providers may charge or enforce account limits.</p></div>
+    <div class="prow"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
     <div class="row"><label>Storage folders</label></div>
     <p class="hint">Choose where recordings and finished clips are saved. Changes apply after clipping is stopped.</p>
     <div class="row"><label>Recording folder</label></div>
@@ -1937,7 +2038,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="8000" max="50000" step="500" value="8000">
     <p class="hint">Captures at 1080p when the source provides it, falls back to 720p, and records at least 8,000 kbps. Source streams below 1080p cannot be upscaled into real detail.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.1.5. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.1.6. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -2032,6 +2133,7 @@ const S=Object.assign({},BOOT.settings);
 const P=Object.assign({provider:"zernio",providers:{}},BOOT.publishing||{});
 let activeProvider=P.provider||"zernio";
 let Z=Object.assign({},(P.providers&&P.providers[activeProvider])||BOOT.zernio||{});
+let accountsLoadedFor="";
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
 const ICON={
  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
@@ -2054,16 +2156,31 @@ async function api(path,body){
   if(!r.ok)throw new Error(j.error||("Request failed ("+r.status+")"));
   return j;
 }
+const AI=BOOT.ai||{provider:"hooks",ollama_url:"http://127.0.0.1:11434",ollama_model:""};
+$("#ai-provider").value=AI.provider||"hooks";
+$("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
+$("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.ollama_model||"Click Detect models"));
+$("#hf-model").value=AI.huggingface_model||"Qwen/Qwen2.5-7B-Instruct-1M";
+$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";
+$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";
+function showAIFields(){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface"}
+$("#ai-provider").onchange=showAIFields;showAIFields();
+$("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
+$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:AI.gemini_model||"gemini-3.8-flash",huggingface_model:$("#hf-model").value};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 function setSelectOptions(el,items,chosen){
   el.replaceChildren(h("option",{value:""},"Not selected"));
   items.forEach(a=>el.append(h("option",{value:a.id},a.name+" ("+a.platform+")")));
+  if(chosen&&!items.some(a=>String(a.id)===String(chosen)))el.append(h("option",{value:chosen},"Saved channel ("+chosen+")"));
   if(chosen)el.value=chosen;
 }
 async function loadPublishingAccounts(){
   if(Z.available===false){$("#z-msg").textContent="Posting adapter unavailable";$("#z-msg").classList.add("show");return}
-  const r=await api("/api/publishing/accounts",{provider:activeProvider});
+  const provider=activeProvider;
+  const r=await api("/api/publishing/accounts",{provider});
+  if(provider!==activeProvider)return;
   setSelectOptions($("#z-ig"),r.accounts.filter(a=>a.platform==="instagram"),Z.instagram_id);
   setSelectOptions($("#z-yt"),r.accounts.filter(a=>a.platform==="youtube"),Z.youtube_id);
+  accountsLoadedFor=provider;
   $("#z-msg").textContent=r.accounts.length?"Connected channels identified":"No Instagram/YouTube channels found";
   $("#z-msg").classList.add("show");
 }
@@ -2327,13 +2444,15 @@ $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLo
 
 /* ---------- actions ---------- */
 function loadProviderForm(){const cfg=(P.providers&&P.providers[activeProvider])||{};Z=Object.assign({},cfg);$("#pub-provider").value=activeProvider;$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post;$("#pub-base").value=cfg.base_url||"";$("#pub-workspace").value=cfg.workspace||"";$("#selfhost-fields").hidden=activeProvider==="zernio"}
-$("#pub-provider").onchange=async e=>{activeProvider=e.target.value;loadProviderForm();$("#z-ig").replaceChildren(h("option",{value:""},"Not selected"));$("#z-yt").replaceChildren(h("option",{value:""},"Not selected"));if((P.providers[activeProvider]||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
+$("#pub-provider").onchange=async e=>{activeProvider=e.target.value;accountsLoadedFor="";loadProviderForm();$("#z-ig").replaceChildren(h("option",{value:""},"Not selected"));$("#z-yt").replaceChildren(h("option",{value:""},"Not selected"));if((P.providers[activeProvider]||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
 $("#z-key-state").textContent=Z.api_key_set?"Saved locally":"Not saved";
 $("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";
 $("#z-check").onclick=async()=>{
   const b=$("#z-check");b.disabled=true;
   try{
-    const r=await api("/api/publishing",{provider:activeProvider,api_key:$("#z-api").value,base_url:$("#pub-base").value,workspace:$("#pub-workspace").value,instagram_id:$("#z-ig").value,youtube_id:$("#z-yt").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
+    const payload={provider:activeProvider,api_key:$("#z-api").value,base_url:$("#pub-base").value,workspace:$("#pub-workspace").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value};
+    if(accountsLoadedFor===activeProvider){payload.instagram_id=$("#z-ig").value;payload.youtube_id=$("#z-yt").value}
+    const r=await api("/api/publishing",payload);
     Object.assign(P,r);Object.assign(Z,(r.providers||{})[activeProvider]||{});$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadPublishingAccounts();toast(activeProvider+" settings saved locally","ok");
   }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
   b.disabled=false;

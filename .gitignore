@@ -26,6 +26,8 @@ settings.json
 custom_words.txt
 zernio.json
 publishing.json
+ai_settings.json
+data/
 .autoclip.lock
 
 # IDE

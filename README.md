@@ -457,6 +457,14 @@ Stream / file
 | **Claude** (Anthropic) | AI pair-programming assistant |
 | **Antigravity** (Google DeepMind) | AI development environment and coding collaborator |
 
+Follow Scarzero:
+
+- [Facebook](https://www.facebook.com/ScarZero13)
+- [YouTube](https://www.youtube.com/@scarzeroyt)
+- [Twitch](https://www.twitch.tv/scarzero13)
+- [TikTok](https://www.tiktok.com/@scarzero13)
+- [Instagram](https://www.instagram.com/scarzero13/)
+
 Built on top of amazing open-source projects:  
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) ·
 [streamlink](https://github.com/streamlink/streamlink) ·

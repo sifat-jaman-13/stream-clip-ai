@@ -1,5 +1,5 @@
 #define MyAppName "StreamSnip AI"
-#define MyAppVersion "1.1.4"
+#define MyAppVersion "1.1.5"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 
@@ -25,6 +25,7 @@ Source: "..\selfhost_publishers.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\run_streamsnip.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\StreamSnipAI.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\AutoClip\vendor\ffmpeg\*"; DestDir: "{app}\vendor\ffmpeg"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "bootstrap.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 

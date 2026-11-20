@@ -19,11 +19,12 @@ Output: the "out" folder. Each clip = .mp4 in the selected format (9:16 by defau
 Your own hype words: "Hype words" tab in the app (stored in custom_words.txt, re-read for every chunk).
 """
 import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64
+import math
 import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -78,8 +79,11 @@ def _patch_pyav():
 _patch_pyav()
 
 HERE = pathlib.Path(__file__).resolve().parent
-OUT = HERE / "out"
-REC = HERE / "rec"
+_in_site_packages = any(part.lower() in {"site-packages", "dist-packages"} for part in HERE.parts)
+_data_root = (pathlib.Path(os.environ.get("LOCALAPPDATA") or pathlib.Path.home()) / "StreamSnip AI"
+              if _in_site_packages else HERE)
+OUT = _data_root / "out"
+REC = _data_root / "rec"
 
 def ensure_runtime_dirs():
     """Recreate runtime folders if the user, cleanup software, or an installer removed them."""
@@ -90,8 +94,13 @@ ensure_runtime_dirs()
 
 def ffmpeg_exe():
     """Prefer a bundled FFmpeg in portable builds, then fall back to system PATH."""
-    bundled = HERE / "vendor" / "ffmpeg" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
-    return str(bundled) if bundled.is_file() else (shutil.which("ffmpeg") or "ffmpeg")
+    name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    roots = [HERE, pathlib.Path(sys.executable).resolve().parent]
+    for root in roots:
+        bundled = root / "vendor" / "ffmpeg" / name
+        if bundled.is_file():
+            return str(bundled)
+    return shutil.which("ffmpeg") or "ffmpeg"
 
 def check_updates():
     """Check local runtime versions against public release metadata without changing anything."""
@@ -102,13 +111,8 @@ def check_updates():
     try:
         r = run([ffmpeg_exe(), "-version"], capture_output=True, text=True, timeout=10)
         m = re.search(r"ffmpeg version (\S+)", r.stdout or "")
-        latest = ""
-        try:
-            req = urllib.request.Request("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest", headers={"User-Agent": "AutoClip updater"})
-            with urllib.request.urlopen(req, timeout=8) as response:
-                latest = str(json.loads(response.read()).get("tag_name", ""))
-        except Exception: pass
-        add("FFmpeg", m.group(1) if m else "Unknown", latest, "Use the bundled or system FFmpeg build.")
+        add("FFmpeg", m.group(1) if m else "Unknown", "",
+            "Use the bundled or system FFmpeg build; its version is not directly comparable to upstream release tags.")
     except Exception as e:
         add("FFmpeg", "Not available", note=str(e))
     for package in ("faster-whisper", "streamlink", "ctranslate2", "numpy"):
@@ -123,8 +127,12 @@ def check_updates():
         add(package, current, latest)
     model = str(load_settings().get("model", "distil-large-v3"))
     cache_root = pathlib.Path(os.environ.get("HF_HOME", pathlib.Path.home() / ".cache" / "huggingface")) / "hub"
-    cached = any(cache_root.glob("models--Systran--faster-whisper-*")) if cache_root.is_dir() else False
-    add("Speech model: " + model, "Cached" if cached else "Not downloaded", "On first use, the selected model downloads from Hugging Face.")
+    repo_names = {"distil-large-v3": "faster-distil-whisper-large-v3",
+                  "large-v3-turbo": "faster-whisper-large-v3-turbo"}
+    repo_name = repo_names.get(model, "faster-whisper-" + model)
+    cached = (cache_root / ("models--Systran--" + repo_name)).is_dir() if cache_root.is_dir() else False
+    add("Speech model: " + model, "Cached" if cached else "Not downloaded", "",
+        "Selected model is " + ("available locally." if cached else "downloaded on first use."))
     return {"checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "items": result}
 
 def check_app_update():
@@ -163,12 +171,12 @@ def update_components():
     except Exception as e:
         model_status = model + " download deferred: " + str(e)[:180]
     return {"ok": True, "message": "Runtime packages updated; " + model_status}
-SETTINGS_FILE = HERE / "settings.json"
-CUSTOM_FILE = HERE / "custom_words.txt"
-ZERNIO_FILE = HERE / "zernio.json"
-PUBLISHING_FILE = HERE / "publishing.json"
+SETTINGS_FILE = _data_root / "settings.json"
+CUSTOM_FILE = _data_root / "custom_words.txt"
+ZERNIO_FILE = _data_root / "zernio.json"
+PUBLISHING_FILE = _data_root / "publishing.json"
 BRAND_LOGO = HERE / "assets" / "brand-logo.png"
-INSTANCE_LOCK_FILE = HERE / ".autoclip.lock"
+INSTANCE_LOCK_FILE = _data_root / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
 
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
@@ -226,7 +234,8 @@ def clean_cfg(raw):
     c = dict(DEFAULTS)
     def num(k, lo, hi, cast):
         try: v = cast(raw.get(k, c[k]))
-        except (TypeError, ValueError): v = c[k]
+        except (TypeError, ValueError, OverflowError): v = c[k]
+        if isinstance(v, float) and not math.isfinite(v): v = c[k]
         c[k] = max(lo, min(hi, v))
     num("clips_per_chunk", 0, 10, int); num("chunk_min", 1, 30, int)
     num("pre", 3, 90, int); num("post", 3, 90, int)
@@ -280,8 +289,8 @@ def apply_storage_paths(cfg):
             return path.resolve()
         except (OSError, ValueError):
             return fallback
-    OUT = chosen("out_dir", HERE / "out")
-    REC = chosen("rec_dir", HERE / "rec")
+    OUT = chosen("out_dir", _data_root / "out")
+    REC = chosen("rec_dir", _data_root / "rec")
     ensure_runtime_dirs()
 
 def streamer_credit(cfg):
@@ -520,13 +529,20 @@ def make_cta_voice(path, text):
         return False
 
 def has_audio_stream(path):
+    ffmpeg = pathlib.Path(ffmpeg_exe())
+    candidates = [ffmpeg.with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")]
+    found = shutil.which("ffprobe")
+    if found: candidates.append(pathlib.Path(found))
+    probe = next((str(p) for p in candidates if p.is_file()), None)
+    if not probe:
+        return None
     try:
-        r = run(["ffprobe", "-v", "error", "-select_streams", "a:0",
+        r = run([probe, "-v", "error", "-select_streams", "a:0",
                  "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
                 capture_output=True, text=True, timeout=15)
-        return r.returncode == 0 and bool((r.stdout or "").strip())
+        return bool((r.stdout or "").strip()) if r.returncode == 0 else None
     except Exception:
-        return False
+        return None
 
 def make_ass(words, start, end, path, cfg):
     ws = []
@@ -671,7 +687,7 @@ class Engine:
         global _model, _model_key
         device = self.cfg.get("compute_device", "gpu")
         cache_key = (name, device)
-        if _model is not None and _model_key == cache_key:
+        if _model is not None and (_model_key == cache_key or (device == "gpu" and _model_key == (name, "cpu"))):
             return _model
         try:
             from faster_whisper import WhisperModel
@@ -825,19 +841,24 @@ class Engine:
             if make_cta_voice(voice, cfg.get("cta_text", "Subscribe for more clips")):
                 mixed = OUT / f"{name}.audio.tmp.mp4"
                 delay_ms = max(0, int((end - start - 2.8) * 1000))
-                if has_audio_stream(OUT / tmp):
-                    af = f"[1:a]adelay={delay_ms}:all=1[cta];[0:a][cta]amix=inputs=2:duration=first:dropout_transition=2[a]"
+                audio_present = has_audio_stream(OUT / tmp)
+                if audio_present is None:
+                    self.log("FFprobe unavailable; keeping the original clip audio unchanged.")
+                    voice.unlink(missing_ok=True)
+                elif audio_present:
+                    af = f"[1:a]adelay={delay_ms}:all=1[cta];[0:a][cta]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]"
                 else:
                     af = f"[1:a]adelay={delay_ms}:all=1[a]"
-                mix_cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", str(OUT / tmp), "-i", str(voice),
-                           "-filter_complex", af, "-map", "0:v:0", "-map", "[a]",
-                           "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", mixed]
-                mr = run(mix_cmd, cwd=OUT, capture_output=True, text=True)
-                if mr.returncode == 0 and mixed.is_file():
-                    os.replace(mixed, OUT / tmp)
-                else:
-                    self.log("CTA voice unavailable for this clip; keeping the original audio.")
-                    mixed.unlink(missing_ok=True)
+                if audio_present is not None:
+                    mix_cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", str(OUT / tmp), "-i", str(voice),
+                               "-filter_complex", af, "-map", "0:v:0", "-map", "[a]",
+                               "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", mixed]
+                    mr = run(mix_cmd, cwd=OUT, capture_output=True, text=True)
+                    if mr.returncode == 0 and mixed.is_file():
+                        os.replace(mixed, OUT / tmp)
+                    else:
+                        self.log("CTA voice unavailable for this clip; keeping the original audio.")
+                        mixed.unlink(missing_ok=True)
             else:
                 self.log("Soft CTA voice unavailable; the on-screen CTA was kept.")
             voice.unlink(missing_ok=True)
@@ -871,8 +892,10 @@ class Engine:
             start, end = max(0, p - self.cfg["pre"]), min(dur, p + self.cfg["post"])
             begs = [w for w in words if abs(w[0] - start) < 3]          # snap to word edges: never cut mid-word
             if begs: start = max(0, min(begs, key=lambda w: abs(w[0] - start))[0] - 0.25)
+            max_end = min(dur, start + 60)
+            end = min(end, max_end)
             ends = [w for w in words if w[1] >= end]
-            if ends: end = min(dur, ends[0][1] + 0.35)
+            if ends: end = min(max_end, ends[0][1] + 0.35)
             self.status(f"Rendering clip {i} of {len(peaks)} (hype score {sc:.1f})...", "rendering",
                         int((i - 1) / max(1, len(peaks)) * 100))
             try:
@@ -1049,7 +1072,7 @@ class Core:
         self.lock = threading.RLock()
         self.publishing = load_publishing_settings()
         self.zernio = self.publishing["zernio"]
-        self.publisher = self._make_publisher(self.publishing["provider"], self.publishing["provider"] == "zernio")
+        self.publisher = self._make_publisher(self.publishing["provider"])
         self.engine = None
         self.running = False
         self.logs, self.log_id = [], 0
@@ -1064,8 +1087,10 @@ class Core:
     def _config_for(self, provider=None):
         return self.publishing.get(provider or self.publishing.get("provider", "zernio"), {})
 
-    def _make_publisher(self, provider=None, enabled=True):
+    def _make_publisher(self, provider=None, enabled=None):
         provider = provider or self.publishing.get("provider", "zernio")
+        if enabled is None:
+            enabled = bool(self._config_for(provider).get("auto_post", False))
         cfg = dict(self._config_for(provider), enabled=enabled)
         if provider == "zernio":
             return ZernioPublisher(self.push, cfg) if ZERNIO_AVAILABLE else None
@@ -1102,7 +1127,7 @@ class Core:
                 try:
                     self.publisher.submit(OUT / payload)
                 except Exception as e:
-                    self.push("Zernio error: " + str(e))
+                    self.push(f"{self.publishing.get('provider', 'Publisher').title()} auto-post error: " + str(e))
         elif kind == "chunk":
             with self.lock: self.session["chunks"] += 1
         elif kind == "done":
@@ -1466,9 +1491,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/start":
                     CORE.start(clean_cfg(body)); return self._send(200, {"ok": True})
                 if path == "/api/settings":
-                    if CORE.running:
+                    cfg = clean_cfg(body)
+                    if CORE.running and (cfg.get("rec_dir") != CORE.settings.get("rec_dir") or cfg.get("out_dir") != CORE.settings.get("out_dir")):
                         return self._send(400, {"error": "Stop clipping before changing storage folders."})
-                    cfg = clean_cfg(body); CORE.settings = cfg; apply_storage_paths(cfg); save_settings(cfg); return self._send(200, {"ok": True})
+                    CORE.settings = cfg
+                    if not CORE.running: apply_storage_paths(cfg)
+                    save_settings(cfg)
+                    return self._send(200, {"ok": True})
                 if path == "/api/stop":
                     CORE.stop(bool(body.get("force"))); return self._send(200, {"ok": True})
                 if path == "/api/words":
@@ -1908,7 +1937,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="8000" max="50000" step="500" value="8000">
     <p class="hint">Captures at 1080p when the source provides it, falls back to 720p, and records at least 8,000 kbps. Source streams below 1080p cannot be upscaled into real detail.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.1.4. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.1.5. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -2025,11 +2054,6 @@ async function api(path,body){
   if(!r.ok)throw new Error(j.error||("Request failed ("+r.status+")"));
   return j;
 }
-window.addEventListener("pagehide",()=>{
-  if(appClosing)return;
-  appClosing=true;
-  fetch("/api/quit",{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:"{}",keepalive:true}).catch(()=>{});
-});
 function setSelectOptions(el,items,chosen){
   el.replaceChildren(h("option",{value:""},"Not selected"));
   items.forEach(a=>el.append(h("option",{value:a.id},a.name+" ("+a.platform+")")));
@@ -2263,6 +2287,8 @@ function openCropEditor(){
   img.addEventListener("load",()=>{if(img.naturalWidth){sourceAr=img.naturalWidth/img.naturalHeight;stage.style.aspectRatio=img.naturalWidth+"/"+img.naturalHeight;fit();paint()}});
   const msg=h("span",{class:"hint",style:"margin:0"},"");
   const grab=h("button",{class:"btn ghost"},"Grab a frame");
+  const center=h("button",{class:"btn ghost"},"Center segment");
+  center.onclick=()=>{box.x=(100-box.w)/2;box.y=(100-box.h)/2;paint();msg.textContent="Source segment centered."};
   const doGrab=async()=>{grab.disabled=true;msg.textContent="Grabbing a frame...";try{const r=await api("/api/frame",{mode:S.mode,target:S.target});img.src=r.image;msg.textContent="Drag the fixed-aspect box to choose the exact source segment."}catch(e){msg.textContent=e.message}grab.disabled=false};
   grab.onclick=doGrab;
   const close=()=>{m.remove();document.removeEventListener("keydown",esc)};
@@ -2307,7 +2333,7 @@ $("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";
 $("#z-check").onclick=async()=>{
   const b=$("#z-check");b.disabled=true;
   try{
-    const r=await api("/api/publishing",{provider:activeProvider,api_key:$("#z-api").value,base_url:$("#pub-base").value,workspace:$("#pub-workspace").value,instagram_id:$("#z-ig").value||Z.instagram_id,youtube_id:$("#z-yt").value||Z.youtube_id,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
+    const r=await api("/api/publishing",{provider:activeProvider,api_key:$("#z-api").value,base_url:$("#pub-base").value,workspace:$("#pub-workspace").value,instagram_id:$("#z-ig").value,youtube_id:$("#z-yt").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
     Object.assign(P,r);Object.assign(Z,(r.providers||{})[activeProvider]||{});$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadPublishingAccounts();toast(activeProvider+" settings saved locally","ok");
   }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
   b.disabled=false;
@@ -2334,7 +2360,7 @@ $("#btn-quit").onclick=async()=>{
 
 /* ---------- state polling ---------- */
 const PHASES={idle:"Ready",waiting:"Waiting for the stream",recording:"Recording live",transcribing:"Listening for hype",rendering:"Rendering clips",stopping:"Wrapping up",working:"Working"};
-let lastLog=0,fails=0,busy=false,order="",cards=new Map(),selectedClips=new Set(),lastPostDone=0;
+let lastLog=0,fails=0,busy=false,order="",cards=new Map(),selectedClips=new Set(),lastPostDone=0,lastPostStarted=null;
 const fmtT=s=>{const m=Math.floor(s/60),h2=Math.floor(m/60);return h2?h2+":"+String(m%60).padStart(2,"0")+":"+String(s%60).padStart(2,"0"):m+":"+String(s%60).padStart(2,"0")};
 function ago(t){const s=Math.max(0,Date.now()/1000-t);if(s<60)return"just now";if(s<3600)return Math.floor(s/60)+" min ago";if(s<86400)return Math.floor(s/3600)+" h ago";return Math.floor(s/86400)+" d ago"}
 function addLogs(list){
@@ -2365,6 +2391,7 @@ function toggleClipSelection(name){
 }
 function updatePosting(p){
   if(!p)return;
+  if(p.started!==lastPostStarted){lastPostStarted=p.started;lastPostDone=0}
   const total=Number(p.total)||0,done=Number(p.completed)||0,active=!!p.active;
   const visible=active||total>0;
   $("#post-progress").hidden=!visible;

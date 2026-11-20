@@ -50,7 +50,7 @@ while recording, rendering, or publishing. Closing that terminal or choosing Qui
 Installation requirements:
 
 - Python 3.10 or newer
-- FFmpeg on PATH
+- FFmpeg on PATH, or bundled by an installer built on a machine with FFmpeg available
 - Streamlink for live Twitch/YouTube sources
 - NVIDIA CUDA hardware is optional; CPU fallback is supported
 - In Settings, choose GPU for CUDA speech + NVENC rendering or CPU for INT8 speech + software rendering, then click Save settings. An RTX 3060 Ti is supported.
@@ -76,6 +76,7 @@ The installer automatically downloads or installs the following when needed:
 | Streamlink | Twitch and YouTube live capture |
 | NVIDIA cuBLAS CUDA package | GPU speech acceleration for supported NVIDIA cards |
 | `distil-large-v3` model | Default speech model, downloaded before first launch |
+| FFmpeg and FFprobe | Bundled when available during installer build; otherwise install FFmpeg separately and add it to PATH |
 
 Plan for approximately **4–6 GB** for the complete first-time installation. `medium` and `large-v3`
 can use additional model storage. FFmpeg is not downloaded by the installer; install FFmpeg separately
@@ -184,8 +185,8 @@ Raw live segments are stored in the recording folder and can be deleted after cl
 
 ## Publishing providers
 
-Publishing is optional and disabled until configured. StreamSnip AI supports Zernio plus self-hosted
-Postiz and Mixpost. Choose the provider in Settings → Publishing provider:
+Publishing is optional. Automatic posting is off by default and starts only when enabled in Settings.
+StreamSnip AI supports Zernio plus self-hosted Postiz and Mixpost. Choose the provider in Settings → Publishing provider:
 
 1. Enter the provider API key and, for self-hosted services, the base URL (and Mixpost workspace UUID).
 2. Identify connected Instagram and YouTube channels through the provider's official API.
@@ -236,7 +237,7 @@ portable package is published by the current release workflow.
 | Buttons do nothing | Disable the ad blocker for 127.0.0.1 / localhost |
 | Stream stops immediately | Ensure only one copy is running and inspect Activity |
 | No stream found | Confirm Streamlink is installed and keep the best fallback |
-| FFmpeg missing | Install FFmpeg or use the bundled Windows package |
+| FFmpeg missing | Install FFmpeg and add it to PATH, or use an installer build that bundled FFmpeg |
 | No clips | Lower minimum viral score and inspect transcription/activity |
 | CUDA error | Update NVIDIA drivers; CPU fallback remains available |
 | Zernio unavailable | Check zernio_poster.py, API key, and channel settings |

@@ -123,11 +123,11 @@ class ZernioPublisher:
         if schedule_minutes is not None:
             self.schedule_minutes = max(0, int(schedule_minutes))
         try:
-            self._publish(path)
+            self._publish(path, raise_errors=True)
         finally:
             self.instagram_id, self.youtube_id, self.schedule_minutes = old
 
-    def _publish(self, path):
+    def _publish(self, path, raise_errors=False):
         path = pathlib.Path(path)
         try:
             caption_path = path.with_suffix(".txt")
@@ -171,3 +171,5 @@ class ZernioPublisher:
             self.log(f"Zernio: {path.name} {state} to {targets}{suffix}.")
         except Exception as e:
             self.log(f"Zernio error for {path.name}: {e}")
+            if raise_errors:
+                raise

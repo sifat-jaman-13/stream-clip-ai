@@ -33,6 +33,8 @@ class _HTTP:
         data = None if body is None else json.dumps(body).encode("utf-8")
         h = dict(self.headers)
         h.update(headers or {})
+        if data is not None:
+            h.setdefault("Content-Type", "application/json")
         req = urllib.request.Request(url, data=data, method=method, headers=h)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as res:
@@ -81,6 +83,7 @@ class PostizPublisher:
         self.configure(config or {})
 
     def configure(self, config):
+        self.enabled = bool(config.get("enabled", config.get("auto_post", False)))
         self.base = str(config.get("base_url", "https://api.postiz.com")).strip().rstrip("/")
         self.key = str(config.get("api_key", "")).strip()
         self.instagram_id = str(config.get("instagram_id", "")).strip()
@@ -102,6 +105,8 @@ class PostizPublisher:
         return [x for x in out if x["id"]]
 
     def submit(self, video_path):
+        if not (self.enabled and self.key and (self.instagram_id or self.youtube_id)):
+            return
         threading.Thread(target=self.publish_one, args=(video_path,), daemon=True, name="postiz-publisher").start()
 
     def _upload(self, path):
@@ -140,6 +145,7 @@ class MixpostPublisher:
         self.configure(config or {})
 
     def configure(self, config):
+        self.enabled = bool(config.get("enabled", config.get("auto_post", False)))
         self.base = str(config.get("base_url", "")).strip().rstrip("/")
         self.workspace = str(config.get("workspace", "")).strip()
         self.key = str(config.get("api_key", "")).strip()
@@ -167,6 +173,8 @@ class MixpostPublisher:
         return [x for x in out if x["id"]]
 
     def submit(self, video_path):
+        if not (self.enabled and self.key and self.base and self.workspace and (self.instagram_id or self.youtube_id)):
+            return
         threading.Thread(target=self.publish_one, args=(video_path,), daemon=True, name="mixpost-publisher").start()
 
     def _upload(self, path):

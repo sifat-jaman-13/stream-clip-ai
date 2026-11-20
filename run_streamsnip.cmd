@@ -4,7 +4,6 @@ set "RUNTIME=%LOCALAPPDATA%\StreamSnip AI\runtime"
 set "BOOTSTRAP=%~dp0bootstrap.ps1"
 
 if not exist "%~dp0autoclip.py" goto :missing_app
-if not exist "%~dp0live_monitor.py" goto :missing_app
 
 if not exist "%RUNTIME%\Scripts\python.exe" (
   echo Installing the required StreamSnip AI runtime...

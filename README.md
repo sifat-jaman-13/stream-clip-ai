@@ -28,7 +28,7 @@
 | **Windows installer** | Start Menu/desktop shortcuts and bundled runtime | [Download installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe) |
 | **Manual terminal** | Full control over Python, FFmpeg, CUDA, and dependencies | Follow the source setup below |
 
-The Windows packages open a visible terminal and print the local server URL. Keep that terminal open
+The Windows installer opens a visible terminal through the real `StreamSnipAI.exe` launcher and prints the local server URL. Keep that terminal open
 while recording, rendering, or publishing. Closing the app stops its local server.
 
 ## What the app does
@@ -47,7 +47,7 @@ while recording, rendering, or publishing. Closing the app stops its local serve
 
 ## Requirements
 
-Native install:
+Installation requirements:
 
 - Python 3.10 or newer
 - FFmpeg on PATH
@@ -93,10 +93,16 @@ need browser access from outside the container.
 git clone https://github.com/sifat-jaman-13/stream-clip-ai.git
 cd stream-clip-ai
 winget install Gyan.FFmpeg
-py -3.11 -m venv venv
+py -3.12 -m venv venv
 .\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e ".[all]"
+pip install -e ".[live]"
+~~~
+
+For NVIDIA CUDA speech support in a manual Windows install:
+
+~~~powershell
+pip install nvidia-cublas-cu12
 ~~~
 
 If PowerShell blocks activation:
@@ -115,7 +121,7 @@ cd stream-clip-ai
 python3 -m venv venv
 source venv/bin/activate
 python -m pip install --upgrade pip
-pip install -e ".[all]"
+pip install -e ".[live]"
 ~~~
 
 On Apple Silicon, use native arm64 Python and the CPU/INT8 path. The project does not claim an
@@ -204,9 +210,9 @@ The app update control opens the release page; it does not replace files during 
 powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 ~~~
 
-The script creates a console-enabled PyInstaller one-folder build, bundles FFmpeg when found, creates
-compiles dist\installer\StreamSnipAI-Setup.exe when Inno Setup 6 is
-installed. Installer metadata is StreamSnip AI 1.0.10 by ScarZero.
+The script creates a PyInstaller compatibility build, a real `dist\StreamSnipAI.exe` launcher, and
+compiles `dist\installer\StreamSnipAI-Setup.exe` when Inno Setup 6 is installed. The released
+installer uses the automatic runtime bootstrap; no portable package is published.
 
 ## Troubleshooting
 
@@ -226,6 +232,9 @@ installed. Installer metadata is StreamSnip AI 1.0.10 by ScarZero.
 | Path | Purpose |
 |---|---|
 | autoclip.py | Local server, web UI, clipping engine, captions, progress, and orchestration |
+| launcher.py | Source for the real Windows StreamSnipAI.exe launcher |
+| run_streamsnip.cmd | Internal terminal/runtime bootstrap command |
+| installer/bootstrap.ps1 | Python runtime, dependency, and speech-model setup |
 | zernio_poster.py | Optional Zernio API integration |
 | build_windows.ps1 | PyInstaller and Inno Setup installer build |
 | installer/AutoClip.iss | Windows installer metadata and shortcuts |

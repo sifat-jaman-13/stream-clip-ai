@@ -1,4 +1,4 @@
-#define MyAppName "StreamClip AI"
+#define MyAppName "StreamSnip AI"
 #define MyAppVersion "1.0.1"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "AutoClip.exe"
@@ -8,8 +8,8 @@ AppId={{B4D1D9B4-53A8-4F78-9B4D-7D23C2F50F4C}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\StreamClip AI
-DefaultGroupName=StreamClip AI
+DefaultDirName={autopf}\StreamSnip AI
+DefaultGroupName=StreamSnip AI
 OutputDir=..\dist\installer
 OutputBaseFilename=AutoClip-Setup
 Compression=lzma2
@@ -23,11 +23,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Source: "..\dist\AutoClip\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\StreamClip AI"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\StreamClip AI"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\StreamSnip AI"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch StreamClip AI"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch StreamSnip AI"; Flags: nowait postinstall skipifsilent

@@ -24,7 +24,7 @@ from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
 APP_VERSION = "1.0.1"
-PRODUCT_NAME = "StreamClip AI"
+PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
     from zernio_poster import ZernioPublisher
@@ -1498,7 +1498,7 @@ HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" type="image/png" href="/assets/app-icon.png">
-<title>StreamClip AI</title>
+<title>StreamSnip AI</title>
 <style>
 :root{--bg:#07080d;--card:rgba(255,255,255,.035);--card2:rgba(255,255,255,.07);--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);
 --tx:#eef0f7;--dim:#9a9fb5;--mute:#646a82;--a1:#8b5cf6;--a2:#ec4899;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--grad:linear-gradient(135deg,var(--a1),var(--a2))}
@@ -1678,7 +1678,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 <body>
 <div class="app">
 <header>
-  <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="Scarzero Plays" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>StreamClip AI<span class="tag">by ScarZero &middot; live stream &rarr; viral Shorts</span></div>
+  <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="Scarzero Plays" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>StreamSnip AI<span class="tag">by ScarZero &middot; live stream &rarr; viral Shorts</span></div>
   <div class="sp"></div>
   <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
   <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
@@ -1859,16 +1859,16 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 </div>
 <div class="overlay" id="about-overlay" hidden>
  <div class="settings-dialog about-dialog">
-  <div class="settings-head"><div><h2>About StreamClip AI</h2><p>Local clipping tools for creators, by ScarZero.</p></div><button class="btn ghost" id="btn-about-close">Close</button></div>
+  <div class="settings-head"><div><h2>About StreamSnip AI</h2><p>Local clipping tools for creators, by ScarZero.</p></div><button class="btn ghost" id="btn-about-close">Close</button></div>
   <div class="about-hero">
-   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="Scarzero Plays"></div><div><h3>StreamClip AI by ScarZero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
+   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="Scarzero Plays"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
    <p class="about-copy">Built for creators who want fast local processing, flexible framing, automatic streamer credit, and direct publishing workflows. Follow the author for new releases, clips, and creator updates.</p>
    <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a><a class="btn ghost" href="https://www.facebook.com/ScarZero13" target="_blank" rel="noopener">Facebook · ScarZero13</a><a class="btn ghost" href="https://www.twitch.tv/scarzero13" target="_blank" rel="noopener">Twitch · scarzero13</a><a class="btn ghost" href="https://www.tiktok.com/@scarzero13" target="_blank" rel="noopener">TikTok · @scarzero13</a></div>
   </div>
  </div>
 </div>
 <div id="toasts"></div>
-<div id="offline" hidden>Lost connection to StreamClip AI - is it still running?</div>
+<div id="offline" hidden>Lost connection to StreamSnip AI - is it still running?</div>
 
 <script>
 const BOOT=__BOOT__;
@@ -2185,10 +2185,10 @@ $("#btn-start").onclick=async()=>{
 $("#btn-stop").onclick=()=>api("/api/stop",{force:false}).then(()=>poll(true)).catch(e=>toast(e.message,"bad"));
 $("#btn-kill").onclick=()=>api("/api/stop",{force:true}).then(()=>poll(true)).catch(e=>toast(e.message,"bad"));
 $("#btn-quit").onclick=async()=>{
-  if(!(await confirmBox("Quit StreamClip AI?","Any recording in progress will stop. Finished clips stay in the clips folder.","Quit")))return;
+  if(!(await confirmBox("Quit StreamSnip AI?","Any recording in progress will stop. Finished clips stay in the clips folder.","Quit")))return;
   appClosing=true;
   try{await api("/api/quit")}catch(e){}
-  document.body.replaceChildren(h("div",{style:"height:100%;display:grid;place-items:center;text-align:center;color:#9a9fb5"},h("div",{},h("h2",{style:"color:#fff;margin-bottom:8px"},"StreamClip AI has closed"),h("p",{},"You can close this window."))));
+  document.body.replaceChildren(h("div",{style:"height:100%;display:grid;place-items:center;text-align:center;color:#9a9fb5"},h("div",{},h("h2",{style:"color:#fff;margin-bottom:8px"},"StreamSnip AI has closed"),h("p",{},"You can close this window."))));
   setTimeout(()=>window.close(),400);
 };
 

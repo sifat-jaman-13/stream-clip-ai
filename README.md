@@ -1,16 +1,14 @@
-# 🚀 StreamClip AI — Twitch & YouTube to Shorts
+# StreamSnip AI — Auto Stream Clipper
 
-> **Turn Twitch and YouTube streams into viral Shorts, Reels, and TikToks automatically.**
-> Local AI highlight detection, animated captions, facecam/game layouts, and optional multi-platform publishing.
+> Turn Twitch and YouTube streams—or local video files—into captioned, social-ready clips on your own machine.
 
-[![Source code](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
+[![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
 [![Windows installer](https://img.shields.io/badge/download-Windows%20installer-e94560?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-Setup.exe)
 [![Portable ZIP](https://img.shields.io/badge/download-portable%20ZIP-7c3aed?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-portable.zip)
-[![Rust Edition](https://img.shields.io/badge/download-Rust%20Edition-DEA584?logo=rust)](https://github.com/sifat-jaman-13/stream-clip-ai-rust/releases/latest)
+[![Native edition](https://img.shields.io/badge/download-StreamSnip%20Native-DEA584?logo=rust)](https://github.com/sifat-jaman-13/stream-clip-ai-rust/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker)](Dockerfile)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey)](#installation)
+[![Docker](https://img.shields.io/badge/docker-files-2496ED?logo=docker)](Dockerfile)
 
 [![YouTube: Scarzero](https://img.shields.io/badge/YouTube-Scarzero-red?logo=youtube)](https://www.youtube.com/@scarzeroyt)
 [![Twitch: Scarzero13](https://img.shields.io/badge/Twitch-Scarzero13-9146FF?logo=twitch)](https://www.twitch.tv/scarzero13)
@@ -18,491 +16,204 @@
 [![Instagram: Scarzero13](https://img.shields.io/badge/Instagram-Scarzero13-E4405F?logo=instagram)](https://www.instagram.com/scarzero13/)
 [![Facebook: ScarZero13](https://img.shields.io/badge/Facebook-ScarZero13-1877F2?logo=facebook)](https://www.facebook.com/ScarZero13)
 
-## Choose how to run StreamClip AI
+## Choose your install method
 
-- **Installer:** [Download AutoClip-Setup.exe](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) for a normal Windows installation with shortcuts.
-- **Portable:** Download **AutoClip-portable.zip** from the [latest release](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest), extract it, and run AutoClip.exe.
-- **Manual terminal:** Follow the Windows commands below for full control over Python, FFmpeg, GPU packages, and the server.
-
-**Keywords:** `twitch clipper` · `youtube clipper` · `stream to shorts` · `AI clip maker` · `viral shorts generator` · `TikTok clip generator` · `Instagram Reels maker` · `YouTube Shorts automation` · `Whisper captions`
-
-### Optional Zernio posting
-
-AutoClip includes a Zernio panel for identifying connected Instagram and
-YouTube channels, publishing selected clips, publishing all clips, and
-optionally auto-posting each newly finished MP4. It is disabled by default.
-
-Open the app, enter your Zernio API key in the **Zernio posting** section, and
-click **Save & identify channels**. The key is stored only in the local,
-Git-ignored `zernio.json` file. Each clip's `.txt` file supplies its caption;
-the first caption line becomes the YouTube title.
-
-For headless/background use, set these environment variables locally before starting AutoClip:
-
-```powershell
-$env:ZERNIO_ENABLED="true"
-$env:ZERNIO_API_KEY="your-zernio-api-key"
-$env:ZERNIO_INSTAGRAM_ACCOUNT_ID="your-instagram-account-id"
-$env:ZERNIO_YOUTUBE_ACCOUNT_ID="your-youtube-account-id"
-$env:ZERNIO_SCHEDULE_MINUTES="0"       # 0 = publish now; e.g. 120 = schedule 2 hours later
-$env:ZERNIO_YOUTUBE_VISIBILITY="public" # public, private, or unlisted
-python autoclip.py
-```
-
-You may set only one platform account ID. Keep the API key in your local
-environment; never put it in `settings.json`, source code, or Git. Instagram
-must be a Business or Creator account. Zernio receives the video and caption
-after each clip finishes rendering.
-
----
-
-## ✨ Features
-
-| Feature | Detail |
-|---|---|
-| 🔴 **Live stream clipping** | Monitors Twitch / YouTube live; auto-waits if offline |
-| 🎞️ **VOD / file clipping** | Drop any `.mp4 .mkv .ts .flv .webm` and get clips instantly |
-| 🧠 **AI moment detection** | Combines audio RMS peaks + word-per-second bursts + 150+ streamer hype words |
-| 📝 **Animated captions** | ASS subtitles with per-word pop animation, Impact font, MrBeast colour palette |
-| 📐 **9:16 output** | Blurred-background or fill-crop layout, 1080 × 1920, ready for Shorts/TikTok/Reels |
-| 🖥️ **Local web UI** | Beautiful dark dashboard — no extra install required |
-| ⚡ **GPU accelerated** | NVIDIA NVENC for encoding + CUDA for Whisper (CPU fallback included) |
-| 🔒 **100% local & free by default** | Nothing leaves your machine unless optional Zernio posting is enabled |
-
----
-
-## 📦 Installation
-
-Choose the Windows experience you prefer:
-
-| Windows option | Best for | Download / command |
+| Option | Use it when | Link |
 |---|---|---|
-| **Installer** | Start Menu, desktop shortcut, bundled runtime | [Download AutoClip-Setup.exe](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) |
-| **Portable** | Run from a folder or USB without installation | Download AutoClip-portable.zip from [Releases](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest), extract it, and run AutoClip.exe |
-| **Manual terminal** | Developers and full control over Python/runtime | Follow the [Windows terminal guide](#-windows-native) below |
+| **Windows installer** | Start Menu/desktop shortcuts and bundled runtime | [Download installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-Setup.exe) |
+| **Portable Windows** | Extract and run from a folder or USB drive | [Download portable ZIP](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-portable.zip) |
+| **Manual terminal** | Full control over Python, FFmpeg, CUDA, and dependencies | Follow the source setup below |
+| **StreamSnip Native** | Rust launcher installer for Windows | [Open Native Edition](https://github.com/sifat-jaman-13/stream-clip-ai-rust) |
 
-The installer and portable build open a terminal with the local server URL so you can see and
-control the process. The manual method also prints the URL and supports the headless commands.
+The Windows packages open a visible terminal and print the local server URL. Keep that terminal open
+while recording, rendering, or publishing. Closing the app stops its local server.
 
-For the Rust launcher installer, use the separate [AutoClip Rust Edition repository](https://github.com/sifat-jaman-13/stream-clip-ai-rust).
+## What the app does
 
-Choose the guide that matches your operating system:
+- Captures live streams with a preference of 1080p60, 1080p, 720p60, 720p, then best.
+- Processes Twitch/YouTube live URLs or local MP4, MKV, TS, FLV, and WebM files.
+- Detects moments from audio energy, speech rate, and built-in/custom hype words.
+- Produces 1080-based output in 9:16, 16:9, 1:1, or 4:5 formats.
+- Supports Facecam + game, blurred background, fill crop, and manually selected source crop.
+- Provides a four-corner draggable facecam selector with reset-to-center behavior.
+- Transcribes with distil-large-v3, large-v3-turbo, small, or base.
+- Renders Karaoke/Classic subtitles with Classic, Hormozi, Neon, MrBeast, Minimal, and Fire presets.
+- Adds streamer credit from the source URL, optional on-video credit, and a configurable CTA.
+- Shows render/transcription and Zernio publishing progress bars, selection, bulk delete, and activity history.
+- Publishes selected or all clips through optional local Zernio configuration.
 
-| Platform | Jump to |
-|---|---|
-| 🪟 Windows (native) | [Windows guide](#-windows-native) |
-| 🍎 macOS | [macOS guide](#-macos) |
-| 🐧 Linux | [Linux guide](#-linux) |
-| 🐳 Docker | [Docker guide](#-docker) |
+## Requirements
 
----
+Native install:
 
-## 🪟 Windows (Native)
+- Python 3.10 or newer
+- FFmpeg on PATH
+- Streamlink for live Twitch/YouTube sources
+- NVIDIA CUDA hardware is optional; CPU fallback is supported
 
-### Step 1 — Install FFmpeg
+Docker files are included. The current app binds its UI to a local ephemeral port and prints that port
+at startup; use Docker as a packaging/headless starting point, or adapt the bind/port setup when you
+need browser access from outside the container.
 
-```powershell
-winget install Gyan.FFmpeg
-```
+## Manual installation
 
-> Restart PowerShell after this so `ffmpeg` is on your `PATH`.  
-> Verify: `ffmpeg -version`
+### Windows PowerShell
 
-### Step 2 — Install Python 3.10+
-
-Download from [python.org](https://www.python.org/downloads/windows/) and tick **"Add Python to PATH"** during setup.
-
-### Step 3 — Create a virtual environment (recommended)
-
-```powershell
-py -3.11 -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
-> If you get a script execution error, run this once first:
-> ```powershell
-> Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-> ```
-
-### Step 4 — Install StreamClipAI
-
-```powershell
-# CPU only (from this checkout):
-pip install -e .
-
-# + Live stream support (Twitch / YouTube live):
-pip install -e ".[live]"
-
-# + NVIDIA GPU acceleration (fastest — requires CUDA-capable GPU):
-pip install -e ".[gpu]"
-
-# Everything at once (recommended):
-pip install -e ".[all]"
-```
-
-### Step 5 — Run
-
-```powershell
-autoclip
-```
-
-A browser window opens automatically at `http://127.0.0.1:<port>/`.
-
-  If the app opens but its buttons do not respond, disable your ad blocker for 127.0.0.1 / localhost. AutoClip is a local app and does not serve ads.
-
-  New clips include a configurable “Subscribe for more clips” end card. On Windows, the optional soft female voice uses the built-in SAPI voice engine; the text remains available if no female voice is installed.
-
-  **Headless (no UI):**
-```powershell
-autoclip live https://www.twitch.tv/your_channel
-autoclip file C:\path\to\recording.mp4
-```
-
----
-
-## 🍎 macOS
-
-### Step 1 — Install Homebrew (if not already)
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-### Step 2 — Install FFmpeg & Python
-
-```bash
-brew install ffmpeg python@3.11
-```
-
-Verify: `ffmpeg -version` and `python3 --version`
-
-### Step 3 — Create a virtual environment (recommended)
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### Step 4 — Install StreamClipAI
-
-```bash
-# CPU only (works on Intel + Apple Silicon):
-pip install -e .
-
-# + Live stream support:
-pip install -e ".[live]"
-
-# Everything at once:
-pip install -e ".[all]"
-```
-
-> **Apple Silicon (M1/M2/M3/M4):** this app currently uses the compatible CPU path (`faster-whisper`/CTranslate2 with INT8 fallback). The app does not currently select the experimental CTranslate2 MPS backend, so do not describe Apple Silicon as automatically using MPS. Use Python 3.11 or 3.12, native arm64 Python, FFmpeg, and `pip install -e ".[live]"`.
-
-### Step 5 — Run
-
-```bash
-autoclip
-```
-
-Your default browser opens at `http://127.0.0.1:<port>/`.
-
-**Headless:**
-```bash
-autoclip live https://www.twitch.tv/your_channel
-autoclip file /path/to/recording.mp4
-```
-
----
-
-## 🐧 Linux
-
-> Works on Ubuntu 22.04+, Debian 12+, Fedora 38+, Arch, and WSL2.
-
-### Step 1 — Install FFmpeg & Python
-
-**Ubuntu / Debian:**
-```bash
-sudo apt update
-sudo apt install -y ffmpeg python3 python3-pip python3-venv
-```
-
-**Fedora / RHEL:**
-```bash
-sudo dnf install -y ffmpeg python3 python3-pip
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S ffmpeg python python-pip
-```
-
-Verify: `ffmpeg -version` and `python3 --version`
-
-### Step 2 — Create a virtual environment (recommended)
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### Step 3 — Install StreamClipAI
-
-```bash
-# CPU only:
-pip install -e .
-
-# + Live stream support:
-pip install -e ".[live]"
-
-# + NVIDIA GPU (use a driver/runtime compatible with CUDA 12.x):
-pip install -e ".[gpu]"
-
-# Everything:
-pip install -e ".[all]"
-```
-
-**NVIDIA GPU on Linux — compatible stack:**
-```bash
-# Recommended: Python 3.11/3.12, an NVIDIA driver supporting CUDA 12.x,
-# and the project GPU extra. CTranslate2 provides the inference runtime.
-nvidia-smi
-pip install -e ".[all]"
-```
-
-The app uses CUDA `float16` first and falls back to CPU `int8` if CUDA cannot
-load. See the [CTranslate2 installation guide](https://opennmt.net/CTranslate2/installation.html)
-for current CUDA support details.
-
-### Step 4 — Run
-
-```bash
-autoclip
-```
-
-> On a headless server without a browser, use headless mode and reach the UI over SSH port-forwarding:
-> ```bash
-> # On your local machine:
-> ssh -L 8888:127.0.0.1:<port> user@your-server
-> # Then open http://localhost:8888 in your local browser
-> ```
-
-**Headless:**
-```bash
-autoclip live https://www.twitch.tv/your_channel
-autoclip file /path/to/recording.mp4
-```
-
----
-
-## 🐳 Docker
-
-> No Python or FFmpeg installation needed — everything is bundled in the image.  
-> CPU only (CUDA requires NVIDIA Container Toolkit — see note below).
-
-### Quick start with Docker Compose (easiest)
-
-```bash
-# 1. Clone the repo (or just download docker-compose.yml):
+~~~powershell
 git clone https://github.com/sifat-jaman-13/stream-clip-ai.git
 cd stream-clip-ai
+winget install Gyan.FFmpeg
+py -3.11 -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e ".[all]"
+~~~
 
-# 2. Build and start:
-docker compose up --build
+If PowerShell blocks activation:
 
-# 3. Open the web UI:
-#    http://localhost:8080
-```
+~~~powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+~~~
 
-Finished clips appear in `./out/` on your host machine.
+### macOS or Linux
 
-### Docker run (manual)
+Install Python 3.10+ and FFmpeg with your system package manager, then:
 
-```bash
-# Build the image:
-docker build -t stream-clip-ai .
+~~~bash
+git clone https://github.com/sifat-jaman-13/stream-clip-ai.git
+cd stream-clip-ai
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e ".[all]"
+~~~
 
-# Run web UI:
-docker run -it --rm \
-  -p 8080:8080 \
-  -v "$(pwd)/out:/data/out" \
-  -v "$(pwd)/rec:/data/rec" \
-  stream-clip-ai
+On Apple Silicon, use native arm64 Python and the CPU/INT8 path. The project does not claim an
+automatic CTranslate2 MPS backend.
 
-# Headless — live stream:
-docker run -it --rm \
-  -v "$(pwd)/out:/data/out" \
-  stream-clip-ai live https://www.twitch.tv/your_channel
+## Run it
 
-# Headless — local file:
-docker run -it --rm \
-  -v "$(pwd)/out:/data/out" \
-  -v "$(pwd)/my_vod.mp4:/data/rec/my_vod.mp4" \
-  stream-clip-ai file /data/rec/my_vod.mp4
-```
+### Web app
 
-### NVIDIA GPU in Docker (Linux only)
+~~~powershell
+autoclip
+# Or: python autoclip.py
+~~~
 
-```bash
-# 1. Install NVIDIA Container Toolkit:
-#    https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+The app opens a local browser window and prints its URL. If controls do not respond, disable your
+ad blocker for 127.0.0.1 and localhost.
 
-# 2. Run with GPU passthrough:
-docker run -it --rm --gpus all \
-  -p 8080:8080 \
-  -v "$(pwd)/out:/data/out" \
-  stream-clip-ai
-```
+### Headless terminal mode
 
-### Volume reference
-
-| Host path | Container path | Purpose |
-|---|---|---|
-| `./out` | `/data/out` | Finished `.mp4` clips + `.txt` captions |
-| `./rec` | `/data/rec` | Temporary live-stream recording segments |
-| `./settings.json` | `/data/settings.json` | Persisted UI settings |
-| `./custom_words.txt` | `/data/custom_words.txt` | Your streamer's custom hype words |
-
----
-
-## 🖥️ Usage
-
-### Web UI
-```bash
-autoclip           # native install
-docker compose up  # docker
-```
-Opens a local dashboard. Paste a Twitch/YouTube URL or browse to a video file and hit **Start clipping**.
-
-### Headless CLI
-```bash
-# Live stream:
-autoclip live https://www.twitch.tv/channel_name
+~~~bash
+autoclip live https://www.twitch.tv/your_channel
 autoclip live https://www.youtube.com/watch?v=LIVE_ID
-
-# Video file / VOD:
 autoclip file /path/to/recording.mp4
-```
+~~~
 
----
+The direct equivalents are python autoclip.py live URL and python autoclip.py file PATH.
 
-## ⚙️ Configuration
+## Defaults and controls
 
-All settings are persisted to `settings.json` automatically.
+| Setting | Default | Meaning |
+|---|---:|---|
+| Minimum viral score | **70** | Higher keeps only stronger moments |
+| Clips per chunk | **2** | 0 means no limit |
+| Live chunk length | **3 minutes** | Each segment is analyzed separately |
+| Before / after peak | **20 / 15 seconds** | Context around the detected moment |
+| Output format | **9:16** | 1080 × 1920 portrait |
+| Speech model | **distil-large-v3** | Changeable in Output |
+| CTA | **Subscribe for more clips** | Text plus optional Windows SAPI voice |
+| Streamer tag | Auto-detected | Blank uses the source URL handle |
 
-| Setting | Default | Description |
-|---|---|---|
-| `clips_per_chunk` | 2 | Clips extracted per recording segment |
-| `chunk_min` | 3 | Live recording segment length (minutes) |
-| `pre` / `post` | 20 / 15 s | Context before / after the peak moment |
-| `min_score` | 1.5 | Hype-score threshold (higher = stricter) |
-| `model` | `distil-large-v3` | Whisper model for speech recognition |
-| `color` | Yellow | Caption highlight colour |
-| `position` | Lower third | Caption vertical position |
-| `layout` | Facecam + game (Twitch) | Video layout (facecam/game, blur bg, or fill-crop) |
-| `font` | Impact | Caption font |
+Settings are persisted in settings.json. Recording and output folders are configurable from Settings;
+missing rec and out directories are recreated automatically.
 
-### Custom hype words
-Edit `custom_words.txt` (auto-created on first run):
-```
-# word or phrase → default weight 2.0
-# word or phrase | 3  → custom weight
-no chance | 3
-oh my days | 3
-let him cook | 2.5
-```
-Changes apply to the next chunk — no restart needed.
+## Subtitles, framing, and output
 
----
+Enable Subtitles (customize) to choose mode, preset, font size, text/stroke colors, position,
+alignment, and vertical nudge. The source-frame selector uses the original frame—normally 16:9—so
+you can select the exact segment instead of accepting a forced crop. The facecam selector has handles
+on all four corners and a reset control.
 
-## 📂 Output
+Each finished clip has an MP4 and matching TXT caption file:
 
-```
+~~~text
 out/
-  streamname_143022_clip1.mp4   ← 9:16 clip (1080×1920)
-  streamname_143022_clip1.txt   ← caption + hashtags ready to paste
-```
+├── clip_name.mp4
+└── clip_name.txt
+~~~
 
----
+Raw live segments are stored in the recording folder and can be deleted after clipping.
 
-## 🧩 How It Works
+## Zernio publishing
 
-```
-Stream / file
-     │
-     ▼ streamlink → ffmpeg (segments)
-  .ts chunks (every N minutes for live)
-     │
-     ▼ faster-whisper (CUDA GPU / CPU)
-  Word-level timestamps
-     │
-     ▼ AI Hype Scorer
-  Audio RMS peaks + words/sec bursts + 150+ hype words + custom phrases
-     │
-     ▼ ffmpeg (NVENC / libx264) + ASS animated subtitles
-  9:16 MP4 clips → out/
-```
+Zernio is optional and disabled until configured. In Settings → Zernio posting:
 
----
+1. Enter the API key and save it locally.
+2. Identify connected Instagram and YouTube channels.
+3. Choose channel IDs, visibility, schedule delay, and auto-post behavior.
+4. Select individual clips, double-click a clip, select all, or publish the whole batch.
 
-## 🛠️ Troubleshooting
+The key is saved in local zernio.json and must never be committed or shared. Posting depends on the
+separate zernio_poster.py integration and a working Zernio account.
 
-| Problem | Fix |
+## Runtime and app updates
+
+Settings includes:
+
+- App version check with a link to the latest release
+- FFmpeg, faster-whisper, Streamlink, CTranslate2, NumPy, and speech-model checks
+- Component update and selected speech-model download controls
+
+The app update control opens the release page; it does not replace files during a running recording.
+
+## Build Windows packages
+
+~~~powershell
+powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
+~~~
+
+The script creates a console-enabled PyInstaller one-folder build, bundles FFmpeg when found, creates
+dist\AutoClip-portable.zip, and compiles dist\installer\AutoClip-Setup.exe when Inno Setup 6 is
+installed. Installer metadata is StreamSnip AI 1.0.1 by ScarZero.
+
+## Troubleshooting
+
+| Symptom | Check |
 |---|---|
-| `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` |
-| `streamlink isn't installed` | `pip install streamlink` |
-| `faster-whisper isn't installed` | `pip install --only-binary=:all: faster-whisper` |
-| GPU / CUDA errors | Falls back to CPU automatically; NVIDIA users can run `pip install -e ".[all]"` |
-| No clips generated | Lower the **Strictness** slider; check the Activity log |
-| Docker: port already in use | Change `-p 8081:8080` and open `http://localhost:8081` |
-| macOS: browser doesn't open | Copy the URL printed in the terminal and open it manually |
-| WSL2: can't open browser | Use headless mode and access the printed port from Windows |
+| Buttons do nothing | Disable the ad blocker for 127.0.0.1 / localhost |
+| Stream stops immediately | Ensure only one copy is running and inspect Activity |
+| No stream found | Confirm Streamlink is installed and keep the best fallback |
+| FFmpeg missing | Install FFmpeg or use the bundled Windows package |
+| No clips | Lower minimum viral score and inspect transcription/activity |
+| CUDA error | Update NVIDIA drivers; CPU fallback remains available |
+| Zernio unavailable | Check zernio_poster.py, API key, and channel settings |
+| Browser does not open | Copy the printed local URL into a browser |
 
----
+## Project map
 
-## 📋 Requirements
-
-- Python **3.10+** (native installs) — not needed for Docker
-- FFmpeg (on `PATH`) — bundled in Docker
-- `numpy >= 1.24`
-- `faster-whisper >= 1.0` / CTranslate2
-- *(optional)* `streamlink` — for live Twitch / YouTube clipping
-- *(optional)* `nvidia-cublas-cu12` — NVIDIA GPU acceleration
-
----
-
-## 📜 License
-
-**MIT** — free to use, modify and distribute. See [LICENSE](LICENSE).
-
----
-
-## 📦 Editions
-
-- [Main AutoClip repository and portable download](https://github.com/sifat-jaman-13/stream-clip-ai)
-- [Rust Edition installer](https://github.com/sifat-jaman-13/stream-clip-ai-rust)
-
-## 🙏 Credits
-
-| Contributor | Role |
+| Path | Purpose |
 |---|---|
-| **Sifat Jaman** | Creator & maintainer |
-| **ChatGPT 5.6 Luna** (OpenAI) | AI product, coding, and documentation collaborator |
-| **Claude** (Anthropic) | AI pair-programming assistant |
-| **Antigravity** (Google DeepMind) | AI development environment and coding collaborator |
+| autoclip.py | Local server, web UI, clipping engine, captions, progress, and orchestration |
+| zernio_poster.py | Optional Zernio API integration |
+| build_windows.ps1 | PyInstaller, portable ZIP, and Inno Setup build |
+| installer/AutoClip.iss | Windows installer metadata and shortcuts |
+| Dockerfile / docker-compose.yml | Container packaging |
+| assets/ | App icon and brand artwork |
 
-Follow Scarzero:
+## Credits and links
 
-- [Facebook](https://www.facebook.com/ScarZero13)
-- [YouTube](https://www.youtube.com/@scarzeroyt)
-- [Twitch](https://www.twitch.tv/scarzero13)
-- [TikTok](https://www.tiktok.com/@scarzero13)
-- [Instagram](https://www.instagram.com/scarzero13/)
+Created by **Sifat Jaman / ScarZero**. Built with credit to ChatGPT 5.6 Luna, Claude, and
+Antigravity, and on top of faster-whisper, Streamlink, FFmpeg, NumPy, and CTranslate2.
 
-Built on top of amazing open-source projects:  
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper) ·
-[streamlink](https://github.com/streamlink/streamlink) ·
-[FFmpeg](https://ffmpeg.org/)
+- [Scar Clip Farm on YouTube](https://youtube.com/@scarclipfarm)
+- [Scarzero on YouTube](https://www.youtube.com/@scarzeroyt)
+- [Scarzero13 on Twitch](https://www.twitch.tv/scarzero13)
+- [Scarzero13 on TikTok](https://www.tiktok.com/@scarzero13)
+- [Scarzero13 on Instagram](https://www.instagram.com/scarzero13/)
+- [ScarZero13 on Facebook](https://www.facebook.com/ScarZero13)
 
----
+## License
 
-*StreamClipAI is not affiliated with Twitch, YouTube, or any streaming platform.*
+MIT. See [LICENSE](LICENSE).

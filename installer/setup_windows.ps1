@@ -53,11 +53,18 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
     Fail-Setup "FFmpeg is still unavailable after setup."
 }
 
-$exe = Join-Path $AppDir "StreamSnipAI.exe"
-if (-not (Test-Path $exe)) {
-    Write-Host "StreamSnipAI.exe was not found." -ForegroundColor Red
-    Read-Host "Press Enter to close"
-    exit 1
+$source = Join-Path $AppDir "source"
+$main = Join-Path $source "autoclip.py"
+if (-not (Test-Path $main)) {
+    Fail-Setup "StreamSnip AI source code was not found."
 }
 
-Start-Process -FilePath $exe -WorkingDirectory $AppDir
+if ($pythonCmd) {
+    Set-Location $source
+    & py -3.12 $main
+} elseif ($pythonExe) {
+    Set-Location $source
+    & $pythonExe.Source $main
+} else {
+    Fail-Setup "Python installation could not be found."
+}

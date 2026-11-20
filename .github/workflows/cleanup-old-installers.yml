@@ -1,0 +1,52 @@
+name: Remove old release installers
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cleanup-old-release-installers
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep the installer only on the newest release
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const installerName = "StreamSnipAI-Setup.exe";
+            let keepReleaseId = context.payload.release?.id;
+
+            if (!keepReleaseId) {
+              const latest = await github.rest.repos.getLatestRelease({ owner, repo });
+              keepReleaseId = latest.data.id;
+            }
+
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { owner, repo, per_page: 100 },
+            );
+
+            for (const release of releases) {
+              if (release.id === keepReleaseId) continue;
+
+              for (const asset of release.assets) {
+                if (asset.name.toLowerCase() !== installerName.toLowerCase()) continue;
+
+                core.info(`Deleting ${asset.name} from ${release.tag_name}`);
+                await github.rest.repos.deleteReleaseAsset({
+                  owner,
+                  repo,
+                  asset_id: asset.id,
+                });
+              }
+            }

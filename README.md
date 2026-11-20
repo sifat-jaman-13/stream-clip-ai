@@ -4,7 +4,6 @@
 
 [![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
 [![Windows installer](https://img.shields.io/badge/download-Windows%20installer-e94560?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe)
-[![Native edition](https://img.shields.io/badge/download-StreamSnip%20Native-DEA584?logo=rust)](https://github.com/sifat-jaman-13/stream-clip-ai-rust/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-files-2496ED?logo=docker)](Dockerfile)
@@ -21,7 +20,6 @@
 |---|---|---|
 | **Windows installer** | Start Menu/desktop shortcuts and bundled runtime | [Download installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe) |
 | **Manual terminal** | Full control over Python, FFmpeg, CUDA, and dependencies | Follow the source setup below |
-| **StreamSnip Native** | Rust launcher installer for Windows | [Open Native Edition](https://github.com/sifat-jaman-13/stream-clip-ai-rust) |
 
 The Windows packages open a visible terminal and print the local server URL. Keep that terminal open
 while recording, rendering, or publishing. Closing the app stops its local server.
@@ -49,6 +47,14 @@ Native install:
 - Streamlink for live Twitch/YouTube sources
 - NVIDIA CUDA hardware is optional; CPU fallback is supported
 - In Settings, choose GPU for CUDA speech + NVENC rendering or CPU for INT8 speech + software rendering, then click Save settings. An RTX 3060 Ti is supported.
+
+## Disk space after installation
+
+The installer is small, but it downloads the Python runtime, speech/GPU packages, and the default
+`distil-large-v3` speech model during setup. Plan for approximately **4–6 GB of free space** for a
+complete first-time installation. Larger models such as `medium` and `large-v3` can require additional
+model storage when selected. Recordings and finished clips are stored separately in the configured
+recording/output folders and can require **many additional GB**, depending on stream length and clip count.
 
 Docker files are included. The current app binds its UI to a local ephemeral port and prints that port
 at startup; use Docker as a packaging/headless starting point, or adapt the bind/port setup when you
@@ -175,7 +181,7 @@ powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 
 The script creates a console-enabled PyInstaller one-folder build, bundles FFmpeg when found, creates
 compiles dist\installer\StreamSnipAI-Setup.exe when Inno Setup 6 is
-installed. Installer metadata is StreamSnip AI 1.0.3 by ScarZero.
+installed. Installer metadata is StreamSnip AI 1.0.10 by ScarZero.
 
 ## Troubleshooting
 

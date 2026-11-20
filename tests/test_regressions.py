@@ -50,7 +50,7 @@ class RegressionTests(unittest.TestCase):
                 publisher.publish_one(video)
             self.assertTrue(any("Zernio error" in line for line in logs))
 
-    def test_cpu_model_fallback_is_reused_for_gpu_preference(self):
+    def test_gpu_failure_does_not_silently_fall_back_to_cpu(self):
         attempts = []
 
         def fake_model(name, device, compute_type):
@@ -63,11 +63,11 @@ class RegressionTests(unittest.TestCase):
         autoclip._model = autoclip._model_key = None
         try:
             engine = autoclip.Engine(autoclip.clean_cfg({}), lambda *_: None)
-            with patch.dict(sys.modules, {"faster_whisper": types.SimpleNamespace(WhisperModel=fake_model)}):
-                first = engine.get_model("distil-large-v3")
-                second = engine.get_model("distil-large-v3")
-            self.assertIs(first, second)
-            self.assertEqual(sum(device == "cpu" for _, device, _ in attempts), 1)
+            with patch.object(autoclip, "preferred_speech_device", return_value="cuda"), \
+                 patch.dict(sys.modules, {"faster_whisper": types.SimpleNamespace(WhisperModel=fake_model)}):
+                with self.assertRaisesRegex(RuntimeError, "CPU fallback is disabled"):
+                    engine.get_model("distil-large-v3")
+            self.assertEqual([device for _, device, _ in attempts], ["cuda", "cuda"])
         finally:
             autoclip._model, autoclip._model_key = old_model, old_key
 
@@ -93,6 +93,23 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(end, peak)
             self.assertLessEqual(end - start, 60)
 
+    def test_clip_bounds_do_not_extend_to_unrelated_later_speech(self):
+        words = [(33.8, 36.0, "nearby"), (75.0, 76.0, "unrelated")]
+        start, end = autoclip.clip_bounds(30, 180, 10, 5, words)
+        self.assertEqual(start, 20)
+        self.assertLessEqual(end, 36.5)
+
+    def test_ass_keeps_overlapping_first_word_and_highlight_contrast(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "clip.ass"
+            cfg = autoclip.clean_cfg({"show_tag_video": True, "target": "https://twitch.tv/channel"})
+            autoclip.make_ass([(4.9, 5.5, "first"), (6.0, 6.5, "second")], 5, 10, path, cfg)
+            subtitles = path.read_text(encoding="utf-8")
+        self.assertIn("FIRST", subtitles)
+        self.assertIn("Style: Default,Impact,100,&H00FFFFFF", subtitles)
+        self.assertIn(r"{\1c&H00FFFF&", subtitles)
+        self.assertIn(r"\1c&H00FFFFFF&", subtitles)
+
     def test_auto_post_failures_are_logged(self):
         logs = []
         publisher = MagicMock()
@@ -114,7 +131,8 @@ class RegressionTests(unittest.TestCase):
     def test_publishing_save_without_account_fields_preserves_channel_ids(self):
         core = object.__new__(autoclip.Core)
         core.publishing = {"provider": "postiz", "postiz": {
-            "api_key": "secret", "instagram_id": "ig-saved", "youtube_id": "yt-saved",
+            "api_key": "secret", "base_url": "http://127.0.0.1:3000",
+            "instagram_id": "ig-saved", "youtube_id": "yt-saved",
         }, "zernio": {}}
         core._make_publisher = MagicMock(return_value=object())
         with patch.object(autoclip, "save_publishing_settings"):
@@ -203,11 +221,13 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(any("quota/rate limit" in line for line in logs))
 
     def test_gemini_nonquota_errors_do_not_switch_providers(self):
+        logs = []
         with patch.object(ai_highlights, "_gemini", side_effect=ai_highlights.AIProviderError("bad key")), \
              patch.object(ai_highlights, "_ollama") as ollama:
-            with self.assertRaisesRegex(ai_highlights.AIProviderError, "bad key"):
-                ai_highlights.select_moments("gemini", [(1, 2, "hello")], 60, {})
+            moments = ai_highlights.select_moments("gemini", [(1, 2, "hello")], 60, {}, logs.append)
+        self.assertEqual(moments, [])
         ollama.assert_not_called()
+        self.assertTrue(any("Skipping this window" in line for line in logs))
 
     def test_ai_analysis_visits_every_transcript_window_and_offsets_results(self):
         prompts = []
@@ -232,6 +252,10 @@ class RegressionTests(unittest.TestCase):
     def test_malformed_moments_string_becomes_provider_error(self):
         with self.assertRaisesRegex(ai_highlights.AIProviderError, "invalid moments JSON"):
             ai_highlights._parse_moments({"moments": "not json"}, 100)
+
+    def test_extract_json_accepts_a_top_level_array(self):
+        self.assertEqual(ai_highlights._extract_json('[{"time": 10, "score": 90}]'),
+                         [{"time": 10, "score": 90}])
 
     def test_ollama_requests_receive_a_context_window(self):
         with patch.object(ai_highlights, "ollama_models", return_value=["test-model"]), \
@@ -283,7 +307,9 @@ class RegressionTests(unittest.TestCase):
     def test_large_v3_turbo_cache_uses_its_actual_hugging_face_namespace(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "hub" / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"
-            cache.mkdir(parents=True)
+            model_file = cache / "snapshots" / "snapshot-id" / "model.bin"
+            model_file.parent.mkdir(parents=True)
+            model_file.touch()
             response = MagicMock()
             response.__enter__.return_value.read.return_value = b'{"info":{"version":"1.0"}}'
             with patch.dict("os.environ", {"HF_HOME": directory}), \

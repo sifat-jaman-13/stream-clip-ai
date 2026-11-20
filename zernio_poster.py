@@ -7,7 +7,9 @@ import datetime as _dt
 import json
 import os
 import pathlib
+import socket
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -61,14 +63,28 @@ class ZernioPublisher:
     def _json_request(self, method, url, body=None):
         data = None if body is None else json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, method=method, headers=self._headers())
-        try:
-            with urllib.request.urlopen(req, timeout=60) as res:
-                raw = res.read()
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")[-500:]
-            raise RuntimeError(f"Zernio API {e.code}: {detail}") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Zernio connection failed: {e.reason}") from e
+        raw = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=60) as res:
+                    raw = res.read()
+                break
+            except urllib.error.HTTPError as e:
+                detail = e.read().decode("utf-8", "replace")[-500:]
+                raise RuntimeError(f"Zernio API {e.code}: {detail}") from e
+            except (urllib.error.URLError, TimeoutError) as e:
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                reason = getattr(e, "reason", e)
+                if isinstance(reason, socket.gaierror) or "getaddrinfo" in str(reason).lower():
+                    raise RuntimeError(
+                        "Zernio DNS lookup failed after 3 attempts. Check your internet connection, "
+                        "VPN, firewall, or DNS settings, then try again."
+                    ) from e
+                raise RuntimeError(f"Zernio connection failed after 3 attempts: {reason}") from e
+        if raw is None:
+            raise RuntimeError("Zernio returned no response.")
         try:
             return json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError:

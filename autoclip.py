@@ -25,8 +25,9 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-from ai_highlights import AIAnalysisCancelled, AIProviderError, ollama_models, select_moments
-APP_VERSION = "1.2.3"
+from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_HUGGINGFACE_MODEL,
+                           ollama_models, select_moments, test_provider)
+APP_VERSION = "1.2.4"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -464,7 +465,7 @@ def save_publishing_settings(cfg):
 
 def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
-                "gemini_model": "gemini-3.8-flash", "huggingface_model": "Qwen/Qwen2.5-7B-Instruct-1M",
+                "gemini_model": "gemini-3.8-flash", "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
                 "gemini_api_key": "", "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", ""))}
     try:
         data = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -473,6 +474,8 @@ def load_ai_settings():
         pass
     if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
         defaults["provider"] = "hooks"
+    if defaults["huggingface_model"] == "Qwen/Qwen2.5-7B-Instruct-1M":
+        defaults["huggingface_model"] = DEFAULT_HUGGINGFACE_MODEL
     return defaults
 
 def public_ai_settings():
@@ -499,6 +502,22 @@ def save_ai_settings(body):
     atomic_json_write(AI_SETTINGS_FILE, cfg)
     apply_huggingface_token()
     return public_ai_settings()
+
+def test_ai_settings(body):
+    """Test entered or saved provider credentials without returning or persisting secrets."""
+    body = body if isinstance(body, dict) else {}
+    cfg = load_ai_settings()
+    provider = str(body.get("provider", cfg["provider"]))
+    if provider not in {"hooks", "ollama", "gemini", "huggingface"}:
+        raise ValueError("Unknown AI highlight provider.")
+    cfg["provider"] = provider
+    for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model"):
+        if key in body:
+            cfg[key] = str(body[key]).strip()[:500]
+    for key in ("gemini_api_key", "huggingface_token"):
+        if body.get(key):
+            cfg[key] = str(body[key]).strip()[:1000]
+    return test_provider(provider, cfg)
 
 # ------------------------------------------------------------------ hype words
 HYPE_WORDS = {
@@ -1992,6 +2011,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, CORE.publish_clips([str(n) for n in names]))
                 if path == "/api/ai/settings":
                     return self._send(200, save_ai_settings(body))
+                if path == "/api/ai/test":
+                    return self._send(200, test_ai_settings(body))
                 if path == "/api/ai/ollama/models":
                     cfg = load_ai_settings()
                     base = str(body.get("ollama_url", cfg["ollama_url"]))
@@ -2045,7 +2066,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, update_components())
                 if path == "/api/quit":
                     self._send(200, {"ok": True}); CORE.shutdown(); QUIT.set(); return
-            except ValueError as e:
+            except (ValueError, AIProviderError) as e:
                 return self._send(400, {"error": str(e)})
             self._send(404, {"error": "not found"})
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -2153,7 +2174,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
 header{display:flex;align-items:center;gap:14px;padding:16px 22px}
 .logo{display:flex;align-items:center;gap:11px;font-weight:700;font-size:18px;letter-spacing:-.2px}
 .mark{width:34px;height:34px;border-radius:11px;background:#0b0000;display:grid;place-items:center;overflow:hidden;box-shadow:0 6px 22px rgba(139,92,246,.45);border:1px solid rgba(255,255,255,.12)}
-.mark img{width:100%;height:100%;object-fit:cover;object-position:center 38%;transform:scale(1.5)}
+.mark img{width:100%;height:100%;object-fit:cover}
 .tag{color:var(--dim);font-weight:400;font-size:13px;margin-left:2px}
 .sp{flex:1}
 .main{position:relative;display:grid;grid-template-columns:430px minmax(0,1fr);gap:18px;padding:0 22px 22px;min-height:0}
@@ -2327,7 +2348,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 <body>
 <div class="app">
 <header>
-  <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="Scarzero Plays" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>StreamSnip AI<span class="tag">by ScarZero &middot; live stream &rarr; viral Shorts</span></div>
+  <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="StreamSnip AI" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>StreamSnip AI<span class="tag">by ScarZero &middot; live stream &rarr; viral Shorts</span></div>
   <div class="sp"></div>
   <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
   <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
@@ -2363,8 +2384,8 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <p class="hint">Install Ollama and at least one model first. Only models already installed and detected by Ollama are available.</p>
     </div>
     <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><b id="gemini-key-state">Not saved</b></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><div class="row"><label>Preferred Gemini model</label></div><input id="gemini-model" class="text" value="gemini-3.8-flash" placeholder="gemini-3.8-flash"><p class="hint">The app checks this model first, tries the other available Gemini models if needed, then falls back to Ollama. Model IDs can change; use one enabled for your API key.</p></div>
-    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="Qwen/Qwen2.5-7B-Instruct-1M"><div class="row"><label>Hugging Face access token</label><b id="hf-token-state">Not saved</b></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads, so the Hugging Face Hub warning should stop. Use a token with Inference Providers access; hosted providers may still enforce account limits.</p></div>
-    <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
+    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="deepseek-ai/DeepSeek-V4.1-Flash:fastest"><div class="row"><label>Hugging Face access token</label><b id="hf-token-state">Not saved</b></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads. Use a token with Inference Providers access and available provider credits.</p></div>
+    <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><button class="btn ghost" id="ai-test-provider">Test connection</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
   </div>
 
   <div class="card">
@@ -2462,7 +2483,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.2.3. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.2.4. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -2539,7 +2560,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
  <div class="settings-dialog about-dialog">
   <div class="settings-head"><div><h2>About StreamSnip AI</h2><p>Local clipping tools for creators, by ScarZero.</p></div><button class="btn ghost" id="btn-about-close">Close</button></div>
   <div class="about-hero">
-   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="Scarzero Plays"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
+   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="StreamSnip AI"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
    <p class="about-copy">Built for creators who want fast local processing, flexible framing, automatic streamer credit, and direct publishing workflows. Follow the author for new releases, clips, and creator updates.</p>
    <p class="about-copy"><strong>Created by Sifat Jaman / ScarZero.</strong> Development assistance credited to ChatGPT 5.6 Luna, Claude, and Antigravity.</p>
    <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a><a class="btn ghost" href="https://www.facebook.com/ScarZero13" target="_blank" rel="noopener">Facebook · ScarZero13</a><a class="btn ghost" href="https://www.twitch.tv/scarzero13" target="_blank" rel="noopener">Twitch · scarzero13</a><a class="btn ghost" href="https://www.tiktok.com/@scarzero13" target="_blank" rel="noopener">TikTok · @scarzero13</a></div>
@@ -2586,14 +2607,16 @@ const AI=BOOT.ai||{provider:"hooks",ollama_url:"http://127.0.0.1:11434",ollama_m
 $("#ai-provider").value=AI.provider||"hooks";
 $("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
 $("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.ollama_model||"Click Detect models"));
-$("#hf-model").value=AI.huggingface_model||"Qwen/Qwen2.5-7B-Instruct-1M";
+$("#hf-model").value=AI.huggingface_model||"deepseek-ai/DeepSeek-V4.1-Flash:fastest";
 $("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";
 $("#gemini-model").value=AI.gemini_model||"gemini-3.8-flash";
 $("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";
-function showAIFields(){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
+function showAIFields(){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$("#ai-test-provider").hidden=p==="hooks";$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
 $("#ai-provider").onchange=showAIFields;$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields()});showAIFields();
 $("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
-$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
+function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest"};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;return payload}
+$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
+$("#ai-test-provider").onclick=async()=>{const b=$("#ai-test-provider");b.disabled=true;$("#ai-settings-msg").textContent="Testing connection...";try{const r=await api("/api/ai/test",aiSettingsPayload());$("#ai-settings-msg").textContent=r.message;toast(r.message,"ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 function setSelectOptions(el,items,chosen){
   el.replaceChildren(h("option",{value:""},"Not selected"));
   items.forEach(a=>el.append(h("option",{value:a.id},a.name+" ("+a.platform+")")));

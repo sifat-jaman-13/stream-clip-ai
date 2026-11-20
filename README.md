@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand-logo.png" alt="StreamSnip AI" width="760">
+</p>
+
 # StreamSnip AI
 
 StreamSnip AI turns Twitch and YouTube live streams or local video files into captioned short-form clips. Processing, transcription, rendering, settings, and generated clips stay local. Zernio is the supported publishing integration.
@@ -38,6 +42,7 @@ Internet access is required for the initial dependency and speech-model download
 - Process MP4, MKV, TS, FLV, and other FFmpeg-supported video files.
 - Transcribe speech locally with faster-whisper.
 - Choose built-in hook-word scoring or optional Ollama, Gemini, or Hugging Face analysis.
+- Test Ollama, Gemini, or Hugging Face directly from the AI card before processing a video.
 - Render 9:16, 16:9, 1:1, and 4:5 clips.
 - Add karaoke or classic captions, streamer credit, end cards, and optional voice CTA.
 - Preview, download, copy captions, reveal folders, select, publish, or delete clips.

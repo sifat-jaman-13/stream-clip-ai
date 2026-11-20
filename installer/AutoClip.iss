@@ -1,5 +1,5 @@
 #define MyAppName "StreamSnip AI"
-#define MyAppVersion "1.2.3"
+#define MyAppVersion "1.2.4"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 
@@ -17,6 +17,8 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
+SetupIconFile=..\assets\app-icon.ico
+UninstallDisplayIcon={app}\StreamSnipAI.exe
 
 [Files]
 Source: "..\dist\StreamSnipAI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

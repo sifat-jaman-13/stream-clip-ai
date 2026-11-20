@@ -49,6 +49,30 @@ class RegressionTests(unittest.TestCase):
             result = publisher._json_request("POST", "https://example.invalid")
         self.assertEqual(result, {})
 
+    def test_zernio_transient_dns_failure_is_retried(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"data": []}'
+        dns_error = __import__("urllib.error").error.URLError(
+            __import__("socket").gaierror(11001, "getaddrinfo failed")
+        )
+        publisher = ZernioPublisher(lambda _: None)
+        with patch("zernio_poster.urllib.request.urlopen", side_effect=[dns_error, response]) as urlopen, \
+             patch("zernio_poster.time.sleep") as sleep:
+            result = publisher._json_request("GET", "https://zernio.com/api/v1/accounts")
+        self.assertEqual(result, {"data": []})
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_zernio_persistent_dns_failure_is_actionable(self):
+        dns_error = __import__("urllib.error").error.URLError(
+            __import__("socket").gaierror(11001, "getaddrinfo failed")
+        )
+        publisher = ZernioPublisher(lambda _: None)
+        with patch("zernio_poster.urllib.request.urlopen", side_effect=dns_error), \
+             patch("zernio_poster.time.sleep"):
+            with self.assertRaisesRegex(RuntimeError, "DNS lookup failed after 3 attempts"):
+                publisher._json_request("GET", "https://zernio.com/api/v1/accounts")
+
     def test_gemini_model_filter_excludes_non_text_models(self):
         response = {
             "models": [
@@ -66,6 +90,61 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("gemini-image-preview", models)
         self.assertNotIn("gemini-robotics-er-1.5-preview", models)
         self.assertNotIn("gemini-embedding-001", models)
+
+    def test_gemini_connection_test_checks_generation(self):
+        response = {"candidates": [{"content": {"parts": [{"text": "STREAMSNIP_OK"}]}}]}
+        with patch.object(ai_highlights, "_gemini_available_models", return_value=["gemini-3.8-flash"]), \
+             patch.object(ai_highlights, "_json_request", return_value=response) as request:
+            result = ai_highlights.test_provider("gemini", {
+                "gemini_api_key": "secret", "gemini_model": "gemini-3.8-flash",
+            })
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["model"], "gemini-3.8-flash")
+        self.assertIn("generateContent", request.call_args.args[0])
+        self.assertNotIn("secret", str(result))
+
+    def test_huggingface_connection_test_checks_auth_and_inference(self):
+        responses = [
+            {"type": "user"},
+            {"choices": [{"message": {"content": "STREAMSNIP_OK"}}]},
+        ]
+        with patch.object(ai_highlights, "_json_request", side_effect=responses) as request:
+            result = ai_highlights.test_provider("huggingface", {
+                "huggingface_token": "hf_secret",
+                "huggingface_model": ai_highlights.DEFAULT_HUGGINGFACE_MODEL,
+            })
+        self.assertTrue(result["ok"])
+        self.assertEqual(request.call_count, 2)
+        self.assertIn("whoami-v2", request.call_args_list[0].args[0])
+        self.assertIn("chat/completions", request.call_args_list[1].args[0])
+        self.assertNotIn("hf_secret", str(result))
+
+    def test_huggingface_connection_test_explains_rejected_token(self):
+        with patch.object(ai_highlights, "_json_request",
+                          side_effect=ai_highlights.AIProviderError("HTTP 401: invalid token")):
+            with self.assertRaisesRegex(ai_highlights.AIProviderError, "Create a new token"):
+                ai_highlights.test_provider("huggingface", {
+                    "huggingface_token": "hf_invalid",
+                    "huggingface_model": ai_highlights.DEFAULT_HUGGINGFACE_MODEL,
+                })
+
+    def test_gemini_connection_test_explains_rejected_key(self):
+        with patch.object(ai_highlights, "_gemini_available_models",
+                          side_effect=ai_highlights.AIProviderError("HTTP 403: forbidden")):
+            with self.assertRaisesRegex(ai_highlights.AIProviderError, "Gemini rejected this API key"):
+                ai_highlights.test_provider("gemini", {
+                    "gemini_api_key": "invalid", "gemini_model": "gemini-3.8-flash",
+                })
+
+    def test_retired_huggingface_default_is_migrated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            path.write_text(__import__("json").dumps({
+                "huggingface_model": "Qwen/Qwen2.5-7B-Instruct-1M",
+            }), encoding="utf-8")
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                settings = autoclip.load_ai_settings()
+        self.assertEqual(settings["huggingface_model"], ai_highlights.DEFAULT_HUGGINGFACE_MODEL)
 
     def test_common_hype_words_are_not_scored(self):
         for word in ("what", "actually", "literally", "hello", "stop", "mad", "gas", "clean", "peak", "send"):
@@ -472,6 +551,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn('window.addEventListener("pagehide"', autoclip.HTML)
         self.assertIn('api("/api/quit")', autoclip.HTML)
         self.assertIn('const center=h("button",{class:"btn ghost"},"Center segment")', autoclip.HTML)
+        self.assertIn('id="ai-test-provider"', autoclip.HTML)
 
 
 if __name__ == "__main__":

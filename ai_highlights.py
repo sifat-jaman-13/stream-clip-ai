@@ -10,6 +10,7 @@ import hashlib
 
 _GEMINI_MODEL_CACHE = {}
 _GEMINI_ACTIVE_CACHE = {}
+DEFAULT_HUGGINGFACE_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash:fastest"
 
 
 class AIProviderError(RuntimeError):
@@ -260,7 +261,7 @@ def _gemini(prompt, config):
 
 def _huggingface(prompt, config):
     token = str(config.get("huggingface_token", "")).strip()
-    model = str(config.get("huggingface_model", "Qwen/Qwen2.5-7B-Instruct-1M")).strip()
+    model = str(config.get("huggingface_model", DEFAULT_HUGGINGFACE_MODEL)).strip()
     if not token:
         raise AIProviderError("Add a Hugging Face access token in AI settings to use hosted models.")
     report = config.get("_ai_log")
@@ -280,6 +281,93 @@ def _huggingface(prompt, config):
         return result
     except (KeyError, IndexError, TypeError) as exc:
         raise AIProviderError("Hugging Face returned no highlight response.") from exc
+
+
+def test_provider(provider, config):
+    """Make a minimal authenticated request and return a secret-free status."""
+    if provider == "hooks":
+        return {"ok": True, "provider": "hooks", "model": "", "message": "Built-in hook scoring is ready."}
+    if provider == "ollama":
+        models = ollama_models(config.get("ollama_url", "http://127.0.0.1:11434"))
+        if not models:
+            raise AIProviderError("Ollama is reachable, but no models are installed.")
+        selected = str(config.get("ollama_model", "")).strip()
+        model = selected if selected in models else models[0]
+        return {"ok": True, "provider": "ollama", "model": model,
+                "message": f"Ollama is reachable and {model} is available."}
+    if provider == "gemini":
+        key = str(config.get("gemini_api_key", "")).strip()
+        if not key:
+            raise AIProviderError("Add a Gemini API key before testing the connection.")
+        try:
+            models = _gemini_available_models(key)
+        except AIProviderError as exc:
+            if any(code in str(exc) for code in ("HTTP 400", "HTTP 401", "HTTP 403")):
+                raise AIProviderError(
+                    "Gemini rejected this API key. Check that it is copied correctly and enabled for the Gemini API."
+                ) from exc
+            raise
+        if not models:
+            raise AIProviderError("The Gemini key is valid, but it exposes no text-generation models.")
+        selected = str(config.get("gemini_model", "gemini-3.8-flash")).strip()
+        model = selected if selected in models else models[0]
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='.-')}:generateContent"
+        try:
+            data = _json_request(url, {
+                "contents": [{"parts": [{"text": "Reply with exactly STREAMSNIP_OK."}]}],
+                "generationConfig": {"temperature": 0, "maxOutputTokens": 32},
+            }, headers={"Content-Type": "application/json", "x-goog-api-key": key}, timeout=45)
+        except AIProviderError as exc:
+            if exc.quota:
+                raise AIProviderError("The Gemini key is valid, but its quota or rate limit is exhausted.", quota=True) from exc
+            raise
+        try:
+            text = str(data["candidates"][0]["content"]["parts"][0]["text"]).strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AIProviderError("Gemini accepted the key but returned no test response.") from exc
+        if not text:
+            raise AIProviderError("Gemini accepted the key but returned an empty test response.")
+        return {"ok": True, "provider": "gemini", "model": model,
+                "message": f"Gemini API key works. Text generation succeeded with {model}."}
+    if provider == "huggingface":
+        token = str(config.get("huggingface_token", "")).strip()
+        model = str(config.get("huggingface_model", DEFAULT_HUGGINGFACE_MODEL)).strip() or DEFAULT_HUGGINGFACE_MODEL
+        if not token:
+            raise AIProviderError("Add a Hugging Face access token before testing the connection.")
+        headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
+        try:
+            _json_request("https://huggingface.co/api/whoami-v2",
+                          headers={"Authorization": "Bearer " + token}, timeout=20)
+        except AIProviderError as exc:
+            if any(code in str(exc) for code in ("HTTP 401", "HTTP 403")):
+                raise AIProviderError(
+                    "Hugging Face rejected this token. Create a new token with Inference Providers access."
+                ) from exc
+            raise
+        try:
+            data = _json_request("https://router.huggingface.co/v1/chat/completions", {
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply with exactly STREAMSNIP_OK."}],
+                "temperature": 0,
+                "max_tokens": 32,
+                "stream": False,
+            }, headers=headers, timeout=90)
+        except AIProviderError as exc:
+            detail = str(exc)
+            if "HTTP 402" in detail:
+                raise AIProviderError("The Hugging Face token works, but the account has no available provider credits.") from exc
+            if any(code in detail for code in ("HTTP 400", "HTTP 404")):
+                raise AIProviderError(f"Hugging Face could not run model '{model}'. Choose a currently available chat model.") from exc
+            raise
+        try:
+            text = str(data["choices"][0]["message"]["content"]).strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AIProviderError("Hugging Face accepted the token but returned no test response.") from exc
+        if not text:
+            raise AIProviderError("Hugging Face accepted the token but returned an empty test response.")
+        return {"ok": True, "provider": "huggingface", "model": model,
+                "message": f"Hugging Face token works. Inference succeeded with {model}."}
+    raise AIProviderError("Unknown highlight provider.")
 
 
 def _call_backend(backend, prompt, config, cancelled):

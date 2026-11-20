@@ -15,7 +15,8 @@ if (-not $csc) { throw "The Windows C# compiler is required to create the thin S
 
 $launcher = Join-Path $PSScriptRoot "installer\StreamSnipAILauncher.cs"
 $launcherExe = Join-Path $thinDir "StreamSnipAI.exe"
-& $csc /nologo /target:exe /out:$launcherExe $launcher
+$icon = Join-Path $PSScriptRoot "assets\app-icon.ico"
+& $csc /nologo /target:exe "/win32icon:$icon" /out:$launcherExe $launcher
 if ($LASTEXITCODE -ne 0) { throw "Could not compile the thin StreamSnip AI launcher." }
 
 $iscc = @(

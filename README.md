@@ -58,7 +58,20 @@ after each clip finishes rendering.
 
 ## 📦 Installation
 
-Choose the guide that matches your setup:
+Choose the Windows experience you prefer:
+
+| Windows option | Best for | Download / command |
+|---|---|---|
+| **Installer** | Start Menu, desktop shortcut, bundled runtime | [Download AutoClip-Setup.exe](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) |
+| **Portable** | Run from a folder or USB without installation | Download AutoClip-portable.zip from [Releases](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest), extract it, and run AutoClip.exe |
+| **Manual terminal** | Developers and full control over Python/runtime | Follow the [Windows terminal guide](#-windows-native) below |
+
+The installer and portable build open a terminal with the local server URL so you can see and
+control the process. The manual method also prints the URL and supports the headless commands.
+
+For the Rust launcher installer, use the separate [AutoClip Rust Edition repository](https://github.com/sifat-jaman-13/stream-clip-ai-rust).
+
+Choose the guide that matches your operating system:
 
 | Platform | Jump to |
 |---|---|

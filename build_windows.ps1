@@ -39,18 +39,6 @@ if ($ffmpeg) {
 }
 
 Copy-Item README.md "dist\AutoClip\README.md" -Force
-
-# Publish a complete portable bundle with the actual app EXE, not the bootstrap launcher.
-$portable = Join-Path $PSScriptRoot "dist\StreamSnipAI-Portable"
-New-Item -ItemType Directory -Force -Path $portable | Out-Null
-Copy-Item "dist\AutoClip\*" $portable -Recurse -Force
-Rename-Item (Join-Path $portable "AutoClip.exe") "StreamSnipAI.exe" -Force
-$portableZip = Join-Path $PSScriptRoot "dist\StreamSnipAI-Portable.zip"
-if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
-Compress-Archive -Path (Join-Path $portable "*") -DestinationPath $portableZip -CompressionLevel Fastest
-if (-not (Test-Path $portableZip)) { throw "Could not create the StreamSnip AI portable app bundle." }
-Write-Host "Portable app bundle created at $portableZip" -ForegroundColor Green
-
 $iscc = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",

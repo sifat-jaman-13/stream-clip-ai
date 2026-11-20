@@ -24,6 +24,7 @@ from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
 APP_VERSION = "1.0.1"
+PRODUCT_NAME = "StreamClip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
     from zernio_poster import ZernioPublisher
@@ -1256,7 +1257,7 @@ TOKEN = secrets.token_urlsafe(24)
 
 # ------------------------------------------------------------------ http server
 class Handler(http.server.BaseHTTPRequestHandler):
-    server_version = "AutoClip"
+    server_version = PRODUCT_NAME
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *a): pass
@@ -1468,7 +1469,7 @@ def main():
     srv.daemon_threads = True
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    print(f"AutoClip is running at {url}\nClose this window (or press Ctrl+C) to quit.")
+    print(f"{PRODUCT_NAME} by ScarZero is running at {url}\nClose this window (or press Ctrl+C) to quit.")
     open_window(url)
     try:
         while not QUIT.wait(0.5):
@@ -1497,7 +1498,7 @@ HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" type="image/png" href="/assets/app-icon.png">
-<title>AutoClip</title>
+<title>StreamClip AI</title>
 <style>
 :root{--bg:#07080d;--card:rgba(255,255,255,.035);--card2:rgba(255,255,255,.07);--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);
 --tx:#eef0f7;--dim:#9a9fb5;--mute:#646a82;--a1:#8b5cf6;--a2:#ec4899;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--grad:linear-gradient(135deg,var(--a1),var(--a2))}
@@ -1555,8 +1556,8 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;bac
 .two .row{margin-top:14px}
 .folder-pick{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
 .update-list{line-height:1.7;white-space:pre-line}
-.about-links{display:flex;flex-wrap:wrap;gap:8px}
-.about-card{margin-top:14px;padding:16px 18px}.about-title{display:flex;align-items:center;gap:12px;margin-bottom:10px}.about-title h3{font-size:16px}.small-mark{width:34px;height:34px;border-radius:10px}.small-mark img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.about-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.about-links a{color:var(--tx);background:rgba(139,92,246,.12);border-color:rgba(139,92,246,.28)}.about-links a:hover{color:#fff;background:rgba(236,72,153,.2);border-color:rgba(236,72,153,.48)}
+.about-dialog{width:min(680px,calc(100vw - 32px));background:linear-gradient(145deg,#151522,#11131c)}.about-hero{padding:18px;border:1px solid rgba(139,92,246,.24);border-radius:16px;background:radial-gradient(420px 180px at 0 0,rgba(139,92,246,.2),transparent 70%),rgba(255,255,255,.025)}.about-title{display:flex;align-items:center;gap:12px}.about-title h3{font-size:18px;letter-spacing:-.2px}.about-title .hint{margin-top:3px}.small-mark{width:42px;height:42px;border-radius:13px}.small-mark img{width:100%;height:100%;object-fit:cover;border-radius:inherit}.about-copy{color:var(--dim);font-size:13px;line-height:1.6;margin-top:16px}
 .sw{display:flex;gap:10px}
 .sw button{width:30px;height:30px;border-radius:50%;border:2px solid transparent;box-shadow:0 0 0 2px rgba(0,0,0,.5) inset;transition:.15s}
 .sw button.on{border-color:#fff;transform:scale(1.12)}
@@ -1677,10 +1678,11 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 <body>
 <div class="app">
 <header>
-  <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="Scarzero Plays" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>AutoClip<span class="tag">Scarzero Plays &middot; live stream &rarr; viral Shorts</span></div>
+  <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="Scarzero Plays" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>StreamClip AI<span class="tag">by ScarZero &middot; live stream &rarr; viral Shorts</span></div>
   <div class="sp"></div>
   <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
   <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
+  <button class="btn ghost" id="btn-about"><span data-ico="info"></span>About</button>
   <button class="btn ghost" id="btn-quit" title="Stop everything and close AutoClip"><span data-ico="power"></span>Quit</button>
 </header>
 <div class="local-note">If buttons do not respond, disable your ad blocker for <b>127.0.0.1</b> / <b>localhost</b>.</div>
@@ -1846,11 +1848,6 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <details><summary id="builtin-sum">Built-in hype words</summary><div class="chips" id="chips"></div></details>
     </div>
   </div>
-  <div class="card about-card">
-    <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="Scarzero Plays"></div><div><h3>AutoClip by Scarzero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
-    <p class="hint">Built for creators who want fast local processing, flexible framing, automatic streamer credit, and direct publishing workflows. Follow the author for new releases, clips, and creator updates.</p>
-    <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a><a class="btn ghost" href="https://www.facebook.com/ScarZero13" target="_blank" rel="noopener">Facebook · ScarZero13</a><a class="btn ghost" href="https://www.twitch.tv/scarzero13" target="_blank" rel="noopener">Twitch · scarzero13</a><a class="btn ghost" href="https://www.tiktok.com/@scarzero13" target="_blank" rel="noopener">TikTok · @scarzero13</a></div>
-  </div>
 </section>
 </div>
 </div>
@@ -1860,8 +1857,18 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   <div id="settings-slot"></div>
  </div>
 </div>
+<div class="overlay" id="about-overlay" hidden>
+ <div class="settings-dialog about-dialog">
+  <div class="settings-head"><div><h2>About StreamClip AI</h2><p>Local clipping tools for creators, by ScarZero.</p></div><button class="btn ghost" id="btn-about-close">Close</button></div>
+  <div class="about-hero">
+   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="Scarzero Plays"></div><div><h3>StreamClip AI by ScarZero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
+   <p class="about-copy">Built for creators who want fast local processing, flexible framing, automatic streamer credit, and direct publishing workflows. Follow the author for new releases, clips, and creator updates.</p>
+   <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a><a class="btn ghost" href="https://www.facebook.com/ScarZero13" target="_blank" rel="noopener">Facebook · ScarZero13</a><a class="btn ghost" href="https://www.twitch.tv/scarzero13" target="_blank" rel="noopener">Twitch · scarzero13</a><a class="btn ghost" href="https://www.tiktok.com/@scarzero13" target="_blank" rel="noopener">TikTok · @scarzero13</a></div>
+  </div>
+ </div>
+</div>
 <div id="toasts"></div>
-<div id="offline" hidden>Lost connection to AutoClip - is it still running?</div>
+<div id="offline" hidden>Lost connection to StreamClip AI - is it still running?</div>
 
 <script>
 const BOOT=__BOOT__;
@@ -1878,6 +1885,7 @@ const ICON={
  play:'<path d="M8 5v14l11-7z" fill="currentColor"/>',
  bolt:'<path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor"/>',
  power:'<path d="M12 3v9"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>',
+ info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
  settings:'<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="m4.9 4.9 1.4 1.4M17.7 17.7l1.4 1.4M4 12H2M22 12h-2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4M12 4V2M12 22v-2"/>',
  check:'<path d="m5 12 5 5 9-10"/>'
 };
@@ -1910,13 +1918,19 @@ async function loadZernioAccounts(){
 }
 function toast(msg,kind){const t=h("div",{class:"toast "+(kind||"")},msg);$("#toasts").append(t);setTimeout(()=>{t.classList.add("out");setTimeout(()=>t.remove(),300)},3200)}
 const settingsOverlay=$("#settings-overlay");
+const aboutOverlay=$("#about-overlay");
 $("#settings-slot").append($("#settings-card"));
 function closeSettings(){settingsOverlay.hidden=true}
 function openSettings(){settingsOverlay.hidden=false;$("#z-api").focus()}
+function closeAbout(){aboutOverlay.hidden=true}
+function openAbout(){aboutOverlay.hidden=false}
 $("#btn-settings").onclick=openSettings;
 $("#btn-settings-close").onclick=closeSettings;
 settingsOverlay.onclick=e=>{if(e.target===settingsOverlay)closeSettings()};
-document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!settingsOverlay.hidden)closeSettings()});
+$("#btn-about").onclick=openAbout;
+$("#btn-about-close").onclick=closeAbout;
+aboutOverlay.onclick=e=>{if(e.target===aboutOverlay)closeAbout()};
+document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(!settingsOverlay.hidden)closeSettings();if(!aboutOverlay.hidden)closeAbout()});
 $("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||"";
 function wireFolderPicker(inputId,buttonId,key){
   const input=$(inputId), button=$(buttonId);
@@ -2171,10 +2185,10 @@ $("#btn-start").onclick=async()=>{
 $("#btn-stop").onclick=()=>api("/api/stop",{force:false}).then(()=>poll(true)).catch(e=>toast(e.message,"bad"));
 $("#btn-kill").onclick=()=>api("/api/stop",{force:true}).then(()=>poll(true)).catch(e=>toast(e.message,"bad"));
 $("#btn-quit").onclick=async()=>{
-  if(!(await confirmBox("Quit AutoClip?","Any recording in progress will stop. Finished clips stay in the clips folder.","Quit")))return;
+  if(!(await confirmBox("Quit StreamClip AI?","Any recording in progress will stop. Finished clips stay in the clips folder.","Quit")))return;
   appClosing=true;
   try{await api("/api/quit")}catch(e){}
-  document.body.replaceChildren(h("div",{style:"height:100%;display:grid;place-items:center;text-align:center;color:#9a9fb5"},h("div",{},h("h2",{style:"color:#fff;margin-bottom:8px"},"AutoClip has closed"),h("p",{},"You can close this window."))));
+  document.body.replaceChildren(h("div",{style:"height:100%;display:grid;place-items:center;text-align:center;color:#9a9fb5"},h("div",{},h("h2",{style:"color:#fff;margin-bottom:8px"},"StreamClip AI has closed"),h("p",{},"You can close this window."))));
   setTimeout(()=>window.close(),400);
 };
 

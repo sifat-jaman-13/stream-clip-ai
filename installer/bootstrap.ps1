@@ -4,9 +4,12 @@ $python = $null
 function Find-PythonCompatible {
   $launcher = Get-Command py -ErrorAction SilentlyContinue
   if ($launcher) {
+    $installed = (& $launcher.Source -0p 2>$null | Out-String)
     foreach ($version in @("3.10", "3.11", "3.12", "3.13", "3.14")) {
-      $candidate = (& $launcher.Source "-$version" -c "import sys; print(sys.executable)" 2>$null | Select-Object -Last 1)
-      if ($candidate -and (Test-Path $candidate)) { return $candidate }
+      if ($installed -match [regex]::Escape($version)) {
+        $candidate = (& $launcher.Source "-$version" -c "import sys; print(sys.executable)" 2>$null | Select-Object -Last 1)
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+      }
     }
   }
   $candidate = Get-Command python -ErrorAction SilentlyContinue

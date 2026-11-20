@@ -26,7 +26,7 @@ from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
 from ai_highlights import AIAnalysisCancelled, AIProviderError, ollama_models, select_moments
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -2462,7 +2462,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.2.1. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.2.2. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>

@@ -11,12 +11,12 @@ StreamSnip AI turns Twitch and YouTube live streams or local video files into ca
 
 Download **StreamSnipAI-Setup.exe** from the [latest GitHub release](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest).
 
-The installer packages:
+The installer packages only:
 
-- the StreamSnip AI application executable;
-- the application source modules;
+- a lightweight `StreamSnipAI.exe` launcher;
+- the StreamSnip AI source modules;
 - the icon and README;
-- a setup script that installs missing runtime dependencies through the Windows terminal.
+- a setup script that opens a Windows terminal and installs runtime dependencies.
 
 On first setup, the script:
 

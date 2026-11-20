@@ -18,7 +18,7 @@
 [![Instagram: Scarzero13](https://img.shields.io/badge/Instagram-Scarzero13-E4405F?logo=instagram)](https://www.instagram.com/scarzero13/)
 [![Facebook: ScarZero13](https://img.shields.io/badge/Facebook-ScarZero13-1877F2?logo=facebook)](https://www.facebook.com/ScarZero13)
 
-## Choose how to run AutoClip
+## Choose how to run StreamClip AI
 
 - **Installer:** [Download AutoClip-Setup.exe](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) for a normal Windows installation with shortcuts.
 - **Portable:** Download **AutoClip-portable.zip** from the [latest release](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest), extract it, and run AutoClip.exe.

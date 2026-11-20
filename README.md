@@ -448,6 +448,11 @@ Stream / file
 
 ---
 
+## 📦 Editions
+
+- [Main AutoClip repository and portable download](https://github.com/sifat-jaman-13/stream-clip-ai)
+- [Rust Edition installer](https://github.com/sifat-jaman-13/stream-clip-ai-rust)
+
 ## 🙏 Credits
 
 | Contributor | Role |

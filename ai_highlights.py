@@ -7,9 +7,13 @@ import urllib.request
 import queue
 import threading
 import hashlib
+import time
 
 _GEMINI_MODEL_CACHE = {}
 _GEMINI_ACTIVE_CACHE = {}
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+RETIRED_GEMINI_MODELS = {"gemini-2.5-flash"}
+GEMINI_ATTEMPTS_PER_MODEL = 3
 DEFAULT_HUGGINGFACE_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash:fastest"
 
 
@@ -159,7 +163,7 @@ def _gemini_available_models(key):
             methods = item.get("supportedGenerationMethods", [])
             model = name.removeprefix("models/")
             lower = model.lower()
-            unsuitable = any(term in lower for term in (
+            unsuitable = model in RETIRED_GEMINI_MODELS or any(term in lower for term in (
                 "image", "tts", "embedding", "vision", "robotics", "live",
                 "native-audio", "computer-use",
             ))
@@ -173,6 +177,8 @@ def _gemini_available_models(key):
 
     def priority(model):
         lower = model.lower()
+        if model == DEFAULT_GEMINI_MODEL:
+            return 0
         if "flash-lite" in lower:
             return 3
         if "flash" in lower:
@@ -182,79 +188,96 @@ def _gemini_available_models(key):
         return 4
 
     names.sort(key=lambda model: (priority(model), model))
-    return names[:4]
+    return names
+
+
+def _gemini_model_order(selected, available=()):
+    """Prefer the configured model, replacing known retired IDs with the current default."""
+    selected = str(selected or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+    if selected in RETIRED_GEMINI_MODELS:
+        selected = DEFAULT_GEMINI_MODEL
+    return list(dict.fromkeys(
+        model for model in [selected, DEFAULT_GEMINI_MODEL, *available]
+        if model and model not in RETIRED_GEMINI_MODELS
+    ))
 
 
 def _gemini(prompt, config):
     key = str(config.get("gemini_api_key", "")).strip()
-    selected = str(config.get("gemini_model", "gemini-3.8-flash")).strip()
+    selected = str(config.get("gemini_model", DEFAULT_GEMINI_MODEL)).strip()
+    selected = _gemini_model_order(selected)[0]
     if not key:
         raise AIProviderError("Add a Gemini API key in AI settings.")
     cache_id = hashlib.sha256(key.encode("utf-8")).hexdigest()
     cached_models = config.get("_gemini_fallback_models")
     if cached_models is None:
-        cached_models = _GEMINI_MODEL_CACHE.get(cache_id)
-    previous = _GEMINI_ACTIVE_CACHE.get(cache_id)
-    preferred = previous[1] if previous and previous[0] == selected else selected
-    active = str(config.get("_gemini_active_model", preferred)).strip()
-    models = list(dict.fromkeys(model for model in [active, selected, *(cached_models or [])] if model))
+        try:
+            cached_models = _gemini_available_models(key)
+        except AIProviderError as exc:
+            if not exc.retryable:
+                raise
+            cached_models = _GEMINI_MODEL_CACHE.get(cache_id, [])
+        config["_gemini_fallback_models"] = cached_models
+        if len(_GEMINI_MODEL_CACHE) >= 8 and cache_id not in _GEMINI_MODEL_CACHE:
+            _GEMINI_MODEL_CACHE.pop(next(iter(_GEMINI_MODEL_CACHE)))
+        _GEMINI_MODEL_CACHE[cache_id] = cached_models
+    active = str(config.get("_gemini_active_model", "")).strip()
+    models = _gemini_model_order(selected, [active, *(cached_models or [])])
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}
     last_error = None
-    index = 0
-    while index < len(models):
-        cancelled = config.get("_gemini_cancelled")
-        if callable(cancelled) and cancelled():
-            raise AIAnalysisCancelled("AI highlight analysis stopped by user.")
-        model = models[index]
-        report = config.get("_ai_log")
-        if callable(report):
-            start, end = config.get("_ai_window", (0, 0))
-            report(f"Trying Gemini cloud model {model} through Google's API for transcript window {int(start)}–{int(end)}s.")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='.-')}:generateContent"
-        try:
-            data = _json_request(url, {"contents": [{"parts": [{"text": prompt}]}],
-                                   "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}},
-                                 headers=headers, timeout=45 if index == 0 else 30)
-            try:
-                result = _extract_json(data["candidates"][0]["content"]["parts"][0]["text"])
-            except (KeyError, IndexError, TypeError) as exc:
-                detail = json.dumps(data.get("promptFeedback", data))[:500]
-                raise AIProviderError("Gemini returned no highlight response: " + detail) from exc
-            config["_gemini_active_model"] = model
-            if len(_GEMINI_ACTIVE_CACHE) >= 8 and cache_id not in _GEMINI_ACTIVE_CACHE:
-                _GEMINI_ACTIVE_CACHE.pop(next(iter(_GEMINI_ACTIVE_CACHE)))
-            _GEMINI_ACTIVE_CACHE[cache_id] = (selected, model)
-            if model != selected:
-                config["_gemini_using_alternate"] = model
+    attempts = 0
+    for model_index, model in enumerate(models):
+        for model_attempt in range(1, GEMINI_ATTEMPTS_PER_MODEL + 1):
+            cancelled = config.get("_gemini_cancelled")
+            if callable(cancelled) and cancelled():
+                raise AIAnalysisCancelled("AI highlight analysis stopped by user.")
+            attempts += 1
             report = config.get("_ai_log")
             if callable(report):
                 start, end = config.get("_ai_window", (0, 0))
-                report(f"Gemini cloud model {model} analyzed transcript window {int(start)}–{int(end)}s using the Google Gemini API.")
-            return result
-        except AIProviderError as exc:
-            last_error = exc
-            if "invalid JSON" in str(exc) or "did not contain valid JSON" in str(exc) or "no highlight response" in str(exc):
-                exc.retryable = True
-            if not exc.retryable:
-                break
-            if cached_models is None:
+                report(
+                    f"Trying Gemini cloud model {model} (attempt {model_attempt}/{GEMINI_ATTEMPTS_PER_MODEL}) "
+                    f"through Google's API for transcript window {int(start)}–{int(end)}s."
+                )
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='.-')}:generateContent"
+            try:
+                data = _json_request(url, {"contents": [{"parts": [{"text": prompt}]}],
+                                       "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}},
+                                     headers=headers, timeout=45 if attempts == 1 else 30)
                 try:
-                    cached_models = _gemini_available_models(key)
-                except AIProviderError:
-                    cached_models = []
-                config["_gemini_fallback_models"] = cached_models
-                if len(_GEMINI_MODEL_CACHE) >= 8:
-                    _GEMINI_MODEL_CACHE.pop(next(iter(_GEMINI_MODEL_CACHE)))
-                _GEMINI_MODEL_CACHE[cache_id] = cached_models
-                models.extend(candidate for candidate in cached_models if candidate not in models)
-            if index + 1 < len(models):
-                report = config.get("_gemini_log")
+                    result = _extract_json(data["candidates"][0]["content"]["parts"][0]["text"])
+                except (KeyError, IndexError, TypeError) as exc:
+                    detail = json.dumps(data.get("promptFeedback", data))[:500]
+                    raise AIProviderError("Gemini returned no highlight response: " + detail,
+                                          retryable=True) from exc
+                config["_gemini_active_model"] = model
+                if len(_GEMINI_ACTIVE_CACHE) >= 8 and cache_id not in _GEMINI_ACTIVE_CACHE:
+                    _GEMINI_ACTIVE_CACHE.pop(next(iter(_GEMINI_ACTIVE_CACHE)))
+                _GEMINI_ACTIVE_CACHE[cache_id] = (selected, model)
+                if model != selected:
+                    config["_gemini_using_alternate"] = model
                 if callable(report):
-                    report(f"Gemini model {model} failed ({str(exc)[:180]}). Trying another available Gemini model.")
-        index += 1
+                    start, end = config.get("_ai_window", (0, 0))
+                    report(f"Gemini cloud model {model} analyzed transcript window {int(start)}–{int(end)}s using the Google Gemini API.")
+                return result
+            except AIProviderError as exc:
+                last_error = exc
+                if "invalid JSON" in str(exc) or "did not contain valid JSON" in str(exc) or "no highlight response" in str(exc):
+                    exc.retryable = True
+                if not exc.retryable:
+                    raise
+                retry_log = config.get("_gemini_log")
+                if callable(retry_log):
+                    if model_attempt < GEMINI_ATTEMPTS_PER_MODEL:
+                        retry_log(f"Gemini model {model} failed ({str(exc)[:180]}). Retrying this model.")
+                    elif model_index + 1 < len(models):
+                        retry_log(f"Gemini model {model} failed three times. Switching to {models[model_index + 1]}.")
+                if model_attempt < GEMINI_ATTEMPTS_PER_MODEL:
+                    time.sleep(0.4 * model_attempt)
     if last_error:
         raise AIProviderError(
-            f"Gemini model attempts failed ({len(models)} tried; last model {model}); last error: {last_error}",
+            f"Gemini model rotation failed after {attempts} attempts across {len(models)} model(s); "
+            f"each model was tried {GEMINI_ATTEMPTS_PER_MODEL} times. Last error: {last_error}",
             quota=last_error.quota, retryable=last_error.retryable) from last_error
     raise AIProviderError("No Gemini models supporting text generation are available for this API key.")
 
@@ -309,26 +332,48 @@ def test_provider(provider, config):
             raise
         if not models:
             raise AIProviderError("The Gemini key is valid, but it exposes no text-generation models.")
-        selected = str(config.get("gemini_model", "gemini-3.8-flash")).strip()
-        model = selected if selected in models else models[0]
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='.-')}:generateContent"
-        try:
-            data = _json_request(url, {
-                "contents": [{"parts": [{"text": "Reply with exactly STREAMSNIP_OK."}]}],
-                "generationConfig": {"temperature": 0, "maxOutputTokens": 32},
-            }, headers={"Content-Type": "application/json", "x-goog-api-key": key}, timeout=45)
-        except AIProviderError as exc:
-            if exc.quota:
-                raise AIProviderError("The Gemini key is valid, but its quota or rate limit is exhausted.", quota=True) from exc
-            raise
-        try:
-            text = str(data["candidates"][0]["content"]["parts"][0]["text"]).strip()
-        except (KeyError, IndexError, TypeError) as exc:
-            raise AIProviderError("Gemini accepted the key but returned no test response.") from exc
-        if not text:
-            raise AIProviderError("Gemini accepted the key but returned an empty test response.")
-        return {"ok": True, "provider": "gemini", "model": model,
-                "message": f"Gemini API key works. Text generation succeeded with {model}."}
+        selected = str(config.get("gemini_model", DEFAULT_GEMINI_MODEL)).strip()
+        candidates = _gemini_model_order(selected, models)
+        last_error = None
+        attempts = 0
+        for model in candidates:
+            for model_attempt in range(1, GEMINI_ATTEMPTS_PER_MODEL + 1):
+                attempts += 1
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='.-')}:generateContent"
+                try:
+                    data = _json_request(url, {
+                        "contents": [{"parts": [{"text": "Reply with exactly STREAMSNIP_OK."}]}],
+                        "generationConfig": {"temperature": 0, "maxOutputTokens": 32},
+                    }, headers={"Content-Type": "application/json", "x-goog-api-key": key}, timeout=45)
+                    text = str(data["candidates"][0]["content"]["parts"][0]["text"]).strip()
+                    if not text:
+                        raise AIProviderError("Gemini accepted the key but returned an empty test response.",
+                                              retryable=True)
+                    return {"ok": True, "provider": "gemini", "model": model,
+                            "attempts": attempts,
+                            "message": f"Gemini API key works. Text generation succeeded with {model}."}
+                except (KeyError, IndexError, TypeError) as exc:
+                    last_error = AIProviderError("Gemini accepted the key but returned no test response.",
+                                                 retryable=True)
+                    last_error.__cause__ = exc
+                except AIProviderError as exc:
+                    last_error = exc
+                    if not exc.retryable:
+                        if any(code in str(exc) for code in ("HTTP 400", "HTTP 401", "HTTP 403")):
+                            raise AIProviderError(
+                                "Gemini rejected this API key. Check that it is copied correctly and enabled for the Gemini API."
+                            ) from exc
+                        raise
+                if model_attempt < GEMINI_ATTEMPTS_PER_MODEL:
+                    time.sleep(0.4 * model_attempt)
+        if last_error and last_error.quota:
+            raise AIProviderError(
+                f"The Gemini key is valid, but quota or rate limits remained exhausted after {attempts} attempts "
+                f"across {len(candidates)} model(s).", quota=True, retryable=True) from last_error
+        raise AIProviderError(
+            f"The Gemini key is valid, but generation failed after {attempts} attempts across "
+            f"{len(candidates)} model(s); each model was tried {GEMINI_ATTEMPTS_PER_MODEL} times. "
+            f"Last error: {last_error}", retryable=True) from last_error
     if provider == "huggingface":
         token = str(config.get("huggingface_token", "")).strip()
         model = str(config.get("huggingface_model", DEFAULT_HUGGINGFACE_MODEL)).strip() or DEFAULT_HUGGINGFACE_MODEL

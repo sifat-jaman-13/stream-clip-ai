@@ -25,9 +25,10 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_HUGGINGFACE_MODEL,
+from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
+                           DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.2.5"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -241,12 +242,97 @@ _INSTANCE_LOCK_HANDLE = None
 STORAGE_PATH_WARNING = ""
 
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
+_CHILD_PROCESS_LOCK = threading.RLock()
+_CHILD_PROCESSES = set()
+_PROCESS_SHUTDOWN = threading.Event()
+
+def _forget_child_process(process):
+    with _CHILD_PROCESS_LOCK:
+        _CHILD_PROCESSES.discard(process)
+
+def terminate_process_tree(process, force=True, timeout=2.0):
+    """Stop a tracked child and its descendants, escalating when necessary."""
+    if process is None:
+        return
+    try:
+        if process.poll() is not None:
+            _forget_child_process(process)
+            return
+    except Exception:
+        pass
+    pid = getattr(process, "pid", None)
+    try:
+        if force and os.name == "nt" and isinstance(pid, int) and pid > 0 and pid != os.getpid():
+            subprocess.run(["taskkill.exe", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True, timeout=max(2.0, timeout), creationflags=CF)
+        else:
+            process.terminate()
+        process.wait(timeout=timeout)
+    except (subprocess.TimeoutExpired, TimeoutError):
+        try: process.kill()
+        except Exception: pass
+        try: process.wait(timeout=1)
+        except Exception: pass
+    except Exception:
+        try: process.kill()
+        except Exception: pass
+    finally:
+        _forget_child_process(process)
+
+def shutdown_child_processes():
+    """Prevent new children and synchronously remove every tracked app process."""
+    _PROCESS_SHUTDOWN.set()
+    with _CHILD_PROCESS_LOCK:
+        processes = list(_CHILD_PROCESSES)
+    for process in processes:
+        terminate_process_tree(process, force=True)
+
+def popen(cmd, **kw):
+    if _PROCESS_SHUTDOWN.is_set():
+        raise RuntimeError("StreamSnip AI is shutting down.")
+    process = subprocess.Popen(cmd, creationflags=CF, **kw)
+    with _CHILD_PROCESS_LOCK:
+        if _PROCESS_SHUTDOWN.is_set():
+            terminate_process_tree(process, force=True)
+            raise RuntimeError("StreamSnip AI is shutting down.")
+        _CHILD_PROCESSES.add(process)
+    return process
+
 def run(cmd, **kw):
     if kw.get("text") and "encoding" not in kw:
         kw["encoding"] = "utf-8"
         kw["errors"] = "replace"
-    return subprocess.run(cmd, creationflags=CF, **kw)
-def popen(cmd, **kw): return subprocess.Popen(cmd, creationflags=CF, **kw)
+    input_data = kw.pop("input", None)
+    capture_output = bool(kw.pop("capture_output", False))
+    timeout = kw.pop("timeout", None)
+    check = bool(kw.pop("check", False))
+    if input_data is not None:
+        if kw.get("stdin") is not None:
+            raise ValueError("stdin and input arguments may not both be used")
+        kw["stdin"] = subprocess.PIPE
+    if capture_output:
+        if kw.get("stdout") is not None or kw.get("stderr") is not None:
+            raise ValueError("stdout/stderr and capture_output may not both be used")
+        kw["stdout"] = subprocess.PIPE
+        kw["stderr"] = subprocess.PIPE
+    process = popen(cmd, **kw)
+    try:
+        stdout, stderr = process.communicate(input_data, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        terminate_process_tree(process, force=True)
+        try: stdout, stderr = process.communicate()
+        except Exception: stdout, stderr = exc.output, exc.stderr
+        exc.output, exc.stderr = stdout, stderr
+        raise
+    except BaseException:
+        terminate_process_tree(process, force=True)
+        raise
+    finally:
+        _forget_child_process(process)
+    result = subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+    if check:
+        result.check_returncode()
+    return result
 
 def acquire_instance_lock():
     """Prevent accidentally launching two AutoClip servers in the same folder."""
@@ -465,7 +551,7 @@ def save_publishing_settings(cfg):
 
 def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
-                "gemini_model": "gemini-3.8-flash", "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
+                "gemini_model": DEFAULT_GEMINI_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
                 "gemini_api_key": "", "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", ""))}
     try:
         data = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -474,6 +560,8 @@ def load_ai_settings():
         pass
     if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
         defaults["provider"] = "hooks"
+    if defaults["gemini_model"] in RETIRED_GEMINI_MODELS:
+        defaults["gemini_model"] = DEFAULT_GEMINI_MODEL
     if defaults["huggingface_model"] == "Qwen/Qwen2.5-7B-Instruct-1M":
         defaults["huggingface_model"] = DEFAULT_HUGGINGFACE_MODEL
     return defaults
@@ -986,8 +1074,7 @@ class Engine:
             self.abort = True
             self.ai_cancel.set()
             for p in list(self.procs):
-                try: p.terminate()
-                except Exception: pass
+                terminate_process_tree(p, force=True)
 
     def check(self):
         if self.abort:
@@ -1446,8 +1533,7 @@ class Engine:
                 self.log(f"Recording stopped after a few seconds. streamlink says: {self._tail(slog_path) or '(nothing)'}")
         finally:
             for pr in (sl, ff):
-                try: pr.terminate()
-                except Exception: pass
+                terminate_process_tree(pr, force=True)
             try: slog.close()
             except Exception: pass
             for fpath in glob.glob(str(REC / f"streamlink_{run_id}.log")):
@@ -1465,15 +1551,59 @@ class Engine:
         except Exception as e:
             self.log(f"ERROR: {e}")
         finally:
-            for p in self.procs:
-                try: p.terminate()
-                except Exception: pass
+            for p in list(self.procs):
+                terminate_process_tree(p, force=True)
+            self.procs = []
             self.emit("done", "")
 
 # ------------------------------------------------------------------ app core (state shared with the UI)
 CLIP_RE = re.compile(r"^[A-Za-z0-9_\-]+\.mp4$")
 LOCK_FILE_RE = re.compile(r"^[A-Za-z0-9_\-]+(?:\.tmp\.mp4|\.mp4|\.txt)$")
 QUIT = threading.Event()
+_WINDOW_CLOSE_LOCK = threading.RLock()
+_WINDOW_CLOSE_TIMER = None
+_WINDOW_LEASES = set()
+
+def cancel_window_close_shutdown():
+    global _WINDOW_CLOSE_TIMER
+    with _WINDOW_CLOSE_LOCK:
+        timer, _WINDOW_CLOSE_TIMER = _WINDOW_CLOSE_TIMER, None
+    if timer:
+        timer.cancel()
+
+def schedule_window_close_shutdown(delay=3.0):
+    """Quit after an app-window close, unless a quick page reload reconnects."""
+    global _WINDOW_CLOSE_TIMER
+    cancel_window_close_shutdown()
+    def close_if_still_gone():
+        global _WINDOW_CLOSE_TIMER
+        with _WINDOW_CLOSE_LOCK:
+            if _WINDOW_LEASES:
+                _WINDOW_CLOSE_TIMER = None
+                return
+            _WINDOW_CLOSE_TIMER = None
+        QUIT.set()
+    timer = threading.Timer(delay, close_if_still_gone)
+    timer.daemon = True
+    with _WINDOW_CLOSE_LOCK:
+        if _WINDOW_LEASES:
+            return
+        _WINDOW_CLOSE_TIMER = timer
+    timer.start()
+
+def begin_window_lease():
+    lease = object()
+    with _WINDOW_CLOSE_LOCK:
+        _WINDOW_LEASES.add(lease)
+    cancel_window_close_shutdown()
+    return lease
+
+def end_window_lease(lease):
+    with _WINDOW_CLOSE_LOCK:
+        _WINDOW_LEASES.discard(lease)
+        empty = not _WINDOW_LEASES
+    if empty and not QUIT.is_set():
+        schedule_window_close_shutdown()
 
 class Core:
     def __init__(self):
@@ -1482,6 +1612,7 @@ class Core:
         self.zernio = self.publishing["zernio"]
         self.publisher = self._make_publisher(self.publishing["provider"])
         self.engine = None
+        self.worker = None
         self.running = False
         self.logs, self.log_id = [], 0
         self.phase, self.status = "idle", "Ready when you are."
@@ -1577,7 +1708,8 @@ class Core:
             self.progress = 0
             self.session = {"clips": 0, "chunks": 0, "started": time.time(), "ended": None}
             self.push("Started (" + ("live stream" if cfg["mode"] == "live" else "video file") + ").")
-            threading.Thread(target=self.engine.run, daemon=True).start()
+            self.worker = threading.Thread(target=self.engine.run, daemon=True, name="streamsnip-engine")
+            self.worker.start()
 
     def stop(self, force):
         with self.lock:
@@ -1636,8 +1768,20 @@ class Core:
 
     def shutdown(self):
         with self.lock:
-            if self.engine and self.running:
-                self.engine.stop(force=True)
+            engine = self.engine
+            worker = self.worker
+        if engine:
+            engine.stop(force=True)
+        shutdown_child_processes()
+        if worker and worker is not threading.current_thread() and worker.is_alive():
+            worker.join(timeout=6)
+        # A worker racing with shutdown may have registered a child just before
+        # the shutdown flag was set. A second idempotent pass closes that gap.
+        shutdown_child_processes()
+        with self.lock:
+            self.running = False
+            self.phase, self.status = "idle", "StreamSnip AI has closed."
+            self.progress = 0
 
     def zernio_status(self):
         cfg = self._config_for("zernio")
@@ -1878,6 +2022,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_window_lease(self):
+        """Keep one socket open so closing the app window is observable server-side."""
+        lease = begin_window_lease()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        try:
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+            while not QUIT.wait(1.0):
+                self.wfile.write(b": keepalive\n\n")
+                self.wfile.flush()
+        except (OSError, ConnectionError, BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        finally:
+            self.close_connection = True
+            end_window_lease(lease)
+
     def _serve_clip(self, name):
         p = OUT / name
         if not (CLIP_RE.match(name) or re.match(r"^[A-Za-z0-9_\-]+\.txt$", name)) or not p.is_file():
@@ -1923,6 +2087,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(403, {"error": "bad host"})
             u = urllib.parse.urlparse(self.path)
             path = u.path
+            if path == "/api/window/lease":
+                if not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
+                    self.close_connection = True
+                    return self._send(403, {"error": "forbidden"})
+                return self._serve_window_lease()
             if path == "/":
                 boot = {"settings": CORE.settings, "colors": {k: "#" + v[4:6] + v[2:4] + v[0:2] for k, v in CAPTION_COLORS.items()},
                         "positions": CAPTION_POS, "models": MODELS, "layouts": LAYOUTS,
@@ -2017,6 +2186,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     cfg = load_ai_settings()
                     base = str(body.get("ollama_url", cfg["ollama_url"]))
                     return self._send(200, {"models": ollama_models(base)})
+                if path == "/api/window/open":
+                    cancel_window_close_shutdown(); return self._send(200, {"ok": True})
+                if path == "/api/window/closing":
+                    schedule_window_close_shutdown(); return self._send(200, {"ok": True})
                 if path == "/api/delete_many":
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
@@ -2065,7 +2238,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/update_components":
                     return self._send(200, update_components())
                 if path == "/api/quit":
-                    self._send(200, {"ok": True}); CORE.shutdown(); QUIT.set(); return
+                    cancel_window_close_shutdown(); self._send(200, {"ok": True}); QUIT.set(); return
             except (ValueError, AIProviderError) as e:
                 return self._send(400, {"error": str(e)})
             self._send(404, {"error": "not found"})
@@ -2095,6 +2268,8 @@ def open_window(url):
     webbrowser.open(url)
 
 def main():
+    _PROCESS_SHUTDOWN.clear()
+    QUIT.clear()
     if len(sys.argv) >= 2 and sys.argv[1] == "--streamlink":
         from streamlink_cli.main import main as streamlink_main
         # The frozen app uses this flag only to select the worker mode. Do not
@@ -2137,6 +2312,7 @@ def main():
             pass
     except KeyboardInterrupt:
         pass
+    cancel_window_close_shutdown()
     CORE.shutdown()
     try:
         time.sleep(0.3)
@@ -2173,7 +2349,7 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
 .app{position:relative;height:100%;display:grid;grid-template-rows:auto 1fr}
 header{display:flex;align-items:center;gap:14px;padding:16px 22px}
 .logo{display:flex;align-items:center;gap:11px;font-weight:700;font-size:18px;letter-spacing:-.2px}
-.mark{width:34px;height:34px;border-radius:11px;background:#0b0000;display:grid;place-items:center;overflow:hidden;box-shadow:0 6px 22px rgba(139,92,246,.45);border:1px solid rgba(255,255,255,.12)}
+.mark{width:34px;height:34px;flex:0 0 34px;border-radius:11px;background:#0b0000;display:grid;place-items:center;overflow:hidden;box-shadow:0 6px 22px rgba(139,92,246,.45);border:1px solid rgba(255,255,255,.12)}
 .mark img{width:100%;height:100%;object-fit:cover}
 .tag{color:var(--dim);font-weight:400;font-size:13px;margin-left:2px}
 .sp{flex:1}
@@ -2483,7 +2659,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.2.4. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.2.5. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -2603,6 +2779,12 @@ async function api(path,body){
   if(!r.ok)throw new Error(j.error||("Request failed ("+r.status+")"));
   return j;
 }
+const markWindowOpen=()=>api("/api/window/open").catch(()=>{});
+let windowLeaseController=null,windowLeaseActive=false;
+function startWindowLease(){if(windowLeaseActive)return;windowLeaseActive=true;windowLeaseController=new AbortController();const controller=windowLeaseController;(async()=>{while(windowLeaseActive&&controller===windowLeaseController){try{const r=await fetch("/api/window/lease",{headers:{"X-Token":TOKEN},cache:"no-store",signal:controller.signal});if(!r.ok)throw new Error("Window lease failed");const reader=r.body.getReader();while(windowLeaseActive){const part=await reader.read();if(part.done)break}}catch(e){}if(windowLeaseActive)await new Promise(resolve=>setTimeout(resolve,350))}})()}
+function stopWindowLease(){windowLeaseActive=false;if(windowLeaseController)windowLeaseController.abort();windowLeaseController=null}
+markWindowOpen();startWindowLease();window.addEventListener("pageshow",()=>{markWindowOpen();startWindowLease()});
+window.addEventListener("pagehide",()=>{stopWindowLease();if(appClosing)return;fetch("/api/window/closing",{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:"{}",keepalive:true}).catch(()=>{})});
 const AI=BOOT.ai||{provider:"hooks",ollama_url:"http://127.0.0.1:11434",ollama_model:""};
 $("#ai-provider").value=AI.provider||"hooks";
 $("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
@@ -2611,8 +2793,8 @@ $("#hf-model").value=AI.huggingface_model||"deepseek-ai/DeepSeek-V4.1-Flash:fast
 $("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";
 $("#gemini-model").value=AI.gemini_model||"gemini-3.8-flash";
 $("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";
-function showAIFields(){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$("#ai-test-provider").hidden=p==="hooks";$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
-$("#ai-provider").onchange=showAIFields;$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields()});showAIFields();
+function showAIFields(updateMessage=false){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$("#ai-test-provider").hidden=p==="hooks";if(updateMessage){const names={ollama:"Ollama",gemini:"Gemini",huggingface:"Hugging Face"};$("#ai-settings-msg").textContent=p==="hooks"?"Built-in hook detection selected":"Ready to test or save "+names[p]+" settings"}$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
+$("#ai-provider").onchange=()=>showAIFields(true);$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields(true)});showAIFields(true);
 $("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
 function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest"};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;return payload}
 $("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};

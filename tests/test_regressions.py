@@ -91,9 +91,19 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("gemini-robotics-er-1.5-preview", models)
         self.assertNotIn("gemini-embedding-001", models)
 
+    def test_gemini_model_discovery_does_not_truncate_usable_models(self):
+        response = {"models": [
+            {"name": f"models/gemini-test-{index}-flash",
+             "supportedGenerationMethods": ["generateContent"]}
+            for index in range(12)
+        ]}
+        with patch.object(ai_highlights, "_json_request", return_value=response):
+            models = ai_highlights._gemini_available_models("key")
+        self.assertEqual(len(models), 12)
+
     def test_gemini_connection_test_checks_generation(self):
         response = {"candidates": [{"content": {"parts": [{"text": "STREAMSNIP_OK"}]}}]}
-        with patch.object(ai_highlights, "_gemini_available_models", return_value=["gemini-3.8-flash"]), \
+        with patch.object(ai_highlights, "_gemini_available_models", return_value=["gemini-2.5-flash"]), \
              patch.object(ai_highlights, "_json_request", return_value=response) as request:
             result = ai_highlights.test_provider("gemini", {
                 "gemini_api_key": "secret", "gemini_model": "gemini-3.8-flash",
@@ -101,7 +111,24 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["model"], "gemini-3.8-flash")
         self.assertIn("generateContent", request.call_args.args[0])
+        self.assertIn("gemini-3.8-flash", request.call_args.args[0])
         self.assertNotIn("secret", str(result))
+
+    def test_gemini_connection_test_retries_each_model_three_times(self):
+        failure = ai_highlights.AIProviderError("HTTP 404: retired", retryable=True)
+        success = {"candidates": [{"content": {"parts": [{"text": "STREAMSNIP_OK"}]}}]}
+        with patch.object(ai_highlights, "_gemini_available_models",
+                          return_value=["gemini-3.8-flash", "gemini-backup-flash"]), \
+             patch.object(ai_highlights, "_json_request",
+                          side_effect=[failure, failure, failure, success]) as request, \
+             patch.object(ai_highlights.time, "sleep"):
+            result = ai_highlights.test_provider("gemini", {
+                "gemini_api_key": "secret", "gemini_model": "gemini-3.8-flash",
+            })
+        self.assertEqual(result["model"], "gemini-backup-flash")
+        self.assertEqual(request.call_count, 4)
+        first_urls = [call.args[0] for call in request.call_args_list[:3]]
+        self.assertTrue(all("gemini-3.8-flash" in url for url in first_urls))
 
     def test_huggingface_connection_test_checks_auth_and_inference(self):
         responses = [
@@ -146,6 +173,16 @@ class RegressionTests(unittest.TestCase):
                 settings = autoclip.load_ai_settings()
         self.assertEqual(settings["huggingface_model"], ai_highlights.DEFAULT_HUGGINGFACE_MODEL)
 
+    def test_retired_gemini_model_is_migrated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            path.write_text(__import__("json").dumps({
+                "gemini_model": "gemini-2.5-flash",
+            }), encoding="utf-8")
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                settings = autoclip.load_ai_settings()
+        self.assertEqual(settings["gemini_model"], ai_highlights.DEFAULT_GEMINI_MODEL)
+
     def test_common_hype_words_are_not_scored(self):
         for word in ("what", "actually", "literally", "hello", "stop", "mad", "gas", "clean", "peak", "send"):
             self.assertNotIn(word, autoclip.HYPE_WORDS)
@@ -157,6 +194,9 @@ class RegressionTests(unittest.TestCase):
         engine.abort = False
         engine.ai_cancel = __import__("threading").Event()
         process = MagicMock()
+        process.poll.return_value = None
+        process.pid = None
+        process.wait.return_value = 0
         engine.procs = [process]
 
         engine.stop(force=False)
@@ -172,12 +212,45 @@ class RegressionTests(unittest.TestCase):
         engine.abort = False
         engine.ai_cancel = __import__("threading").Event()
         process = MagicMock()
+        process.poll.return_value = None
+        process.pid = None
+        process.wait.return_value = 0
         engine.procs = [process]
 
         engine.stop(force=True)
 
         process.terminate.assert_called_once_with()
         self.assertTrue(engine.abort)
+
+    def test_force_shutdown_escalates_a_stuck_child(self):
+        process = MagicMock()
+        process.poll.return_value = None
+        process.pid = None
+        process.wait.side_effect = [__import__("subprocess").TimeoutExpired("child", 1), 0]
+
+        autoclip.terminate_process_tree(process, force=True, timeout=0.01)
+
+        process.terminate.assert_called_once_with()
+        process.kill.assert_called_once_with()
+
+    def test_core_shutdown_stops_engine_children_before_waiting(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = __import__("threading").RLock()
+        core.engine = MagicMock()
+        core.worker = MagicMock()
+        core.worker.is_alive.return_value = True
+        core.running = True
+        core.phase = "recording"
+        core.status = "Recording"
+        core.progress = 50
+
+        with patch.object(autoclip, "shutdown_child_processes") as shutdown_children:
+            core.shutdown()
+
+        core.engine.stop.assert_called_once_with(force=True)
+        core.worker.join.assert_called_once_with(timeout=6)
+        self.assertEqual(shutdown_children.call_count, 2)
+        self.assertFalse(core.running)
 
     def test_zernio_upload_streams_file_instead_of_reading_all_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -374,11 +447,35 @@ class RegressionTests(unittest.TestCase):
                 raise ai_highlights.AIProviderError("HTTP 503 busy", retryable=True)
             return {"candidates": [{"content": {"parts": [{"text": '{"moments":[]}'}]}}]}
 
-        with patch.object(ai_highlights, "_json_request", side_effect=fake_request):
+        with patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
+             patch.object(ai_highlights.time, "sleep"):
             result = ai_highlights._gemini("transcript", {"gemini_api_key": "test-key",
                                                            "gemini_model": "gemini-3.8-flash"})
         self.assertEqual(result, {"moments": []})
         self.assertTrue(any("gemini-backup-flash:generateContent" in url for url in calls))
+        self.assertEqual(sum("gemini-3.8-flash:generateContent" in url for url in calls), 3)
+
+    def test_gemini_exhausts_three_attempts_for_every_model_before_fallback(self):
+        generation_urls = []
+
+        def fake_request(url, payload=None, headers=None, timeout=90):
+            if "/models?" in url:
+                return {"models": [
+                    {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/gemini-backup-flash", "supportedGenerationMethods": ["generateContent"]},
+                ]}
+            generation_urls.append(url)
+            raise ai_highlights.AIProviderError("HTTP 503 busy", retryable=True)
+
+        with patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
+             patch.object(ai_highlights.time, "sleep"):
+            with self.assertRaisesRegex(ai_highlights.AIProviderError, "6 attempts across 2 model"):
+                ai_highlights._gemini("transcript", {
+                    "gemini_api_key": "test-key", "gemini_model": "gemini-3.8-flash",
+                })
+        self.assertEqual(len(generation_urls), 6)
+        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 3)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 3)
 
     @unittest.skipUnless(autoclip.shutil.which("ffmpeg") or autoclip.ffmpeg_exe() != "ffmpeg", "FFmpeg is not installed")
     def test_render_burns_relative_captions_after_input_seek(self):
@@ -416,6 +513,35 @@ class RegressionTests(unittest.TestCase):
             moments = ai_highlights.select_moments("gemini", [(24, 25, "wow")], 60, {}, logs.append)
         self.assertEqual(moments, [(24, 92.0)])
         self.assertTrue(any("quota/rate limit" in line for line in logs))
+
+    def test_gemini_completes_full_retry_rotation_before_ollama(self):
+        generation_urls = []
+        logs = []
+
+        def fake_request(url, payload=None, headers=None, timeout=90):
+            if "/models?" in url:
+                return {"models": [
+                    {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/gemini-backup-flash", "supportedGenerationMethods": ["generateContent"]},
+                ]}
+            generation_urls.append(url)
+            raise ai_highlights.AIProviderError("HTTP 503 busy", retryable=True)
+
+        with patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
+             patch.object(ai_highlights.time, "sleep"), \
+             patch.object(ai_highlights, "_ollama",
+                          return_value={"moments": [{"time": 24, "score": 92}]}) as ollama:
+            moments = ai_highlights.select_moments(
+                "gemini", [(24, 25, "wow")], 60,
+                {"gemini_api_key": "test-key", "gemini_model": "gemini-3.8-flash"},
+                logs.append,
+            )
+        self.assertEqual(moments, [(24, 92.0)])
+        self.assertEqual(len(generation_urls), 6)
+        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 3)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 3)
+        ollama.assert_called_once()
+        self.assertTrue(any("Switching remaining transcript windows to local Ollama" in line for line in logs))
 
     def test_gemini_nonquota_errors_do_not_switch_providers(self):
         logs = []
@@ -547,11 +673,32 @@ class RegressionTests(unittest.TestCase):
             ):
                 self.assertEqual(autoclip.ffmpeg_exe(), str(ffmpeg))
 
-    def test_page_reload_does_not_quit_application(self):
-        self.assertNotIn('window.addEventListener("pagehide"', autoclip.HTML)
+    def test_window_close_quits_but_page_reload_can_reconnect(self):
+        self.assertIn('window.addEventListener("pagehide"', autoclip.HTML)
+        self.assertIn('api("/api/window/open")', autoclip.HTML)
+        self.assertIn('fetch("/api/window/lease"', autoclip.HTML)
+        self.assertIn('fetch("/api/window/closing"', autoclip.HTML)
         self.assertIn('api("/api/quit")', autoclip.HTML)
         self.assertIn('const center=h("button",{class:"btn ghost"},"Center segment")', autoclip.HTML)
         self.assertIn('id="ai-test-provider"', autoclip.HTML)
+
+    def test_window_reload_cancels_pending_close_shutdown(self):
+        timer = MagicMock()
+        with patch.object(autoclip.threading, "Timer", return_value=timer):
+            autoclip.schedule_window_close_shutdown()
+            timer.start.assert_called_once_with()
+            autoclip.cancel_window_close_shutdown()
+        timer.cancel.assert_called_once_with()
+
+    def test_active_window_lease_defers_close_until_socket_ends(self):
+        timer = MagicMock()
+        with patch.object(autoclip.threading, "Timer", return_value=timer):
+            lease = autoclip.begin_window_lease()
+            autoclip.schedule_window_close_shutdown()
+            timer.start.assert_not_called()
+            autoclip.end_window_lease(lease)
+            timer.start.assert_called_once_with()
+            autoclip.cancel_window_close_shutdown()
 
 
 if __name__ == "__main__":

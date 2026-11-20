@@ -43,10 +43,12 @@ Internet access is required for the initial dependency and speech-model download
 - Transcribe speech locally with faster-whisper.
 - Choose built-in hook-word scoring or optional Ollama, Gemini, or Hugging Face analysis.
 - Test Ollama, Gemini, or Hugging Face directly from the AI card before processing a video.
+- Retry each available Gemini text model three times before falling back to local Ollama after retryable API failures.
 - Render 9:16, 16:9, 1:1, and 4:5 clips.
 - Add karaoke or classic captions, streamer credit, end cards, and optional voice CTA.
 - Preview, download, copy captions, reveal folders, select, publish, or delete clips.
 - Publish manually or enable automatic posting through Zernio.
+- Quit from the header or close the app window to stop recording, rendering, the local server, and all app child processes.
 
 ## Run from source
 

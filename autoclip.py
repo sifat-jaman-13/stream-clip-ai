@@ -1898,6 +1898,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   <div class="about-hero">
    <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="Scarzero Plays"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
    <p class="about-copy">Built for creators who want fast local processing, flexible framing, automatic streamer credit, and direct publishing workflows. Follow the author for new releases, clips, and creator updates.</p>
+   <p class="about-copy"><strong>Created by Sifat Jaman / ScarZero.</strong> Development assistance credited to ChatGPT 5.6 Luna, Claude, and Antigravity.</p>
    <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a><a class="btn ghost" href="https://www.facebook.com/ScarZero13" target="_blank" rel="noopener">Facebook · ScarZero13</a><a class="btn ghost" href="https://www.twitch.tv/scarzero13" target="_blank" rel="noopener">Twitch · scarzero13</a><a class="btn ghost" href="https://www.tiktok.com/@scarzero13" target="_blank" rel="noopener">TikTok · @scarzero13</a></div>
   </div>
  </div>

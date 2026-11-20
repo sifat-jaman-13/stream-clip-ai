@@ -1,7 +1,7 @@
 #define MyAppName "StreamSnip AI"
 #define MyAppVersion "1.0.13"
 #define MyAppPublisher "ScarZero"
-#define MyAppExeName "AutoClip.exe"
+#define MyAppExeName "StreamSnipAI.exe"
 
 [Setup]
 AppId={{B4D1D9B4-53A8-4F78-9B4D-7D23C2F50F4C}

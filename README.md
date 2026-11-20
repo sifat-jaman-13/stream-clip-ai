@@ -25,11 +25,11 @@
 
 | Option | Use it when | Link |
 |---|---|---|
-| **Windows installer** | Start Menu/desktop shortcuts and bundled runtime | [Download installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe) |
+| **Windows installer** | Start Menu/desktop shortcuts; downloads its runtime on first setup | [Download installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe) |
 | **Manual terminal** | Full control over Python, FFmpeg, CUDA, and dependencies | Follow the source setup below |
 
 The Windows installer opens a visible terminal through the real `StreamSnipAI.exe` launcher and prints the local server URL. Keep that terminal open
-while recording, rendering, or publishing. Closing the app stops its local server.
+while recording, rendering, or publishing. Closing that terminal or choosing Quit stops the local server.
 
 ## What the app does
 
@@ -57,7 +57,7 @@ Installation requirements:
 
 ## Installation storage and downloads
 
-The installer is small, but it downloads the Python runtime, speech/GPU packages, and the default
+The installer is small, but it downloads a compatible Python runtime, speech/GPU packages, and the default
 `distil-large-v3` speech model during setup. Plan for approximately **4–6 GB of free space** for a
 complete first-time installation. Larger models such as `medium` and `large-v3` can require additional
 model storage when selected. Recordings and finished clips are stored separately in the configured
@@ -69,7 +69,7 @@ The installer automatically downloads or installs the following when needed:
 
 | Component | Purpose |
 |---|---|
-| Python 3.10–3.14 | Runtime for the app; Python 3.12 is installed only as a compatibility fallback |
+| Python 3.10–3.14 | Runtime for the app; Python 3.12 is installed through `winget` only when no compatible Python is found |
 | NumPy | Audio analysis and processing |
 | faster-whisper | Speech transcription |
 | CTranslate2, ONNX Runtime, Tokenizers, PyAV | Speech-model dependencies |
@@ -78,8 +78,8 @@ The installer automatically downloads or installs the following when needed:
 | `distil-large-v3` model | Default speech model, downloaded before first launch |
 
 Plan for approximately **4–6 GB** for the complete first-time installation. `medium` and `large-v3`
-can use additional model storage. FFmpeg is not silently downloaded by the installer; install FFmpeg
-separately and place it on PATH. CPU mode remains available when CUDA is unavailable.
+can use additional model storage. FFmpeg is not downloaded by the installer; install FFmpeg separately
+and place it on PATH. CPU mode remains available when CUDA is unavailable.
 
 Docker files are included. The current app binds its UI to a local ephemeral port and prints that port
 at startup; use Docker as a packaging/headless starting point, or adapt the bind/port setup when you
@@ -210,9 +210,11 @@ The app update control opens the release page; it does not replace files during 
 powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 ~~~
 
-The script creates a PyInstaller compatibility build, a real `dist\StreamSnipAI.exe` launcher, and
-compiles `dist\installer\StreamSnipAI-Setup.exe` when Inno Setup 6 is installed. The released
-installer uses the automatic runtime bootstrap; no portable package is published.
+The script creates a PyInstaller compatibility build in `dist\AutoClip`, a real
+`dist\StreamSnipAI.exe` terminal launcher, and compiles
+`dist\installer\StreamSnipAI-Setup.exe` when Inno Setup 6 is installed. The installer ships the
+Python source and bootstrap files; it downloads the runtime and dependencies on first setup. No
+portable package is published by the current release workflow.
 
 ## Troubleshooting
 
@@ -243,8 +245,9 @@ installer uses the automatic runtime bootstrap; no portable package is published
 
 ## Credits and links
 
-Created by **Sifat Jaman / ScarZero**. Built with credit to ChatGPT 5.6 Luna, Claude, and
-Antigravity, and on top of faster-whisper, Streamlink, FFmpeg, NumPy, and CTranslate2.
+Created by **Sifat Jaman / ScarZero**. Product direction, source ownership, and final decisions
+belong to Sifat Jaman. Development assistance is credited to **ChatGPT 5.6 Luna**, **Claude**, and
+**Antigravity**. The runtime uses faster-whisper, Streamlink, FFmpeg, NumPy, and CTranslate2.
 
 - [Scar Clip Farm on YouTube](https://youtube.com/@scarclipfarm)
 - [Scarzero on YouTube](https://www.youtube.com/@scarzeroyt)

@@ -3,17 +3,20 @@
 > **Turn Twitch and YouTube streams into viral Shorts, Reels, and TikToks automatically.**
 > Local AI highlight detection, animated captions, facecam/game layouts, and optional multi-platform publishing.
 
-[![GitHub](https://img.shields.io/badge/install-from%20source-blue?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/)
+[![Source code](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
+[![Windows installer](https://img.shields.io/badge/download-Windows%20installer-e94560?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-Setup.exe)
+[![Portable ZIP](https://img.shields.io/badge/download-portable%20ZIP-7c3aed?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-portable.zip)
+[![Rust Edition](https://img.shields.io/badge/download-Rust%20Edition-DEA584?logo=rust)](https://github.com/sifat-jaman-13/stream-clip-ai-rust/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker)](https://hub.docker.com/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey)]()
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker)](Dockerfile)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey)](#installation)
 
-[![Follow on YouTube](https://img.shields.io/badge/follow-YouTube-red?logo=youtube)](https://www.youtube.com/@scarzeroyt)
-[![Follow on Twitch](https://img.shields.io/badge/follow-Twitch-9146FF?logo=twitch)](https://www.twitch.tv/scarzero13)
-[![Follow on TikTok](https://img.shields.io/badge/follow-TikTok-000000?logo=tiktok)](https://www.tiktok.com/@scarzero13)
-[![Follow on Instagram](https://img.shields.io/badge/follow-Instagram-E4405F?logo=instagram)](https://www.instagram.com/scarzero13/)
-[![Follow on Facebook](https://img.shields.io/badge/follow-Facebook-1877F2?logo=facebook)](https://www.facebook.com/ScarZero13)
+[![YouTube: Scarzero](https://img.shields.io/badge/YouTube-Scarzero-red?logo=youtube)](https://www.youtube.com/@scarzeroyt)
+[![Twitch: Scarzero13](https://img.shields.io/badge/Twitch-Scarzero13-9146FF?logo=twitch)](https://www.twitch.tv/scarzero13)
+[![TikTok: Scarzero13](https://img.shields.io/badge/TikTok-Scarzero13-000000?logo=tiktok)](https://www.tiktok.com/@scarzero13)
+[![Instagram: Scarzero13](https://img.shields.io/badge/Instagram-Scarzero13-E4405F?logo=instagram)](https://www.instagram.com/scarzero13/)
+[![Facebook: ScarZero13](https://img.shields.io/badge/Facebook-ScarZero13-1877F2?logo=facebook)](https://www.facebook.com/ScarZero13)
 
 ## Choose how to run AutoClip
 

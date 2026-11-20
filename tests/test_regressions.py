@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import autoclip
 import ai_highlights
-from selfhost_publishers import PostizPublisher, _HTTP, _auto_publish
 from zernio_poster import ZernioPublisher
 
 
@@ -15,29 +14,21 @@ class RegressionTests(unittest.TestCase):
     def test_publishing_auto_post_defaults_to_off_and_submit_obeys_toggle(self):
         core = object.__new__(autoclip.Core)
         core.publishing = {
-            "provider": "postiz",
-            "postiz": {"api_key": "secret", "instagram_id": "account"},
+            "provider": "zernio",
+            "zernio": {"api_key": "secret", "instagram_id": "account"},
         }
-        publisher = core._make_publisher("postiz")
+        publisher = core._make_publisher("zernio")
         self.assertFalse(publisher.enabled)
-        with patch("selfhost_publishers.threading.Thread") as thread:
+        with patch("zernio_poster.threading.Thread") as thread:
             publisher.submit("clip.mp4")
             thread.assert_not_called()
 
-        core.publishing["postiz"]["auto_post"] = True
-        publisher = core._make_publisher("postiz")
+        core.publishing["zernio"]["auto_post"] = True
+        publisher = core._make_publisher("zernio")
         self.assertTrue(publisher.enabled)
-        with patch("selfhost_publishers.threading.Thread") as thread:
+        with patch("zernio_poster.threading.Thread") as thread:
             publisher.submit("clip.mp4")
             thread.assert_called_once()
-
-    def test_self_hosted_json_requests_set_content_type(self):
-        response = MagicMock()
-        response.__enter__.return_value.read.return_value = b"{}"
-        with patch("selfhost_publishers.urllib.request.urlopen", return_value=response) as urlopen:
-            _HTTP(lambda _: None, {}).request("POST", "https://example.invalid/api", {"ok": True})
-        request = urlopen.call_args.args[0]
-        self.assertEqual(request.get_header("Content-type"), "application/json")
 
     def test_zernio_manual_publish_propagates_failures(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -49,6 +40,87 @@ class RegressionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "upload failed"):
                 publisher.publish_one(video)
             self.assertTrue(any("Zernio error" in line for line in logs))
+
+    def test_zernio_empty_success_response_is_valid(self):
+        publisher = ZernioPublisher(lambda _: None)
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b""
+        with patch("zernio_poster.urllib.request.urlopen", return_value=response):
+            result = publisher._json_request("POST", "https://example.invalid")
+        self.assertEqual(result, {})
+
+    def test_gemini_model_filter_excludes_non_text_models(self):
+        response = {
+            "models": [
+                {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-robotics-er-1.5-preview", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-image-preview", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-embedding-001", "supportedGenerationMethods": ["embedContent"]},
+            ]
+        }
+        with patch.object(ai_highlights, "_json_request", return_value=response):
+            models = ai_highlights._gemini_available_models("key")
+        self.assertIn("gemini-3.8-flash", models)
+        self.assertIn("gemini-2.5-pro", models)
+        self.assertNotIn("gemini-image-preview", models)
+        self.assertNotIn("gemini-robotics-er-1.5-preview", models)
+        self.assertNotIn("gemini-embedding-001", models)
+
+    def test_common_hype_words_are_not_scored(self):
+        for word in ("what", "actually", "literally", "hello", "stop", "mad", "gas", "clean", "peak", "send"):
+            self.assertNotIn(word, autoclip.HYPE_WORDS)
+
+    def test_graceful_live_stop_keeps_producers_running_until_close(self):
+        engine = object.__new__(autoclip.Engine)
+        engine.cfg = {"mode": "live"}
+        engine.stop_flag = False
+        engine.abort = False
+        engine.ai_cancel = __import__("threading").Event()
+        process = MagicMock()
+        engine.procs = [process]
+
+        engine.stop(force=False)
+
+        process.terminate.assert_not_called()
+        self.assertTrue(engine.stop_flag)
+        self.assertFalse(engine.abort)
+
+    def test_graceful_live_stop_force_terminates_producers(self):
+        engine = object.__new__(autoclip.Engine)
+        engine.cfg = {"mode": "live"}
+        engine.stop_flag = False
+        engine.abort = False
+        engine.ai_cancel = __import__("threading").Event()
+        process = MagicMock()
+        engine.procs = [process]
+
+        engine.stop(force=True)
+
+        process.terminate.assert_called_once_with()
+        self.assertTrue(engine.abort)
+
+    def test_zernio_upload_streams_file_instead_of_reading_all_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            video = Path(directory) / "clip.mp4"
+            video.write_bytes(b"video-data")
+            publisher = ZernioPublisher(lambda _: None)
+            publisher._json_request = MagicMock(side_effect=[
+                {"uploadUrl": "https://upload.invalid/video", "publicUrl": "https://cdn.invalid/video.mp4"}
+            ])
+            uploaded = {}
+            def fake_urlopen(request, timeout):
+                uploaded["header"] = request.get_header("Content-length")
+                uploaded["reader"] = request.data.read()
+                return __import__("contextlib").nullcontext(MagicMock())
+
+            with patch.object(autoclip.urllib.request, "urlopen", side_effect=fake_urlopen):
+                with patch.object(__import__("zernio_poster").urllib.request, "urlopen", side_effect=fake_urlopen):
+                    public_url = publisher._upload(video)
+
+            self.assertEqual(public_url, "https://cdn.invalid/video.mp4")
+            self.assertEqual(uploaded["header"], "10")
+            self.assertEqual(uploaded["reader"], b"video-data")
 
     def test_gpu_failure_does_not_silently_fall_back_to_cpu(self):
         attempts = []
@@ -99,6 +171,62 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(start, 20)
         self.assertLessEqual(end, 36.5)
 
+    def test_quiet_top_ai_candidate_does_not_cancel_lower_candidates(self):
+        engine = object.__new__(autoclip.Engine)
+        engine.cfg = {"min_score": 70, "clips_per_chunk": 0, "chunk_min": 3}
+        engine.ai_cancel = __import__("threading").Event()
+        engine.log = MagicMock()
+        engine.status = MagicMock()
+        engine.rms_per_second = lambda _path: __import__("numpy").ones(201) * 0.01
+
+        def picks(*_args):
+            return [(100, 100), (20, 90), (160, 80)]
+
+        engine.rms_per_second = lambda _path: __import__("numpy").where(
+            __import__("numpy").arange(201) == 100,
+            0.001,
+            0.01,
+        )
+        with patch.object(autoclip, "load_custom", return_value=[]), \
+             patch.object(autoclip, "load_ai_settings", return_value={"provider": "gemini"}), \
+             patch.object(autoclip, "select_moments", side_effect=picks):
+            found, _duration = engine.find_peaks("clip.mp4", [])
+
+        self.assertIn(20, [p for p, _score in found])
+        self.assertIn(160, [p for p, _score in found])
+
+    def test_settings_version_migrates_low_score_only_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            with patch.object(autoclip, "SETTINGS_FILE", path):
+                path.write_text(__import__("json").dumps({"min_score": 3}), encoding="utf-8")
+                migrated = autoclip.load_settings()
+                autoclip.save_settings(migrated)
+                reloaded = autoclip.load_settings()
+
+        self.assertEqual(migrated["min_score"], 100.0)
+        self.assertEqual(reloaded["min_score"], 100.0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            with patch.object(autoclip, "SETTINGS_FILE", path):
+                path.write_text(__import__("json").dumps({"min_score": 3, "_settings_version": 2}), encoding="utf-8")
+                unchanged = autoclip.load_settings()
+        self.assertEqual(unchanged["min_score"], 3.0)
+
+    def test_clip_bounds_random_windows_always_contain_peak(self):
+        random = __import__("random")
+        for _ in range(20000):
+            duration = random.uniform(60, 500)
+            peak = random.uniform(0, duration)
+            before = random.uniform(3, 90)
+            after = random.uniform(3, 90)
+            words = [(s, s + 1, "word") for s in (random.uniform(0, duration),)]
+            start, end = autoclip.clip_bounds(peak, duration, before, after, words)
+            self.assertLessEqual(start, peak)
+            self.assertGreaterEqual(end, peak)
+            self.assertLessEqual(end - start, 60.000001)
+
     def test_ass_keeps_overlapping_first_word_and_highlight_contrast(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "clip.ass"
@@ -110,16 +238,6 @@ class RegressionTests(unittest.TestCase):
         self.assertIn(r"{\1c&H00FFFF&", subtitles)
         self.assertIn(r"\1c&H00FFFFFF&", subtitles)
 
-    def test_auto_post_failures_are_logged(self):
-        logs = []
-        publisher = MagicMock()
-        publisher.name = "Postiz"
-        publisher.log = logs.append
-        publisher.publish_one.side_effect = RuntimeError("upload failed")
-        _auto_publish(publisher, "clip.mp4")
-        self.assertIn("Postiz auto-post error", logs[0])
-        self.assertIn("upload failed", logs[0])
-
     def test_windows_reveal_opens_containing_folder(self):
         with tempfile.TemporaryDirectory() as directory:
             clip = Path(directory) / "clip.mp4"
@@ -130,15 +248,15 @@ class RegressionTests(unittest.TestCase):
 
     def test_publishing_save_without_account_fields_preserves_channel_ids(self):
         core = object.__new__(autoclip.Core)
-        core.publishing = {"provider": "postiz", "postiz": {
-            "api_key": "secret", "base_url": "http://127.0.0.1:3000",
+        core.publishing = {"provider": "zernio", "zernio": {
+            "api_key": "secret",
             "instagram_id": "ig-saved", "youtube_id": "yt-saved",
-        }, "zernio": {}}
+        }}
         core._make_publisher = MagicMock(return_value=object())
         with patch.object(autoclip, "save_publishing_settings"):
-            core.publishing_save({"provider": "postiz", "api_key": "", "auto_post": True})
-        self.assertEqual(core.publishing["postiz"]["instagram_id"], "ig-saved")
-        self.assertEqual(core.publishing["postiz"]["youtube_id"], "yt-saved")
+            core.publishing_save({"provider": "zernio", "api_key": "", "auto_post": True})
+        self.assertEqual(core.publishing["zernio"]["instagram_id"], "ig-saved")
+        self.assertEqual(core.publishing["zernio"]["youtube_id"], "yt-saved")
 
     def test_render_uses_frame_accurate_input_seeking_for_captions(self):
         engine = autoclip.Engine(autoclip.clean_cfg({"compute_device": "cpu"}), lambda *_: None)

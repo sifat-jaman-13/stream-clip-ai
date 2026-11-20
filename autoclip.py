@@ -19,14 +19,14 @@ Run:
 Output: the "out" folder. Each clip = .mp4 in the selected format (9:16 by default) + .txt (caption and hashtags to paste).
 Your own hype words: "Hype words" tab in the app (stored in custom_words.txt, re-read for every chunk).
 """
-import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64
+import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64, uuid
 import math
 import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
 from ai_highlights import AIAnalysisCancelled, AIProviderError, ollama_models, select_moments
-APP_VERSION = "1.1.9"
+APP_VERSION = "1.2.1"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -35,13 +35,6 @@ try:
 except Exception:
     ZernioPublisher = None
     ZERNIO_AVAILABLE = False
-try:
-    from selfhost_publishers import MixpostPublisher, PostizPublisher, publisher_for
-    SELF_HOSTED_AVAILABLE = True
-except Exception:
-    MixpostPublisher = PostizPublisher = None
-    publisher_for = None
-    SELF_HOSTED_AVAILABLE = False
 
 # ------------------------------------------------------------------ setup
 def _add_cuda_dlls():
@@ -214,7 +207,9 @@ def update_components():
     """
     if getattr(sys, "frozen", False):
         raise RuntimeError("This app bundles its runtime components. Download and install the latest StreamSnipAI-Setup.exe to update them.")
-    commands = [sys.executable, "-m", "pip", "install", "--upgrade", "faster-whisper", "streamlink", "ctranslate2", "numpy"]
+    requirements = pathlib.Path(__file__).resolve().parent / "requirements.txt"
+    commands = [sys.executable, "-m", "pip", "install", "--upgrade", "-r", str(requirements),
+                "streamlink", "numpy"]
     result = run(commands, capture_output=True, text=True, timeout=900)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout or "Package update failed").strip()[-800:])
@@ -245,7 +240,11 @@ _INSTANCE_LOCK_HANDLE = None
 STORAGE_PATH_WARNING = ""
 
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
-def run(cmd, **kw):   return subprocess.run(cmd, creationflags=CF, **kw)
+def run(cmd, **kw):
+    if kw.get("text") and "encoding" not in kw:
+        kw["encoding"] = "utf-8"
+        kw["errors"] = "replace"
+    return subprocess.run(cmd, creationflags=CF, **kw)
 def popen(cmd, **kw): return subprocess.Popen(cmd, creationflags=CF, **kw)
 
 def acquire_instance_lock():
@@ -396,21 +395,46 @@ def normalize_stream_target(value):
         return "https://" + target
     return target
 
+SETTINGS_VERSION = 2
+
+def atomic_json_write(path, value):
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_text(json.dumps(value, indent=2), encoding="utf-8")
+        if os.name != "nt":
+            os.chmod(temp, 0o600)
+        os.replace(temp, path)
+        if os.name != "nt":
+            os.chmod(path, 0o600)
+    finally:
+        temp.unlink(missing_ok=True)
+
 def load_settings():
     try:
         raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        # Migrate the old internal 0-5 hype threshold to the new 0-100 score.
-        try:
-            old_score = float(raw.get("min_score"))
-            if 0 < old_score <= 5: raw["min_score"] = round(50 + old_score * 20, 1)
-        except (TypeError, ValueError):
-            pass
+        if not isinstance(raw, dict):
+            return dict(DEFAULTS)
+        # Version 1 stored min_score on a 0-5 scale. Version 2 uses 0-100.
+        if int(raw.get("_settings_version", 1)) < SETTINGS_VERSION:
+            try:
+                old_score = float(raw.get("min_score"))
+                if 0 < old_score <= 5:
+                    raw["min_score"] = round(50 + old_score * 20, 1)
+            except (TypeError, ValueError, OverflowError):
+                pass
         return clean_cfg(raw)
-    except Exception: return dict(DEFAULTS)
+    except Exception:
+        return dict(DEFAULTS)
 
 def save_settings(cfg):
-    try: SETTINGS_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    except Exception: pass
+    try:
+        cfg = dict(cfg)
+        cfg["_settings_version"] = SETTINGS_VERSION
+        atomic_json_write(SETTINGS_FILE, cfg)
+    except Exception as exc:
+        print(f"Could not save settings: {exc}", file=sys.stderr)
 
 def load_zernio_settings():
     try:
@@ -421,25 +445,22 @@ def load_zernio_settings():
 
 def save_zernio_settings(cfg):
     # This file is local-only and ignored by Git. Never send the API key to the browser.
-    ZERNIO_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    atomic_json_write(ZERNIO_FILE, cfg)
 
 def load_publishing_settings():
-    defaults = {"provider": "postiz", "zernio": load_zernio_settings(), "postiz": {}, "mixpost": {}}
+    defaults = {"provider": "zernio", "zernio": load_zernio_settings()}
     try:
         raw = json.loads(PUBLISHING_FILE.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
-            for key in ("provider", "zernio", "postiz", "mixpost"):
-                if key in raw: defaults[key] = raw[key]
+            zernio = raw.get("zernio")
+            if isinstance(zernio, dict):
+                defaults["zernio"].update(zernio)
     except Exception:
         pass
-    if not isinstance(defaults["provider"], str) or defaults["provider"] not in {"zernio", "postiz", "mixpost"}:
-        defaults["provider"] = "postiz"
-    for key in ("zernio", "postiz", "mixpost"):
-        if not isinstance(defaults[key], dict): defaults[key] = {}
     return defaults
 
 def save_publishing_settings(cfg):
-    PUBLISHING_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    atomic_json_write(PUBLISHING_FILE, cfg)
 
 def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
@@ -475,7 +496,7 @@ def save_ai_settings(body):
         if body.get(key): cfg[key] = str(body[key]).strip()[:1000]
     if body.get("clear_gemini_key"): cfg["gemini_api_key"] = ""
     if body.get("clear_huggingface_token"): cfg["huggingface_token"] = ""
-    AI_SETTINGS_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    atomic_json_write(AI_SETTINGS_FILE, cfg)
     apply_huggingface_token()
     return public_ai_settings()
 
@@ -486,25 +507,25 @@ HYPE_WORDS = {
     "nahh", "nah", "holy", "jesus", "damn", "dang", "unbelievable", "insane", "crazy",
     "nuts", "mental", "wild", "cracked", "clutch", "clip", "scream", "screaming",
     "dead", "dying", "crying", "cry", "wow", "whoa", "woah", "yikes", "bruv", "fam",
-    "mad", "madness", "sick", "filthy", "nasty", "disgusting", "unreal", "actually",
-    "what", "huh", "hello", "stop", "shut", "seriously", "literally", "genuinely",
+    "madness", "sick", "filthy", "nasty", "disgusting", "unreal",
+    "huh", "seriously", "genuinely",
     # laughing
     "lol", "lmao", "lmfao", "haha", "hahaha", "hahahaha", "rofl", "wheezing", "deceased",
     # gen z / streamer slang
     "sheesh", "cooked", "cook", "cooking", "goated", "goat", "rizz", "rizzler", "sigma",
     "skibidi", "gyatt", "fanum", "ohio", "bussin", "slay", "lit", "fire", "sus", "cap",
     "nocap", "bet", "fr", "ong", "deadass", "valid", "based", "ratio", "glazing", "glaze",
-    "mid", "banger", "tuff", "peak", "crashout", "aura", "mewing", "cringe", "yeet",
+    "mid", "banger", "tuff", "crashout", "aura", "mewing", "cringe", "yeet",
     "vibes", "goofy", "ahh", "lowkey", "highkey", "bozo", "npc", "griefing", "trolling",
     "cheating", "hacker", "hacks", "w", "l", "ez", "gg", "pog", "poggers", "kekw", "omegalul",
     "pogchamp", "monkas", "copium", "hopium", "sadge", "pepega", "kappa", "clown",
     "sussy", "drip", "slaps", "chad", "gigachad",
     # UK-streamer style (Lacy / Zerkaa type energy)
-    "peng", "gassed", "gas", "safe", "innit", "mandem", "wagwan", "bare", "dench", "banging",
+    "peng", "safe", "innit", "mandem", "wagwan", "bare", "dench", "banging",
     "proper", "bloody", "bollocks", "mug", "donkey", "melt", "muppet", "legend", "shocking",
     "scammed", "robbed", "rigged", "washed", "gapped", "gap", "diff", "sweaty", "tryhard",
-    "jumpscare", "ragequit", "rage", "lagging", "lag", "banned", "ban", "kicked", "send",
-    "clean", "cleanest", "disrespectful", "outplayed", "demolished", "obliterated",
+    "jumpscare", "ragequit", "rage", "lagging", "lag", "banned", "ban", "kicked",
+    "cleanest", "disrespectful", "outplayed", "demolished", "obliterated",
     "hilarious", "genius", "stupid", "idiot", "embarrassing", "terrifying", "scary",
 }
 HYPE_PHRASES = {
@@ -809,6 +830,9 @@ def clip_bounds(peak, duration, before, after, words, limit=60):
     if starts:
         start = max(0, min(starts, key=lambda w: abs(w[0] - start))[0] - 0.25)
     start = min(start, peak)
+    if peak > start + limit:
+        start = peak - limit
+    start = max(0.0, min(start, peak))
     max_end = min(duration, start + limit)
     end = min(max(end, peak), max_end)
     # Extend only through speech adjacent to this clip boundary. A later
@@ -942,9 +966,9 @@ class Engine:
         if force or self.cfg["mode"] != "live":
             self.abort = True
             self.ai_cancel.set()
-        for p in list(self.procs):
-            try: p.terminate()
-            except Exception: pass
+            for p in list(self.procs):
+                try: p.terminate()
+                except Exception: pass
 
     def check(self):
         if self.abort:
@@ -1106,8 +1130,11 @@ class Engine:
         picks, s = [], score.copy()
         while n_clips is None or len(picks) < n_clips:
             i = int(s.argmax())
-            if s[i] < float(self.cfg["min_score"]) or s[i] <= 0 or rms[i] < 0.0025:
+            if s[i] < float(self.cfg["min_score"]) or s[i] <= 0:
                 break
+            if rms[i] < 0.0025:
+                s[i] = -99
+                continue
             picks.append((i, float(s[i])))
             s[max(0, i - 40): i + 40] = -99          # never pick overlapping moments
         if not picks:
@@ -1309,6 +1336,8 @@ class Engine:
         sl.stdout.close()
         self.procs = [sl, ff]
         done = set()
+        producers_stopped = False
+        observed_segment_sizes = {}
         idle = f"Recording - a clip batch is made every {self.cfg['chunk_min']} min."
         self.status(idle, "recording", 0)
         t0 = time.time(); last_beat = t0; last_growth = t0; last_total = -1; warned = False
@@ -1316,8 +1345,46 @@ class Engine:
             while not self.abort:
                 segs = sorted(glob.glob(str(REC / f"seg_{run_id}_*.ts")))
                 recording = ff.poll() is None and not self.stop_flag
+                if self.stop_flag and not producers_stopped:
+                    producers_stopped = True
+                    self.status("Stopping the live source and closing the final recording...", "stopping")
+                    try:
+                        sl.terminate()
+                    except Exception:
+                        pass
+                    try:
+                        ff.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            ff.terminate()
+                        except Exception:
+                            pass
+                        try:
+                            ff.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            try:
+                                ff.kill()
+                            except Exception:
+                                pass
+                            try:
+                                ff.wait(timeout=5)
+                            except Exception:
+                                pass
+                    try:
+                        sl.wait(timeout=5)
+                    except Exception:
+                        pass
+                    recording = False
                 # progress heartbeat + stall detection
-                total = sum(os.path.getsize(x) for x in segs if os.path.exists(x))
+                for segment in segs:
+                    try:
+                        observed_segment_sizes[segment] = max(
+                            observed_segment_sizes.get(segment, 0),
+                            os.path.getsize(segment),
+                        )
+                    except OSError:
+                        pass
+                total = sum(observed_segment_sizes.values())
                 if total > last_total:
                     last_total = total; last_growth = time.time(); warned = False
                 if recording and not warned and time.time() - last_growth > STALL_SECONDS:
@@ -1410,25 +1477,19 @@ class Core:
             self.push(STORAGE_PATH_WARNING)
 
     def _config_for(self, provider=None):
-        return self.publishing.get(provider or self.publishing.get("provider", "zernio"), {})
+        return self.publishing.get("zernio", {})
 
     def _make_publisher(self, provider=None, enabled=None):
-        provider = provider or self.publishing.get("provider", "zernio")
+        provider = "zernio"
         if enabled is None:
-            enabled = bool(self._config_for(provider).get("auto_post", False))
-        cfg = dict(self._config_for(provider), enabled=enabled)
-        if provider == "zernio":
-            return ZernioPublisher(self.push, cfg) if ZERNIO_AVAILABLE else None
-        return publisher_for(provider, self.push, cfg) if SELF_HOSTED_AVAILABLE and publisher_for else None
+            enabled = bool(self._config_for().get("auto_post", False))
+        cfg = dict(self._config_for(), enabled=enabled)
+        return ZernioPublisher(self.push, cfg) if ZERNIO_AVAILABLE else None
 
     def _provider_status(self, provider):
-        cfg = self._config_for(provider)
-        if provider == "zernio":
-            return {"configured": bool(cfg.get("api_key")), "api_key_set": bool(cfg.get("api_key")),
-                    "available": ZERNIO_AVAILABLE, "base_url": "https://zernio.com"}
-        return {"configured": bool(cfg.get("api_key") and cfg.get("base_url") and (provider != "mixpost" or cfg.get("workspace"))),
-                "api_key_set": bool(cfg.get("api_key")), "available": SELF_HOSTED_AVAILABLE,
-                "base_url": cfg.get("base_url", "")}
+        cfg = self._config_for()
+        return {"configured": bool(cfg.get("api_key")), "api_key_set": bool(cfg.get("api_key")),
+                "available": ZERNIO_AVAILABLE, "base_url": "https://zernio.com"}
 
     def push(self, msg):
         with self.lock:
@@ -1564,40 +1625,28 @@ class Core:
         return dict(self._provider_status("zernio"), auto_post=bool(cfg.get("auto_post")),
                     schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
                     visibility=cfg.get("visibility", "public"),
-                    instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""),
-                    facebook_id=cfg.get("facebook_id", ""), tiktok_id=cfg.get("tiktok_id", ""))
+                    instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""))
 
     def publishing_status(self):
-        provider = self.publishing.get("provider", "zernio")
-        cfg = self._config_for(provider)
-        return {"provider": provider, "providers": {p: dict(self._provider_status(p),
-                schedule_minutes=int(self._config_for(p).get("schedule_minutes", 0) or 0),
-                visibility=self._config_for(p).get("visibility", "public"),
-                instagram_id=self._config_for(p).get("instagram_id", ""),
-                youtube_id=self._config_for(p).get("youtube_id", ""),
-                facebook_id=self._config_for(p).get("facebook_id", ""),
-                tiktok_id=self._config_for(p).get("tiktok_id", ""),
-                tiktok_consent=bool(self._config_for(p).get("tiktok_consent", False)),
-                auto_post=bool(self._config_for(p).get("auto_post"))) for p in ("zernio", "postiz", "mixpost")},
-                **self._provider_status(provider)}
+        cfg = self._config_for()
+        return {"provider": "zernio", "providers": {"zernio": dict(self._provider_status("zernio"),
+                schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
+                visibility=cfg.get("visibility", "public"),
+                instagram_id=cfg.get("instagram_id", ""),
+                youtube_id=cfg.get("youtube_id", ""),
+                auto_post=bool(cfg.get("auto_post", False)))},
+                **self._provider_status("zernio")}
 
     def publishing_save(self, body):
-        provider = str(body.get("provider", self.publishing.get("provider", "zernio"))).lower()
-        if provider not in {"zernio", "postiz", "mixpost"}: raise ValueError("Unknown publishing provider.")
-        cfg = dict(self._config_for(provider))
-        for key in ("api_key", "base_url", "workspace", "instagram_id", "youtube_id", "facebook_id", "tiktok_id"):
-            if key in {"instagram_id", "youtube_id", "facebook_id", "tiktok_id"} and key not in body:
+        provider = str(body.get("provider", "zernio")).lower()
+        if provider != "zernio": raise ValueError("Only Zernio publishing is supported.")
+        cfg = dict(self._config_for())
+        for key in ("api_key", "instagram_id", "youtube_id"):
+            if key in {"instagram_id", "youtube_id"} and key not in body:
                 continue
             value = str(body.get(key, cfg.get(key, ""))).strip()
             if value: cfg[key] = value
-            elif key in {"base_url", "workspace", "instagram_id", "youtube_id", "facebook_id", "tiktok_id"}: cfg[key] = ""
-        cfg["tiktok_consent"] = bool(body.get("tiktok_consent", cfg.get("tiktok_consent", False)))
-        if cfg.get("tiktok_id") and provider == "postiz" and not cfg["tiktok_consent"]:
-            raise ValueError("Confirm TikTok direct publishing before saving the selected TikTok account.")
-        if cfg.get("tiktok_id") and provider == "mixpost":
-            raise ValueError("Mixpost TikTok publishing is unavailable in the free integration. Use self-hosted Postiz for TikTok.")
-        if provider == "postiz" and not cfg.get("base_url"):
-            raise ValueError("Enter your self-hosted Postiz URL. The free setup does not use Postiz Cloud.")
+            elif key in {"instagram_id", "youtube_id"}: cfg[key] = ""
         cfg["auto_post"] = bool(body.get("auto_post", False))
         try: cfg["schedule_minutes"] = max(0, int(body.get("schedule_minutes", 0)))
         except (TypeError, ValueError): cfg["schedule_minutes"] = 0
@@ -1610,9 +1659,8 @@ class Core:
         return self.publishing_status()
 
     def publishing_accounts(self, provider=None):
-        provider = provider or self.publishing.get("provider", "zernio")
-        pub = self._make_publisher(provider, False)
-        if not pub: raise ValueError(f"{provider.title()} posting is unavailable.")
+        pub = self._make_publisher("zernio", False)
+        if not pub: raise ValueError("Zernio posting is unavailable.")
         return pub.accounts()
 
     def zernio_save(self, body):
@@ -1623,15 +1671,11 @@ class Core:
         return self.publishing_accounts("zernio")
 
     def publish_clips(self, names):
-        provider = self.publishing.get("provider", "zernio")
-        cfg = self._config_for(provider)
+        provider = "zernio"
+        cfg = self._config_for()
         if not cfg.get("api_key"): raise ValueError(f"Save and verify a {provider.title()} API key first.")
-        if not any(cfg.get(key) for key in ("instagram_id", "youtube_id", "facebook_id", "tiktok_id")):
+        if not any(cfg.get(key) for key in ("instagram_id", "youtube_id")):
             raise ValueError("Select at least one connected channel.")
-        if cfg.get("tiktok_id") and provider in {"postiz", "zernio"} and not cfg.get("tiktok_consent"):
-            raise ValueError("Confirm TikTok direct publishing in Publishing settings before posting.")
-        if cfg.get("tiktok_id") and provider == "mixpost":
-            raise ValueError("Mixpost TikTok publishing is unavailable in the free integration. Use self-hosted Postiz for TikTok.")
         valid = [n for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
         if not valid: raise ValueError("No valid clips selected.")
         if not self._make_publisher(provider, False): raise ValueError(f"{provider.title()} posting is unavailable.")
@@ -1648,13 +1692,7 @@ class Core:
                         delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
                         with self.lock: self.posting["current"] = name
                         self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
-                        if provider == "zernio":
-                            publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay)
-                        else:
-                            publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay,
-                                                  facebook_id=cfg.get("facebook_id", ""),
-                                                  tiktok_id=cfg.get("tiktok_id", ""),
-                                                  tiktok_consent=cfg.get("tiktok_consent", False))
+                        publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay)
                         with self.lock:
                             self.posting["completed"] += 1
                             self.posting["done"] += 1
@@ -2043,11 +2081,6 @@ def main():
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         streamlink_main()
         return
-    try:
-        acquire_instance_lock()
-    except RuntimeError as e:
-        print(str(e), file=sys.stderr)
-        return
     if len(sys.argv) >= 3 and sys.argv[1] in ("live", "file"):      # headless mode
         cfg = clean_cfg(dict(load_settings(), mode=sys.argv[1], target=sys.argv[2].strip('"')))
         if cfg["mode"] == "live" and not streamlink_available():
@@ -2055,6 +2088,11 @@ def main():
         eng = Engine(cfg, lambda k, p: print(p) if k in ("log", "clip") else None)
         try: eng.run()
         except KeyboardInterrupt: eng.stop(force=True)
+        return
+    try:
+        acquire_instance_lock()
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
         return
     class QuietServer(http.server.ThreadingHTTPServer):
         def handle_error(self, request, client_address):      # browser closed a connection: harmless, don't print a traceback
@@ -2424,27 +2462,21 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.1.9. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.2.1. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
     <div class="hint update-list" id="updates-list"></div>
     <div class="row"><label>Publishing provider</label></div>
-    <select id="pub-provider" class="text"><option value="postiz">Postiz self-hosted (recommended free route)</option><option value="mixpost">Mixpost (Lite platform limits)</option><option value="zernio">Zernio hosted</option></select>
-    <p class="hint">Postiz self-hosted avoids a scheduler subscription; your PC/server must stay online. Postiz Cloud and Zernio are hosted paid services. Mixpost Lite is free but does not include TikTok. Auto-post stays off until you turn it on.</p>
+    <select id="pub-provider" class="text" disabled><option value="zernio">Zernio hosted</option></select>
+    <p class="hint">Zernio is the supported posting provider. Zernio service and platform limits may apply. Auto-post stays off until you turn it on.</p>
     <div class="row"><label>API key</label><b id="z-key-state">Not saved</b></div>
     <input id="z-api" class="text" type="password" placeholder="Enter a new key to replace the saved key">
-    <div class="two" id="selfhost-fields" hidden><div><div class="row"><label>Base URL</label></div><input id="pub-base" class="text" placeholder="https://postiz.example.com"></div><div><div class="row"><label>Workspace UUID (Mixpost)</label></div><input id="pub-workspace" class="text" placeholder="Required for Mixpost"></div></div>
     <p class="hint">Credentials are stored locally in this app folder and never sent to the browser.</p>
     <div class="two">
       <div><div class="row"><label>Instagram</label></div><select id="z-ig" class="text"><option value="">Not selected</option></select></div>
       <div><div class="row"><label>YouTube</label></div><select id="z-yt" class="text"><option value="">Not selected</option></select></div>
     </div>
-    <div class="two">
-      <div><div class="row"><label>Facebook Page</label></div><select id="z-fb" class="text"><option value="">Not selected</option></select></div>
-      <div><div class="row"><label>TikTok</label></div><select id="z-tt" class="text"><option value="">Not selected</option></select></div>
-    </div>
-    <label class="toggle compact" style="margin-top:10px"><span>I approve direct publishing of selected clips to TikTok.</span><input type="checkbox" id="tiktok-consent"><i class="sl"></i></label>
     <div class="two">
       <div><div class="row"><label>Schedule delay (minutes)</label></div><input id="z-delay" class="text" type="number" min="0" value="0"></div>
       <div><div class="row"><label>YouTube visibility</label></div><select id="z-vis" class="text"><option>public</option><option>unlisted</option><option>private</option></select></div>
@@ -2522,8 +2554,8 @@ const BOOT=__BOOT__;
 const TOKEN="__TOKEN__";
 let appClosing=false;
 const S=Object.assign({},BOOT.settings);
-const P=Object.assign({provider:"postiz",providers:{}},BOOT.publishing||{});
-let activeProvider=P.provider||"postiz";
+const P=Object.assign({provider:"zernio",providers:{}},BOOT.publishing||{});
+let activeProvider="zernio";
 let Z=Object.assign({},(P.providers&&P.providers[activeProvider])||{});
 let accountsLoadedFor="";
 let clipOffset=0;
@@ -2575,8 +2607,6 @@ async function loadPublishingAccounts(){
   if(provider!==activeProvider)return;
   setSelectOptions($("#z-ig"),r.accounts.filter(a=>a.platform==="instagram"),Z.instagram_id);
   setSelectOptions($("#z-yt"),r.accounts.filter(a=>a.platform==="youtube"),Z.youtube_id);
-  setSelectOptions($("#z-fb"),r.accounts.filter(a=>a.platform==="facebook"),Z.facebook_id);
-  setSelectOptions($("#z-tt"),r.accounts.filter(a=>a.platform==="tiktok"),Z.tiktok_id);
   accountsLoadedFor=provider;
   $("#z-msg").textContent=r.accounts.length?"Connected channels identified":"No Instagram/YouTube channels found";
   $("#z-msg").classList.add("show");
@@ -2842,15 +2872,15 @@ $("#btn-words-save").onclick=saveWords;
 $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveWords()}});
 
 /* ---------- actions ---------- */
-function loadProviderForm(){const cfg=(P.providers&&P.providers[activeProvider])||{};Z=Object.assign({},cfg);$("#pub-provider").value=activeProvider;$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post;$("#tiktok-consent").checked=!!cfg.tiktok_consent;$("#pub-base").value=cfg.base_url||"";$("#pub-base").placeholder=activeProvider==="postiz"?"Enter your self-hosted Postiz URL":"https://cloud.mixpost.app/p or your instance URL";$("#pub-workspace").value=cfg.workspace||"";$("#pub-workspace").placeholder="Required for Mixpost";$("#selfhost-fields").hidden=activeProvider==="zernio"}
-$("#pub-provider").onchange=async e=>{activeProvider=e.target.value;accountsLoadedFor="";loadProviderForm();["#z-ig","#z-yt","#z-fb","#z-tt"].forEach(id=>$(id).replaceChildren(h("option",{value:""},"Not selected")));if((P.providers[activeProvider]||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
+function loadProviderForm(){const cfg=(P.providers&&P.providers.zernio)||{};Z=Object.assign({},cfg);$("#pub-provider").value="zernio";$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post}
+$("#pub-provider").onchange=async e=>{activeProvider="zernio";accountsLoadedFor="";loadProviderForm();["#z-ig","#z-yt"].forEach(id=>$(id).replaceChildren(h("option",{value:""},"Not selected")));if((P.providers.zernio||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
 $("#z-key-state").textContent=Z.api_key_set?"Saved locally":"Not saved";
 $("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";
 $("#z-check").onclick=async()=>{
   const b=$("#z-check");b.disabled=true;
   try{
-    const payload={provider:activeProvider,api_key:$("#z-api").value,base_url:$("#pub-base").value,workspace:$("#pub-workspace").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value,tiktok_consent:$("#tiktok-consent").checked};
-    if(accountsLoadedFor===activeProvider){payload.instagram_id=$("#z-ig").value;payload.youtube_id=$("#z-yt").value;payload.facebook_id=$("#z-fb").value;payload.tiktok_id=$("#z-tt").value}
+    const payload={provider:"zernio",api_key:$("#z-api").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value};
+    if(accountsLoadedFor==="zernio"){payload.instagram_id=$("#z-ig").value;payload.youtube_id=$("#z-yt").value}
     const r=await api("/api/publishing",payload);
     Object.assign(P,r);Object.assign(Z,(r.providers||{})[activeProvider]||{});$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadPublishingAccounts();toast(activeProvider+" settings saved locally","ok");
   }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}

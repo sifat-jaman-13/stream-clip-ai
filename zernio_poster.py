@@ -71,6 +71,10 @@ class ZernioPublisher:
             raise RuntimeError(f"Zernio connection failed: {e.reason}") from e
         try:
             return json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError:
+            if not raw.strip():
+                return {}
+            raise RuntimeError("Zernio returned invalid JSON.")
         except (ValueError, UnicodeDecodeError) as e:
             raise RuntimeError("Zernio returned invalid JSON.") from e
 
@@ -104,16 +108,20 @@ class ZernioPublisher:
         public_url = presigned.get("publicUrl")
         if not upload_url or not public_url:
             raise RuntimeError("Zernio did not return upload URLs.")
-        req = urllib.request.Request(upload_url, data=path.read_bytes(), method="PUT",
-                                     headers={"Content-Type": "video/mp4",
-                                              "Content-Length": str(size)})
+        video = path.open("rb")
         try:
-            with urllib.request.urlopen(req, timeout=300):
-                pass
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Zernio media upload failed ({e.code}).") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Zernio media upload failed: {e.reason}") from e
+            req = urllib.request.Request(upload_url, data=video, method="PUT",
+                                         headers={"Content-Type": "video/mp4",
+                                                  "Content-Length": str(size)})
+            try:
+                with urllib.request.urlopen(req, timeout=300):
+                    pass
+            except urllib.error.HTTPError as e:
+                raise RuntimeError(f"Zernio media upload failed ({e.code}).") from e
+            except urllib.error.URLError as e:
+                raise RuntimeError(f"Zernio media upload failed: {e.reason}") from e
+        finally:
+            video.close()
         return public_url
 
     def publish_one(self, path, instagram_id=None, youtube_id=None, schedule_minutes=None):

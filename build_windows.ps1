@@ -22,6 +22,7 @@ if (Test-Path dist) { Remove-Item dist -Recurse -Force }
     --add-data "assets;assets" `
     --collect-all faster_whisper `
     --collect-all ctranslate2 `
+    --collect-all nvidia.cublas `
     --collect-submodules streamlink `
     --collect-submodules streamlink_cli `
     --collect-submodules zernio_poster `

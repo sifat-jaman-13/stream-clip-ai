@@ -1917,9 +1917,10 @@ def list_clips(limit=60, offset=0):
 def reveal(path):
     path = pathlib.Path(path).resolve()
     try:
-        if os.name == "nt":
+        system = platform.system()
+        if system == "Windows":
             subprocess.Popen(["explorer.exe", str(path.parent)], creationflags=CF)
-        elif platform.system() == "Darwin":
+        elif system == "Darwin":
             subprocess.Popen(["open", "-R", str(path)])
         else:
             subprocess.Popen(["xdg-open", str(path.parent)])
@@ -1930,13 +1931,14 @@ def open_folder(path):
     path = pathlib.Path(path).resolve()
     try:
         path.mkdir(parents=True, exist_ok=True)
-        if os.name == "nt":
+        system = platform.system()
+        if system == "Windows":
             try:
                 os.startfile(str(path))
             except (AttributeError, OSError):
                 # Some embedded Python builds do not expose os.startfile.
                 subprocess.Popen(["explorer.exe", str(path)], creationflags=CF)
-        elif platform.system() == "Darwin":
+        elif system == "Darwin":
             subprocess.Popen(["open", str(path)])
         else:
             subprocess.Popen(["xdg-open", str(path)])

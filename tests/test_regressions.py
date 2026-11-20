@@ -394,7 +394,8 @@ class RegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             clip = Path(directory) / "clip.mp4"
             clip.touch()
-            with patch.object(autoclip.os, "name", "nt"), patch.object(autoclip.subprocess, "Popen") as popen:
+            with patch.object(autoclip.platform, "system", return_value="Windows"), \
+                 patch.object(autoclip.subprocess, "Popen") as popen:
                 autoclip.reveal(clip)
             self.assertEqual(popen.call_args.args[0], ["explorer.exe", str(Path(directory).resolve())])
 
@@ -421,6 +422,7 @@ class RegressionTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=0)
             with patch.object(autoclip, "OUT", output), patch.object(autoclip, "make_ass"), \
                  patch.object(autoclip, "run", side_effect=fake_run) as run_mock, \
+                 patch.object(autoclip, "has_nvenc", return_value=False), \
                  patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"):
                 engine.render("input.mp4", 4, 12, [], "clip")
             command = commands[0]
@@ -692,7 +694,7 @@ class RegressionTests(unittest.TestCase):
             with patch.object(autoclip, "HERE", internal), patch.object(
                 autoclip.sys, "executable", str(root / ("StreamSnipAI.exe" if autoclip.os.name == "nt" else "StreamSnipAI"))
             ):
-                self.assertEqual(autoclip.ffmpeg_exe(), str(ffmpeg))
+                self.assertEqual(Path(autoclip.ffmpeg_exe()).resolve(), ffmpeg.resolve())
 
     def test_window_close_quits_but_page_reload_can_reconnect(self):
         self.assertIn('window.addEventListener("pagehide"', autoclip.HTML)

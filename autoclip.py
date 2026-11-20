@@ -24,7 +24,7 @@ from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
 from live_monitor import LiveMonitorRegistry
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -33,6 +33,13 @@ try:
 except Exception:
     ZernioPublisher = None
     ZERNIO_AVAILABLE = False
+try:
+    from selfhost_publishers import MixpostPublisher, PostizPublisher, publisher_for
+    SELF_HOSTED_AVAILABLE = True
+except Exception:
+    MixpostPublisher = PostizPublisher = None
+    publisher_for = None
+    SELF_HOSTED_AVAILABLE = False
 
 # ------------------------------------------------------------------ setup
 def _add_cuda_dlls():
@@ -160,6 +167,7 @@ def update_components():
 SETTINGS_FILE = HERE / "settings.json"
 CUSTOM_FILE = HERE / "custom_words.txt"
 ZERNIO_FILE = HERE / "zernio.json"
+PUBLISHING_FILE = HERE / "publishing.json"
 LIVE_MONITOR_FILE = HERE / "live_monitors.json"
 BRAND_LOGO = HERE / "assets" / "brand-logo.png"
 INSTANCE_LOCK_FILE = HERE / ".autoclip.lock"
@@ -197,6 +205,7 @@ DEFAULTS = {
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "streamer_tag": "", "show_tag_video": True,
     "cta_enabled": True, "cta_text": "Subscribe for more clips", "cta_voice_enabled": True,
+    "capture_bitrate_kbps": 8000,
     "layout": "Facecam + game (Twitch)", "output_format": "9:16", "crop_x": 34.2, "crop_y": 0.0,
     "crop_w": 31.6, "crop_h": 100.0, "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
@@ -223,6 +232,7 @@ def clean_cfg(raw):
         c[k] = max(lo, min(hi, v))
     num("clips_per_chunk", 0, 10, int); num("chunk_min", 1, 30, int)
     num("pre", 3, 90, int); num("post", 3, 90, int)
+    num("capture_bitrate_kbps", 8000, 50000, int)
     num("min_score", 0, 100, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
     num("subtitle_font_size", 60, 180, int); num("subtitle_nudge", -400, 400, int)
     c["min_score"] = round(c["min_score"], 1)
@@ -323,6 +333,24 @@ def load_zernio_settings():
 def save_zernio_settings(cfg):
     # This file is local-only and ignored by Git. Never send the API key to the browser.
     ZERNIO_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+def load_publishing_settings():
+    defaults = {"provider": "zernio", "zernio": load_zernio_settings(), "postiz": {}, "mixpost": {}}
+    try:
+        raw = json.loads(PUBLISHING_FILE.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            for key in ("provider", "zernio", "postiz", "mixpost"):
+                if key in raw: defaults[key] = raw[key]
+    except Exception:
+        pass
+    if not isinstance(defaults["provider"], str) or defaults["provider"] not in {"zernio", "postiz", "mixpost"}:
+        defaults["provider"] = "zernio"
+    for key in ("zernio", "postiz", "mixpost"):
+        if not isinstance(defaults[key], dict): defaults[key] = {}
+    return defaults
+
+def save_publishing_settings(cfg):
+    PUBLISHING_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 # ------------------------------------------------------------------ hype words
 HYPE_WORDS = {
@@ -926,8 +954,15 @@ class Engine:
         except Exception:
             slog.close()
             raise
-        ff = popen([ffmpeg_exe(), "-v", "error", "-i", "-", "-c", "copy", "-f", "segment",
-                    "-segment_time", str(self.seg_seconds), "-reset_timestamps", "1", pattern],
+        bitrate = int(self.cfg.get("capture_bitrate_kbps", 8000))
+        if self.cfg.get("compute_device", "gpu") == "gpu" and has_nvenc():
+            capture_enc = ["-c:v", "h264_nvenc", "-preset", "p5", "-b:v", f"{bitrate}k",
+                           "-maxrate", f"{bitrate}k", "-bufsize", f"{bitrate * 2}k"]
+        else:
+            capture_enc = ["-c:v", "libx264", "-preset", "veryfast", "-b:v", f"{bitrate}k",
+                           "-maxrate", f"{bitrate}k", "-bufsize", f"{bitrate * 2}k"]
+        ff = popen([ffmpeg_exe(), "-v", "error", "-i", "-", *capture_enc, "-c:a", "aac", "-b:a", "160k",
+                    "-f", "segment", "-segment_time", str(self.seg_seconds), "-reset_timestamps", "1", pattern],
                    stdin=sl.stdout)
         sl.stdout.close()
         self.procs = [sl, ff]
@@ -1014,9 +1049,9 @@ QUIT = threading.Event()
 class Core:
     def __init__(self):
         self.lock = threading.RLock()
-        self.zernio = load_zernio_settings()
-        self.publisher = (ZernioPublisher(self.push, dict(self.zernio, enabled=self.zernio.get("auto_post", False)))
-                          if ZERNIO_AVAILABLE else None)
+        self.publishing = load_publishing_settings()
+        self.zernio = self.publishing["zernio"]
+        self.publisher = self._make_publisher(self.publishing["provider"], self.publishing["provider"] == "zernio")
         self.engine = None
         self.running = False
         self.logs, self.log_id = [], 0
@@ -1027,6 +1062,25 @@ class Core:
         self.session = {"clips": 0, "chunks": 0, "started": None, "ended": None}
         self.settings = load_settings()
         apply_storage_paths(self.settings)
+
+    def _config_for(self, provider=None):
+        return self.publishing.get(provider or self.publishing.get("provider", "zernio"), {})
+
+    def _make_publisher(self, provider=None, enabled=True):
+        provider = provider or self.publishing.get("provider", "zernio")
+        cfg = dict(self._config_for(provider), enabled=enabled)
+        if provider == "zernio":
+            return ZernioPublisher(self.push, cfg) if ZERNIO_AVAILABLE else None
+        return publisher_for(provider, self.push, cfg) if SELF_HOSTED_AVAILABLE and publisher_for else None
+
+    def _provider_status(self, provider):
+        cfg = self._config_for(provider)
+        if provider == "zernio":
+            return {"configured": bool(cfg.get("api_key")), "api_key_set": bool(cfg.get("api_key")),
+                    "available": ZERNIO_AVAILABLE, "base_url": "https://zernio.com"}
+        return {"configured": bool(cfg.get("api_key") and (cfg.get("base_url") or provider == "postiz")),
+                "api_key_set": bool(cfg.get("api_key")), "available": SELF_HOSTED_AVAILABLE,
+                "base_url": cfg.get("base_url", "")}
 
     def push(self, msg):
         with self.lock:
@@ -1119,43 +1173,63 @@ class Core:
                 self.engine.stop(force=True)
 
     def zernio_status(self):
-        cfg = self.zernio
-        return {"configured": bool(cfg.get("api_key")), "auto_post": bool(cfg.get("auto_post")),
-                "available": ZERNIO_AVAILABLE,
-                "schedule_minutes": int(cfg.get("schedule_minutes", 0) or 0),
-                "visibility": cfg.get("visibility", "public"),
-                "instagram_id": cfg.get("instagram_id", ""), "youtube_id": cfg.get("youtube_id", ""),
-                "api_key_set": bool(cfg.get("api_key"))}
+        cfg = self._config_for("zernio")
+        return dict(self._provider_status("zernio"), auto_post=bool(cfg.get("auto_post")),
+                    schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
+                    visibility=cfg.get("visibility", "public"),
+                    instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""))
 
-    def zernio_save(self, body):
-        cfg = dict(self.zernio)
-        if str(body.get("api_key", "")).strip(): cfg["api_key"] = str(body["api_key"]).strip()
-        cfg["instagram_id"] = str(body.get("instagram_id", cfg.get("instagram_id", ""))).strip()
-        cfg["youtube_id"] = str(body.get("youtube_id", cfg.get("youtube_id", ""))).strip()
+    def publishing_status(self):
+        provider = self.publishing.get("provider", "zernio")
+        cfg = self._config_for(provider)
+        return {"provider": provider, "providers": {p: dict(self._provider_status(p),
+                schedule_minutes=int(self._config_for(p).get("schedule_minutes", 0) or 0),
+                visibility=self._config_for(p).get("visibility", "public"),
+                instagram_id=self._config_for(p).get("instagram_id", ""),
+                youtube_id=self._config_for(p).get("youtube_id", ""),
+                auto_post=bool(self._config_for(p).get("auto_post"))) for p in ("zernio", "postiz", "mixpost")},
+                **self._provider_status(provider)}
+
+    def publishing_save(self, body):
+        provider = str(body.get("provider", self.publishing.get("provider", "zernio"))).lower()
+        if provider not in {"zernio", "postiz", "mixpost"}: raise ValueError("Unknown publishing provider.")
+        cfg = dict(self._config_for(provider))
+        for key in ("api_key", "base_url", "workspace", "instagram_id", "youtube_id"):
+            value = str(body.get(key, cfg.get(key, ""))).strip()
+            if value: cfg[key] = value
+            elif key in {"base_url", "workspace", "instagram_id", "youtube_id"}: cfg[key] = ""
         cfg["auto_post"] = bool(body.get("auto_post", False))
         try: cfg["schedule_minutes"] = max(0, int(body.get("schedule_minutes", 0)))
         except (TypeError, ValueError): cfg["schedule_minutes"] = 0
         cfg["visibility"] = str(body.get("visibility", "public")) if body.get("visibility") in ("public", "private", "unlisted") else "public"
-        if not cfg.get("api_key"): raise ValueError("Enter a Zernio API key first.")
-        save_zernio_settings(cfg); self.zernio = cfg
-        if self.publisher:
-            self.publisher.configure(dict(cfg, enabled=cfg["auto_post"]))
-        return self.zernio_status()
+        if not cfg.get("api_key"): raise ValueError("Enter an API key first.")
+        self.publishing[provider] = cfg; self.publishing["provider"] = provider
+        self.zernio = self.publishing["zernio"]
+        save_publishing_settings(self.publishing)
+        self.publisher = self._make_publisher(provider, cfg["auto_post"])
+        return self.publishing_status()
+
+    def publishing_accounts(self, provider=None):
+        provider = provider or self.publishing.get("provider", "zernio")
+        pub = self._make_publisher(provider, False)
+        if not pub: raise ValueError(f"{provider.title()} posting is unavailable.")
+        return pub.accounts()
+
+    def zernio_save(self, body):
+        body = dict(body); body["provider"] = "zernio"
+        return self.publishing_save(body)
 
     def zernio_accounts(self):
-        if not self.publisher:
-            raise ValueError("Zernio posting unavailable: zernio_poster.py could not be loaded.")
-        self.publisher.configure(dict(self.zernio, enabled=False))
-        return self.publisher.accounts()
+        return self.publishing_accounts("zernio")
 
     def publish_clips(self, names):
-        cfg = self.zernio
-        if not cfg.get("api_key"): raise ValueError("Save and verify a Zernio API key first.")
+        provider = self.publishing.get("provider", "zernio")
+        cfg = self._config_for(provider)
+        if not cfg.get("api_key"): raise ValueError(f"Save and verify a {provider.title()} API key first.")
         if not (cfg.get("instagram_id") or cfg.get("youtube_id")): raise ValueError("Select at least one connected channel.")
         valid = [n for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
         if not valid: raise ValueError("No valid clips selected.")
-        if not ZERNIO_AVAILABLE:
-            raise ValueError("Zernio posting unavailable: zernio_poster.py could not be loaded.")
+        if not self._make_publisher(provider, False): raise ValueError(f"{provider.title()} posting is unavailable.")
         with self.lock:
             if self.posting["active"]:
                 raise ValueError("A Zernio posting batch is already in progress.")
@@ -1163,28 +1237,28 @@ class Core:
                                  "started": time.time(), "done": 0, "last_name": "", "errors": 0})
         def publish_batch():
             for index, name in enumerate(valid):
-                publisher = ZernioPublisher(self.push, dict(cfg, enabled=False))
+                publisher = self._make_publisher(provider, False)
                 delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
                 with self.lock: self.posting["current"] = name
-                self.push(f"Zernio: uploading {index + 1} of {len(valid)} - {name}.")
+                self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
                 try:
                     publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay)
                     with self.lock:
                         self.posting["completed"] += 1
                         self.posting["done"] += 1
                         self.posting["last_name"] = name
-                    self.push(f"Zernio upload complete: {name}.")
+                    self.push(f"{provider.title()} upload complete: {name}.")
                 except Exception as e:
                     with self.lock: self.posting["errors"] += 1
-                    self.push(f"Zernio error for {name}: {e}")
+                    self.push(f"{provider.title()} error for {name}: {e}")
             with self.lock:
                 self.posting["active"] = False
                 self.posting["current"] = ""
                 errors = self.posting["errors"]
                 completed = self.posting["completed"]
-            self.push(f"Zernio posting complete: {completed} uploaded, {errors} failed.")
-        threading.Thread(target=publish_batch, daemon=True, name="zernio-batch").start()
-        self.push(f"Zernio: queued {len(valid)} clip(s) for publishing.")
+            self.push(f"{provider.title()} posting complete: {completed} uploaded, {errors} failed.")
+        threading.Thread(target=publish_batch, daemon=True, name=f"{provider}-batch").start()
+        self.push(f"{provider.title()}: queued {len(valid)} clip(s) for publishing.")
         return {"queued": len(valid)}
 
 def list_clips(limit=60):
@@ -1375,7 +1449,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             path = u.path
             if path == "/":
                 boot = {"settings": CORE.settings, "colors": {k: "#" + v[4:6] + v[2:4] + v[0:2] for k, v in CAPTION_COLORS.items()},
-                        "positions": CAPTION_POS, "models": MODELS, "layouts": LAYOUTS, "zernio": CORE.zernio_status()}
+                        "positions": CAPTION_POS, "models": MODELS, "layouts": LAYOUTS,
+                        "zernio": CORE.zernio_status(), "publishing": CORE.publishing_status()}
                 html = HTML.replace("__BOOT__", json.dumps(boot).replace("</", "<\\/")).replace("__TOKEN__", TOKEN)
                 return self._send(200, html, "text/html; charset=utf-8")
             if path == "/api/state":
@@ -1441,6 +1516,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/zernio/accounts":
                     return self._send(200, {"accounts": CORE.zernio_accounts()})
                 if path == "/api/zernio/publish":
+                    names = body.get("names", [])
+                    if not isinstance(names, list): names = []
+                    return self._send(200, CORE.publish_clips([str(n) for n in names]))
+                if path == "/api/publishing":
+                    return self._send(200, CORE.publishing_save(body))
+                if path == "/api/publishing/accounts":
+                    return self._send(200, {"accounts": CORE.publishing_accounts(str(body.get("provider", "")).lower() or None)})
+                if path == "/api/publishing/publish":
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
                     return self._send(200, CORE.publish_clips([str(n) for n in names]))
@@ -1858,8 +1941,11 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Processing hardware</label></div>
     <select id="compute-device" class="text"><option value="gpu">GPU — CUDA speech + NVENC rendering</option><option value="cpu">CPU — INT8 speech + software rendering</option></select>
     <p class="hint">GPU mode is recommended for an NVIDIA RTX 3060 Ti. If CUDA or NVENC is unavailable, the app logs the fallback.</p>
+    <div class="row"><label>Live recording quality</label><b>Full HD target</b></div>
+    <input id="capture-bitrate" class="text" type="number" min="8000" max="50000" step="500" value="8000">
+    <p class="hint">Captures at 1080p when the source provides it, falls back to 720p, and records at least 8,000 kbps. Source streams below 1080p cannot be upscaled into real detail.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.1.2. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.1.3. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -1872,11 +1958,13 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <div><div class="row"><label>Quality preference</label></div><select id="monitor-quality" class="text"><option>1080p60,1080p,720p60,720p,best</option><option>best</option></select></div>
     </div>
     <div class="prow"><button class="btn ghost" id="monitor-start">Start monitor</button><button class="btn ghost" id="monitor-stop" disabled>Stop monitor</button><span class="msg" id="monitor-msg">No monitor configured</span></div>
-    <div class="row"><label>Zernio posting</label></div>
-    <p class="hint">Save your API key locally, identify connected channels, and control publishing for finished clips.</p>
-    <div class="row"><label>Zernio API key</label><b id="z-key-state">Not saved</b></div>
+    <div class="row"><label>Publishing provider</label></div>
+    <select id="pub-provider" class="text"><option value="zernio">Zernio</option><option value="postiz">Postiz — self-hosted</option><option value="mixpost">Mixpost — self-hosted</option></select>
+    <p class="hint">Postiz and Mixpost connect through their official APIs. Zernio remains available as an option.</p>
+    <div class="row"><label>API key</label><b id="z-key-state">Not saved</b></div>
     <input id="z-api" class="text" type="password" placeholder="Enter a new key to replace the saved key">
-    <p class="hint">The key is stored locally in this app folder and is never shown back in the browser.</p>
+    <div class="two" id="selfhost-fields" hidden><div><div class="row"><label>Base URL</label></div><input id="pub-base" class="text" placeholder="https://postiz.example.com"></div><div><div class="row"><label>Workspace UUID (Mixpost)</label></div><input id="pub-workspace" class="text" placeholder="Required for Mixpost"></div></div>
+    <p class="hint">Credentials are stored locally in this app folder and never sent to the browser.</p>
     <div class="two">
       <div><div class="row"><label>Instagram</label></div><select id="z-ig" class="text"><option value="">Not selected</option></select></div>
       <div><div class="row"><label>YouTube</label></div><select id="z-yt" class="text"><option value="">Not selected</option></select></div>
@@ -1934,7 +2022,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 </div>
 <div class="overlay" id="settings-overlay" hidden>
  <div class="settings-dialog">
-  <div class="settings-head"><div><h2>App settings</h2><p>Configure clipping defaults and Zernio publishing.</p></div><div class="prow"><button class="btn ghost" id="btn-settings-save">Save settings</button><button class="btn ghost" id="btn-settings-close">Close</button></div></div>
+   <div class="settings-head"><div><h2>App settings</h2><p>Configure clipping defaults and publishing providers.</p></div><div class="prow"><button class="btn ghost" id="btn-settings-save">Save settings</button><button class="btn ghost" id="btn-settings-close">Close</button></div></div>
   <div id="settings-slot"></div>
  </div>
 </div>
@@ -1957,7 +2045,9 @@ const BOOT=__BOOT__;
 const TOKEN="__TOKEN__";
 let appClosing=false;
 const S=Object.assign({},BOOT.settings);
-const Z=Object.assign({},BOOT.zernio||{});
+const P=Object.assign({provider:"zernio",providers:{}},BOOT.publishing||{});
+let activeProvider=P.provider||"zernio";
+let Z=Object.assign({},(P.providers&&P.providers[activeProvider])||BOOT.zernio||{});
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
 const ICON={
  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
@@ -1990,9 +2080,9 @@ function setSelectOptions(el,items,chosen){
   items.forEach(a=>el.append(h("option",{value:a.id},a.name+" ("+a.platform+")")));
   if(chosen)el.value=chosen;
 }
-async function loadZernioAccounts(){
-  if(Z.available===false){$("#z-msg").textContent="Posting unavailable: zernio_poster.py is missing or has an error";$("#z-msg").classList.add("show");return}
-  const r=await api("/api/zernio/accounts");
+async function loadPublishingAccounts(){
+  if(Z.available===false){$("#z-msg").textContent="Posting adapter unavailable";$("#z-msg").classList.add("show");return}
+  const r=await api("/api/publishing/accounts",{provider:activeProvider});
   setSelectOptions($("#z-ig"),r.accounts.filter(a=>a.platform==="instagram"),Z.instagram_id);
   setSelectOptions($("#z-yt"),r.accounts.filter(a=>a.platform==="youtube"),Z.youtube_id);
   $("#z-msg").textContent=r.accounts.length?"Connected channels identified":"No Instagram/YouTube channels found";
@@ -2013,7 +2103,7 @@ $("#btn-about").onclick=openAbout;
 $("#btn-about-close").onclick=closeAbout;
 aboutOverlay.onclick=e=>{if(e.target===aboutOverlay)closeAbout()};
 document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(!settingsOverlay.hidden)closeSettings();if(!aboutOverlay.hidden)closeAbout()});
-$("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||"";
+$("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||""; $("#capture-bitrate").value=S.capture_bitrate_kbps||8000;
 function wireFolderPicker(inputId,buttonId,key){
   const input=$(inputId), button=$(buttonId);
   input.addEventListener("change",()=>{S[key]=input.value.trim();scheduleSave()});
@@ -2023,6 +2113,7 @@ wireFolderPicker("#rec-dir","#rec-dir-browse","rec_dir");
 wireFolderPicker("#out-dir","#out-dir-browse","out_dir");
 $("#compute-device").value=S.compute_device||"gpu";
 $("#compute-device").addEventListener("change",e=>{S.compute_device=e.target.value;scheduleSave()});
+$("#capture-bitrate").addEventListener("change",e=>{S.capture_bitrate_kbps=Math.max(8000,Math.min(50000,+e.target.value||8000));e.target.value=S.capture_bitrate_kbps;scheduleSave()});
 $("#btn-settings-save").onclick=async()=>{const b=$("#btn-settings-save");b.disabled=true;try{await api("/api/settings",S);toast("Settings saved","ok")}catch(e){toast(e.message,"bad")}b.disabled=false};
 $("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?" — "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
 $("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new AutoClip version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
@@ -2268,18 +2359,19 @@ $("#btn-words-save").onclick=saveWords;
 $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveWords()}});
 
 /* ---------- actions ---------- */
-$("#z-delay").value=Z.schedule_minutes||0;$("#z-vis").value=Z.visibility||"public";$("#z-auto").checked=!!Z.auto_post;
+function loadProviderForm(){const cfg=(P.providers&&P.providers[activeProvider])||{};Z=Object.assign({},cfg);$("#pub-provider").value=activeProvider;$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post;$("#pub-base").value=cfg.base_url||"";$("#pub-workspace").value=cfg.workspace||"";$("#selfhost-fields").hidden=activeProvider==="zernio"}
+$("#pub-provider").onchange=async e=>{activeProvider=e.target.value;loadProviderForm();$("#z-ig").replaceChildren(h("option",{value:""},"Not selected"));$("#z-yt").replaceChildren(h("option",{value:""},"Not selected"));if((P.providers[activeProvider]||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
 $("#z-key-state").textContent=Z.api_key_set?"Saved locally":"Not saved";
 $("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";
 $("#z-check").onclick=async()=>{
   const b=$("#z-check");b.disabled=true;
   try{
-    const r=await api("/api/zernio",{api_key:$("#z-api").value,instagram_id:$("#z-ig").value||Z.instagram_id,youtube_id:$("#z-yt").value||Z.youtube_id,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
-    Object.assign(Z,r);$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadZernioAccounts();toast("Zernio settings saved locally","ok");
+    const r=await api("/api/publishing",{provider:activeProvider,api_key:$("#z-api").value,base_url:$("#pub-base").value,workspace:$("#pub-workspace").value,instagram_id:$("#z-ig").value||Z.instagram_id,youtube_id:$("#z-yt").value||Z.youtube_id,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value});
+    Object.assign(P,r);Object.assign(Z,(r.providers||{})[activeProvider]||{});$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadPublishingAccounts();toast(activeProvider+" settings saved locally","ok");
   }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
   b.disabled=false;
 };
-if(Z.api_key_set)loadZernioAccounts().catch(e=>{$("#z-msg").textContent=e.message});
+if(Z.api_key_set)loadPublishingAccounts().catch(e=>{$("#z-msg").textContent=e.message});
 $("#btn-folder").onclick=()=>api("/api/open_folder").then(()=>toast("Clips folder opened","ok")).catch(e=>toast(e.message,"bad"));
 function normalizeLiveUrl(v){const t=v.trim().replace(/^"|"$/g,"");return /^(www\.)?(twitch\.tv|youtube\.com|youtu\.be)\//i.test(t)?"https://"+t:t}
 $("#btn-start").onclick=async()=>{
@@ -2397,7 +2489,7 @@ function renderClips(list){
 }
 async function publishNames(names){
   if(!names.length){toast("Select at least one clip first","bad");return}
-  try{const r=await api("/api/zernio/publish",{names});toast("Started uploading "+r.queued+" clip(s) to Zernio","ok");selectedClips.clear();$$('.pick').forEach(x=>x.checked=false);updateSelectedButton();}
+  try{const r=await api("/api/publishing/publish",{names});toast("Started uploading "+r.queued+" clip(s) to "+activeProvider,"ok");selectedClips.clear();$$('.pick').forEach(x=>x.checked=false);updateSelectedButton();}
   catch(e){toast(e.message,"bad")}
 }
 $("#btn-publish-selected").onclick=()=>publishNames([...selectedClips]);

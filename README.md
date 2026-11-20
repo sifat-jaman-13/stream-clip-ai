@@ -184,17 +184,30 @@ out/
 
 Raw live segments are stored in the recording folder and can be deleted after clipping.
 
-## Zernio publishing
+## Publishing providers
 
-Zernio is optional and disabled until configured. In Settings → Zernio posting:
+Publishing is optional and disabled until configured. StreamSnip AI supports Zernio plus self-hosted
+Postiz and Mixpost. Choose the provider in Settings → Publishing provider:
 
-1. Enter the API key and save it locally.
-2. Identify connected Instagram and YouTube channels.
+1. Enter the provider API key and, for self-hosted services, the base URL (and Mixpost workspace UUID).
+2. Identify connected Instagram and YouTube channels through the provider's official API.
 3. Choose channel IDs, visibility, schedule delay, and auto-post behavior.
 4. Select individual clips, double-click a clip, select all, or publish the whole batch.
 
-The key is saved in local zernio.json and must never be committed or shared. Posting depends on the
-separate zernio_poster.py integration and a working Zernio account.
+Credentials are saved locally in `publishing.json` and must never be committed or shared. Zernio remains
+available through `zernio_poster.py`; Postiz and Mixpost use their documented REST APIs. Self-hosted
+instances still enforce the legitimate platform and provider rate limits.
+
+Postiz uses its public API base URL and integration IDs. Mixpost uses its instance URL, personal key,
+workspace UUID, account IDs, and the instance's `/api` endpoints. Connect Instagram and YouTube inside
+Postiz or Mixpost first; StreamSnip only submits clips to accounts that the provider reports as connected.
+
+## Capture quality
+
+Live recording targets 1080p when the source provides it, falls back to 720p when necessary, and records
+with an 8,000 kbps minimum video bitrate by default. Clips render at the selected Full HD output dimensions
+(1080×1920, 1920×1080, 1080×1080, or 1080×1350). A source stream below 1080p cannot contain real 1080p detail,
+so the app preserves the best available source rather than inventing detail.
 
 ## Live monitor
 

@@ -23,6 +23,8 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
+APP_VERSION = "1.0.1"
+APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
     from zernio_poster import ZernioPublisher
     ZERNIO_AVAILABLE = True
@@ -106,6 +108,19 @@ def check_updates():
     cached = any(cache_root.glob("models--Systran--faster-whisper-*")) if cache_root.is_dir() else False
     add("Speech model: " + model, "Cached" if cached else "Not downloaded", "On first use, the selected model downloads from Hugging Face.")
     return {"checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "items": result}
+
+def check_app_update():
+    """Check the published AutoClip release without changing the local install."""
+    req = urllib.request.Request(
+        "https://api.github.com/repos/sifat-jaman-13/stream-clip-ai/releases/latest",
+        headers={"User-Agent": "AutoClip version checker"},
+    )
+    with urllib.request.urlopen(req, timeout=8) as response:
+        data = json.loads(response.read())
+    latest = str(data.get("tag_name", "")).lstrip("v") or APP_VERSION
+    return {"current": APP_VERSION, "latest": latest, "update": latest != APP_VERSION,
+            "url": data.get("html_url") or APP_RELEASES_URL,
+            "name": data.get("name") or ("AutoClip v" + latest)}
 
 def update_components():
     """Update Python runtime components and download the selected speech model.
@@ -1392,6 +1407,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"path": browse_folder()})
                 if path == "/api/check_updates":
                     return self._send(200, check_updates())
+                if path == "/api/check_app_update":
+                    return self._send(200, check_app_update())
                 if path == "/api/update_components":
                     return self._send(200, update_components())
                 if path == "/api/quit":
@@ -1766,7 +1783,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="folder-pick"><input id="rec-dir" class="text" type="text" placeholder="Default: app folder\rec"><button class="btn ghost" id="rec-dir-browse">Browse</button></div>
     <div class="row"><label>Output / clips folder</label></div>
     <div class="folder-pick"><input id="out-dir" class="text" type="text" placeholder="Default: app folder\out"><button class="btn ghost" id="out-dir-browse">Browse</button></div>
-    <div class="row"><label>Runtime updates</label></div>
+    <div class="row"><label>App and runtime updates</label></div>
+    <p class="hint">Current app version: v1.0.1. Check the published release before updating.</p>
+    <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
     <div class="hint update-list" id="updates-list"></div>
@@ -1907,6 +1926,7 @@ function wireFolderPicker(inputId,buttonId,key){
 wireFolderPicker("#rec-dir","#rec-dir-browse","rec_dir");
 wireFolderPicker("#out-dir","#out-dir-browse","out_dir");
 $("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?" — "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
+$("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new AutoClip version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
 $("#btn-update-components").onclick=async()=>{if(!(await confirmBox("Update components?","This updates Python packages and downloads the selected speech model. FFmpeg is bundled into the next installer build.","Update")))return;const b=$("#btn-update-components");b.disabled=true;$("#updates-msg").textContent="Updating...";try{const r=await api("/api/update_components");$("#updates-msg").textContent=r.message;toast("Components updated","ok")}catch(e){$("#updates-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 function confirmBox(title,msg,ok){return new Promise(res=>{
   const done=v=>{m.remove();res(v)};

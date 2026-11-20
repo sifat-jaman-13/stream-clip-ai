@@ -38,10 +38,20 @@ def _add_cuda_dlls():
     """Windows: let ctranslate2 find the cuBLAS DLLs installed by the nvidia-cublas-cu12 wheel."""
     if os.name != "nt":
         return
-    for base in sys.path:
-        d = pathlib.Path(base) / "nvidia" / "cublas" / "bin"
+    roots = [pathlib.Path(p) for p in sys.path if p]
+    for p in (getattr(sys, "_MEIPASS", ""), pathlib.Path(__file__).resolve().parent,
+              pathlib.Path(__file__).resolve().parent / "_internal"):
+        if p:
+            roots.append(pathlib.Path(p))
+    seen = set()
+    for base in roots:
+        d = base / "nvidia" / "cublas" / "bin"
+        if str(d).lower() in seen:
+            continue
+        seen.add(str(d).lower())
         if d.is_dir():
-            os.add_dll_directory(str(d))
+            try: os.add_dll_directory(str(d))
+            except OSError: pass
             os.environ["PATH"] = str(d) + os.pathsep + os.environ["PATH"]
 _add_cuda_dlls()
 
@@ -678,6 +688,7 @@ class Engine:
                 if attempt == 0 and any(k in str(e).lower() for k in ("cublas", "cuda", "dll", "cudnn")):
                     from faster_whisper import WhisperModel
                     self.log(f"GPU error ({e}) - falling back to CPU.")
+                    self.cfg["compute_device"] = "cpu"
                     _model = WhisperModel(self.cfg["model"], device="cpu", compute_type="int8"); _model_key = (self.cfg["model"], "cpu")
                     continue
                 raise

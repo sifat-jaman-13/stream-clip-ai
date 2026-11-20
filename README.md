@@ -3,7 +3,7 @@
 > **Turn Twitch and YouTube streams into viral Shorts, Reels, and TikToks automatically.**
 > Local AI highlight detection, animated captions, facecam/game layouts, and optional multi-platform publishing.
 
-[![GitHub](https://img.shields.io/badge/install-from%20source-blue?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
+[![GitHub](https://img.shields.io/badge/install-from%20source-blue?logo=github)]([https://github.com/sifat-jaman-13/stream-clip-ai](https://github.com/sifat-jaman-13/stream-clip-ai/releases/tag/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker)](https://hub.docker.com/)

@@ -25,4 +25,7 @@ if (-not (Test-Path (Join-Path $runtime "Scripts\python.exe"))) {
 $venvPython = Join-Path $runtime "Scripts\python.exe"
 & $venvPython -m pip install --upgrade pip
 & $venvPython -m pip install --upgrade -r (Join-Path $PSScriptRoot "requirements.txt")
+# Pre-fetch the default speech model during installation so first use does not
+# unexpectedly download it while the user is clipping.
+& $venvPython -c "from faster_whisper import WhisperModel; WhisperModel('distil-large-v3', device='cpu', compute_type='int8')"
 Write-Host "StreamSnip AI runtime installed successfully."

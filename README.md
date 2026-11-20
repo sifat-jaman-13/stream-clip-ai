@@ -9,6 +9,18 @@
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker)](https://hub.docker.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-lightgrey)]()
 
+[![Follow on YouTube](https://img.shields.io/badge/follow-YouTube-red?logo=youtube)](https://www.youtube.com/@scarzeroyt)
+[![Follow on Twitch](https://img.shields.io/badge/follow-Twitch-9146FF?logo=twitch)](https://www.twitch.tv/scarzero13)
+[![Follow on TikTok](https://img.shields.io/badge/follow-TikTok-000000?logo=tiktok)](https://www.tiktok.com/@scarzero13)
+[![Follow on Instagram](https://img.shields.io/badge/follow-Instagram-E4405F?logo=instagram)](https://www.instagram.com/scarzero13/)
+[![Follow on Facebook](https://img.shields.io/badge/follow-Facebook-1877F2?logo=facebook)](https://www.facebook.com/ScarZero13)
+
+## Choose how to run AutoClip
+
+- **Installer:** [Download AutoClip-Setup.exe](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) for a normal Windows installation with shortcuts.
+- **Portable:** Download **AutoClip-portable.zip** from the [latest release](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest), extract it, and run AutoClip.exe.
+- **Manual terminal:** Follow the Windows commands below for full control over Python, FFmpeg, GPU packages, and the server.
+
 **Keywords:** `twitch clipper` · `youtube clipper` · `stream to shorts` · `AI clip maker` · `viral shorts generator` · `TikTok clip generator` · `Instagram Reels maker` · `YouTube Shorts automation` · `Whisper captions`
 
 ### Optional Zernio posting

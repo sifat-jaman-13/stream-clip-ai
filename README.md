@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Capture → transcribe → score → render → publish</strong><br>
-  Runs locally with optional NVIDIA GPU acceleration and automatic runtime setup.
+  Local speech transcription and rendering, with optional local or hosted AI highlight analysis.
 </p>
 
 [![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
@@ -31,11 +31,15 @@
 The Windows installer opens a visible terminal through the real `StreamSnipAI.exe` launcher and prints the local server URL. Keep that terminal open
 while recording, rendering, or publishing. Closing that terminal or choosing Quit stops the local server.
 
+The app's browser interface and default hook-word analysis run locally. If you choose Gemini or hosted
+Hugging Face analysis, the timestamped transcript is sent to that provider. API credentials are stored
+in local app data and are not included in the page sent to the browser.
+
 ## What the app does
 
 - Captures live streams with a preference of 1080p60, 1080p, 720p60, 720p, then best.
 - Processes Twitch/YouTube live URLs or local MP4, MKV, TS, FLV, and WebM files.
-- Detects moments from audio energy, speech rate, and built-in/custom hype words.
+- Transcribes speech locally with faster-whisper, then finds moments using audio energy, speech rate, and built-in/custom hook words.
 - Produces 1080-based output in 9:16, 16:9, 1:1, or 4:5 formats.
 - Supports Facecam + game, blurred background, fill crop, and manually selected source crop.
 - Provides a four-corner draggable facecam selector with reset-to-center behavior.
@@ -43,8 +47,8 @@ while recording, rendering, or publishing. Closing that terminal or choosing Qui
 - Finds viral moments with built-in/custom hook words, local Ollama models, Gemini, or Hugging Face hosted models; Gemini quota exhaustion automatically tries Ollama.
 - Renders Karaoke/Classic subtitles with Classic, Hormozi, Neon, MrBeast, Minimal, and Fire presets.
 - Adds streamer credit from the source URL, optional on-video credit, and a configurable CTA.
-- Shows render/transcription and Zernio publishing progress bars, selection, bulk delete, and activity history.
-- Publishes selected or all clips through optional local Zernio configuration.
+- Shows render/transcription and publishing progress, clip selection, bulk delete, and activity history.
+- Publishes selected or all clips through Zernio, self-hosted Postiz, or self-hosted Mixpost.
 
 ## Requirements
 
@@ -83,10 +87,10 @@ Plan for approximately **4–6 GB** for the complete first-time installation. `m
 can use additional model storage. FFmpeg is not downloaded by the installer; install FFmpeg separately
 and place it on PATH. CPU mode remains available when CUDA is unavailable.
 
-Docker Compose exposes the UI only on this computer at [http://localhost:8080](http://localhost:8080). Persistent settings,
-custom words, clips, and recordings are stored under `./data` on the host; place a source video at
-`./data/rec` to process it from the container. For Ollama on the host, enable host access in Ollama and
-use the prefilled `host.docker.internal` address in AI settings.
+Docker Compose exposes the UI only on this computer at [http://localhost:8080](http://localhost:8080); it is not configured for remote/LAN access.
+Persistent settings, custom words, clips, and recordings are stored under `./data` on the host. Place a source video at
+`./data/rec` to process it from the container. For Ollama on the host, allow connections from Docker in Ollama and
+use the prefilled `host.docker.internal` address in AI settings. Docker runs CPU processing.
 
 ## Manual installation
 
@@ -190,14 +194,14 @@ Raw live segments are stored in the recording folder and can be deleted after cl
 Publishing is optional. Automatic posting is off by default and starts only when enabled in Settings.
 StreamSnip AI supports Zernio plus self-hosted Postiz and Mixpost. Choose the provider in Settings → Publishing provider:
 
-1. Enter the provider API key and, for self-hosted services, the base URL (and Mixpost workspace UUID).
+1. Choose Zernio, Postiz, or Mixpost; enter the provider API key and, for self-hosted services, the base URL (and Mixpost workspace UUID).
 2. Identify connected Instagram and YouTube channels through the provider's official API.
 3. Choose channel IDs, visibility, schedule delay, and auto-post behavior.
 4. Select individual clips, double-click a clip, select all, or publish the whole batch.
 
-Credentials are saved locally in `publishing.json` and must never be committed or shared. Zernio remains
-available through `zernio_poster.py`; Postiz and Mixpost use their documented REST APIs. Self-hosted
-instances still enforce the legitimate platform and provider rate limits.
+Credentials are saved locally in `publishing.json` and must never be committed or shared. Auto-post is off by default for every provider. Enable it explicitly to submit newly generated clips automatically. Errors from automatic uploads appear in Activity; failed uploads are not counted as successful.
+
+Zernio is available through `zernio_poster.py`; Postiz and Mixpost use their documented REST APIs. Self-hosted instances still enforce the legitimate platform and provider rate limits.
 
 Postiz uses its public API base URL and integration IDs. Mixpost uses its instance URL, personal key,
 workspace UUID, account IDs, and the instance's `/api` endpoints. Connect Instagram and YouTube inside
@@ -220,7 +224,18 @@ Settings includes:
 
 ## AI highlight providers
 
-The default hook-word detector runs locally and supports the built-in list plus custom phrases. Ollama analysis also runs locally: install Ollama, download a model with Ollama, then use **Detect models** in AI settings. Gemini and Hugging Face hosted analysis send the timestamped transcript to that provider; enter the matching API key or access token. Provider quota/rate-limit errors appear in the activity log. When Gemini reports quota exhaustion, StreamSnip AI automatically checks Ollama and uses an installed local model when available. Whisper speech models are free open models downloaded from Hugging Face and run locally. Hugging Face model weights are open, though hosted inference providers may charge for usage.
+Open **Settings → AI highlight selection** to choose how StreamSnip AI selects moments from the transcript. This is separate from the faster-whisper speech model setting.
+
+| Provider | What it does | Setup |
+|---|---|---|
+| **Built-in and custom hook words** | Scores transcript words and audio locally; this is the default and works offline. | Edit phrases in the **Hype words** tab. |
+| **Ollama local AI** | Analyzes timestamped transcript windows on your computer. | Install and start Ollama, install a model, click **Detect models**, choose the model, and save. |
+| **Gemini API** | Sends transcript windows to Gemini for moment selection. | Enter and save a Gemini API key. Quota/rate-limit errors are logged; after a quota error the app switches the remaining windows to Ollama when a local model is available. |
+| **Hugging Face hosted model** | Sends transcript windows to the Hugging Face Inference Providers router. | Enter a model ID and a Hugging Face token with Inference Providers access. Provider usage may require credits or be rate limited. |
+
+AI analysis uses timestamped transcript windows across the recording, rather than truncating a long recording to its opening minutes. When no AI moments are returned or a provider fails, the app logs the issue and uses the built-in audio and hook-word scoring. Stop requests cancel the waiting AI analysis. AI results are capped by **Clips per chunk** and **Minimum viral score**.
+
+To check Ollama, choose Ollama and click **Detect models**; the app contacts its configured Ollama server and lists installed models. There is no standalone Gemini connection test button: save the key, process a video, and check **Activity** for Gemini results or authentication/quota errors. The app can report API quota errors returned for a request, but it cannot display your account's remaining quota before a request. Gemini quota fallback requires Ollama to be running with a model installed. Whisper speech models are open models downloaded from Hugging Face and run locally; the optional hosted Hugging Face chat service is separate and may charge for inference.
 
 The app update control opens the release page; it does not replace files during a running recording.
 
@@ -253,11 +268,13 @@ portable package is published by the current release workflow.
 
 | Path | Purpose |
 |---|---|
-| autoclip.py | Local server, web UI, clipping engine, captions, progress, and orchestration |
+| autoclip.py | Local server, web UI, clipping engine, captions, settings, progress, and orchestration |
+| ai_highlights.py | Ollama, Gemini, and Hugging Face transcript highlight analysis |
 | launcher.py | Source for the real Windows StreamSnipAI.exe launcher |
 | run_streamsnip.cmd | Internal terminal/runtime bootstrap command |
 | installer/bootstrap.ps1 | Python runtime, dependency, and speech-model setup |
 | zernio_poster.py | Optional Zernio API integration |
+| selfhost_publishers.py | Optional Postiz and Mixpost API integrations |
 | build_windows.ps1 | PyInstaller and Inno Setup installer build |
 | installer/AutoClip.iss | Windows installer metadata and shortcuts |
 | Dockerfile / docker-compose.yml | Container packaging |

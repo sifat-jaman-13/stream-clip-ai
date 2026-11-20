@@ -13,7 +13,7 @@ body:
     attributes:
       label: StreamSnip AI version
       description: Use the version shown in App settings or the release tag/commit.
-      placeholder: v1.2.6
+      placeholder: v1.2.7
     validations:
       required: true
 

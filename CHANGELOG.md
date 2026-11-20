@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-11-21
+
+### Fixed
+
+- Resolved UI assets from both source-layout and installed-layout paths so the StreamSnip AI header logo and browser/app favicon load correctly from the Windows installer.
+- Added regression coverage for the installer's sibling `source` and `assets` directories.
+
 ## [1.2.6] - 2026-11-21
 
 ### Added
@@ -59,7 +66,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.6...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.7...HEAD
+[1.2.7]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.3...v1.2.4

@@ -696,6 +696,22 @@ class RegressionTests(unittest.TestCase):
             ):
                 self.assertEqual(Path(autoclip.ffmpeg_exe()).resolve(), ffmpeg.resolve())
 
+    def test_installed_source_finds_assets_in_parent_folder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            assets = root / "assets"
+            source.mkdir()
+            assets.mkdir()
+            icon = assets / "app-icon.png"
+            logo = assets / "brand-logo.png"
+            icon.write_bytes(b"icon")
+            logo.write_bytes(b"logo")
+            with patch.object(autoclip, "HERE", source):
+                self.assertEqual(autoclip.asset_file("app-icon.png"), icon.resolve())
+                self.assertEqual(autoclip.asset_file("brand-logo.png"), logo.resolve())
+                self.assertIsNone(autoclip.asset_file("../settings.json"))
+
     def test_window_close_quits_but_page_reload_can_reconnect(self):
         self.assertIn('window.addEventListener("pagehide"', autoclip.HTML)
         self.assertIn('api("/api/window/open")', autoclip.HTML)

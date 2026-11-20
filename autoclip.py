@@ -29,7 +29,7 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "1.2.6"
+APP_VERSION = "1.2.7"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -78,6 +78,26 @@ _patch_pyav()
 
 HERE = (pathlib.Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
         else pathlib.Path(__file__).resolve().parent)
+
+def asset_file(name):
+    """Find a known UI asset in source, installed, or frozen layouts."""
+    if name not in {"app-icon.png", "brand-logo.png"}:
+        return None
+    roots = [HERE, HERE.parent, pathlib.Path(sys.executable).resolve().parent]
+    bundle_root = getattr(sys, "_MEIPASS", "")
+    if bundle_root:
+        roots.insert(0, pathlib.Path(bundle_root))
+    seen = set()
+    for root in roots:
+        candidate = (root / "assets" / name).resolve()
+        key = str(candidate).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.is_file():
+            return candidate
+    return None
+
 _in_site_packages = any(part.lower() in {"site-packages", "dist-packages"} for part in HERE.parts)
 _data_override = os.environ.get("STREAMSNIP_DATA_DIR")
 _data_root = (pathlib.Path(_data_override).expanduser() if _data_override else
@@ -237,7 +257,6 @@ CUSTOM_FILE = _data_root / "custom_words.txt"
 ZERNIO_FILE = _data_root / "zernio.json"
 PUBLISHING_FILE = _data_root / "publishing.json"
 AI_SETTINGS_FILE = _data_root / "ai_settings.json"
-BRAND_LOGO = HERE / "assets" / "brand-logo.png"
 INSTANCE_LOCK_FILE = _data_root / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
 STORAGE_PATH_WARNING = ""
@@ -2117,8 +2136,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if path == "/api/words":
                 return self._send(200, {"text": read_custom_text(), "words": sorted(HYPE_WORDS), "phrases": sorted(HYPE_PHRASES)})
             if path in ("/assets/brand-logo.png", "/assets/app-icon.png"):
-                asset = BRAND_LOGO if path.endswith("brand-logo.png") else HERE / "assets" / "app-icon.png"
-                if asset.is_file():
+                asset = asset_file(path.rsplit("/", 1)[-1])
+                if asset:
                     return self._send(200, asset.read_bytes(), "image/png")
             if path.startswith("/clips/"):
                 return self._serve_clip(urllib.parse.unquote(path[7:]))
@@ -2667,7 +2686,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.2.6. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.2.7. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>

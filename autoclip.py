@@ -23,7 +23,7 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-APP_VERSION = "1.0.10"
+APP_VERSION = "1.0.11"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -287,6 +287,13 @@ def streamer_credit(cfg):
     if m:
         return "@" + m.group(1)
     return ""
+
+def normalize_stream_target(value):
+    """Accept common pasted Twitch/YouTube links without a scheme."""
+    target = str(value or "").strip().strip('"')
+    if re.match(r"(?i)^(?:www\.)?(?:twitch\.tv|youtube\.com|youtu\.be)/", target):
+        return "https://" + target
+    return target
 
 def load_settings():
     try:
@@ -1057,10 +1064,10 @@ class Core:
                 raise ValueError("Already running.")
             if ffmpeg_exe() == "ffmpeg" and not shutil.which("ffmpeg"):
                 raise ValueError("ffmpeg not found. Run  winget install Gyan.FFmpeg  then restart AutoClip.")
-            t = cfg["target"].strip().strip('"')
+            t = normalize_stream_target(cfg["target"])
             if cfg["mode"] == "live":
                 if not re.match(r"https?://", t):
-                    raise ValueError("Paste the full stream URL (starting with https://).")
+                    raise ValueError("Enter a Twitch or YouTube stream URL.")
                 if not streamlink_available():
                     raise ValueError("streamlink is not installed. Run:  pip install streamlink")
             else:
@@ -1814,7 +1821,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <select id="compute-device" class="text"><option value="gpu">GPU — CUDA speech + NVENC rendering</option><option value="cpu">CPU — INT8 speech + software rendering</option></select>
     <p class="hint">GPU mode is recommended for an NVIDIA RTX 3060 Ti. If CUDA or NVENC is unavailable, the app logs the fallback.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.0.10. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.0.11. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -1944,7 +1951,7 @@ async function loadZernioAccounts(){
   $("#z-msg").textContent=r.accounts.length?"Connected channels identified":"No Instagram/YouTube channels found";
   $("#z-msg").classList.add("show");
 }
-function toast(msg,kind){const t=h("div",{class:"toast "+(kind||"")},msg);$("#toasts").append(t);setTimeout(()=>{t.classList.add("out");setTimeout(()=>t.remove(),300)},3200)}
+function toast(msg,kind){if($$(".toast").some(x=>x.textContent===msg))return;const t=h("div",{class:"toast "+(kind||"")},msg);$("#toasts").append(t);setTimeout(()=>{t.classList.add("out");setTimeout(()=>t.remove(),300)},3200)}
 const settingsOverlay=$("#settings-overlay");
 const aboutOverlay=$("#about-overlay");
 $("#settings-slot").append($("#settings-card"));
@@ -2207,8 +2214,10 @@ $("#z-check").onclick=async()=>{
 };
 if(Z.api_key_set)loadZernioAccounts().catch(e=>{$("#z-msg").textContent=e.message});
 $("#btn-folder").onclick=()=>api("/api/open_folder").then(()=>toast("Clips folder opened","ok")).catch(e=>toast(e.message,"bad"));
+function normalizeLiveUrl(v){const t=v.trim().replace(/^"|"$/g,"");return /^(www\.)?(twitch\.tv|youtube\.com|youtu\.be)\//i.test(t)?"https://"+t:t}
 $("#btn-start").onclick=async()=>{
   if(!S.target.trim()){toast(S.mode==="live"?"Paste a stream link first":"Choose a video file first","bad");$("#target").focus();return}
+  if(S.mode==="live"){S.target=normalizeLiveUrl(S.target);$("#target").value=S.target;scheduleSave()}
   const b=$("#btn-start");b.disabled=true;
   try{await api("/api/start",S);await poll(true)}catch(e){toast(e.message,"bad")}
   b.disabled=false;

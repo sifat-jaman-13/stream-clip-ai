@@ -177,7 +177,7 @@ powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 
 The script creates a console-enabled PyInstaller one-folder build, bundles FFmpeg when found, creates
 dist\StreamSnipAI-portable.zip, and compiles dist\installer\StreamSnipAI-Setup.exe when Inno Setup 6 is
-installed. Installer metadata is StreamSnip AI 1.0.2 by ScarZero.
+installed. Installer metadata is StreamSnip AI 1.0.3 by ScarZero.
 
 ## Troubleshooting
 

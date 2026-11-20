@@ -23,7 +23,7 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -1456,6 +1456,9 @@ def open_window(url):
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "--streamlink":
         from streamlink_cli.main import main as streamlink_main
+        # The frozen app uses this flag only to select the worker mode. Do not
+        # pass our private flag into Streamlink's argument parser.
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
         streamlink_main()
         return
     try:
@@ -1800,7 +1803,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <select id="compute-device" class="text"><option value="gpu">GPU — CUDA speech + NVENC rendering</option><option value="cpu">CPU — INT8 speech + software rendering</option></select>
     <p class="hint">GPU mode is recommended for an NVIDIA RTX 3060 Ti. If CUDA or NVENC is unavailable, the app logs the fallback.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.0.2. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.0.3. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>

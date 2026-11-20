@@ -1,5 +1,5 @@
 #define MyAppName "StreamSnip AI"
-#define MyAppVersion "1.2.2"
+#define MyAppVersion "1.2.3"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 
@@ -36,4 +36,4 @@ Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\StreamSnipAI.exe"; Tasks: 
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_windows.ps1"" -AppDir ""{app}"""; WorkingDir: "{app}"; Description: "Install dependencies and launch StreamSnip AI"; Flags: waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_windows.ps1"" -AppDir ""{app}"""; WorkingDir: "{app}"; Description: "Install dependencies and launch StreamSnip AI"; StatusMsg: "Preparing StreamSnip AI..."; Flags: waituntilterminated skipifsilent

@@ -4,6 +4,9 @@ Set-Location $PSScriptRoot
 Write-Host "Preparing the StreamSnip AI application build..." -ForegroundColor Cyan
 $dist = Join-Path $PSScriptRoot "dist"
 $thinDir = Join-Path $dist "StreamSnipAI"
+if (Test-Path $thinDir) {
+    Remove-Item -LiteralPath $thinDir -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $thinDir | Out-Null
 
 $csc = Get-ChildItem "C:\Windows\Microsoft.NET\Framework64" -Filter csc.exe -Recurse -ErrorAction SilentlyContinue |

@@ -20,12 +20,14 @@ The installer packages only:
 
 On first setup, the script:
 
-1. detects Python;
-2. installs Python 3.12 with `winget` when Python is missing;
-3. upgrades `pip`;
-4. installs the packages from `requirements.txt` plus Streamlink;
+1. detects a supported 64-bit Python 3.10-3.12 installation;
+2. installs Python 3.12 with `winget` when a supported Python is missing;
+3. creates an isolated runtime inside the application folder;
+4. installs the packages from `requirements.txt` into that runtime;
 5. installs FFmpeg with `winget` when FFmpeg is missing;
-6. launches `StreamSnipAI.exe`.
+6. launches StreamSnip AI and records setup details in `%LOCALAPPDATA%\StreamSnip AI\setup.log`.
+
+Later launches reuse the isolated runtime and do not reinstall unchanged dependencies.
 
 Internet access is required for the initial dependency and speech-model downloads. Keep the setup terminal open until installation finishes.
 
@@ -94,7 +96,7 @@ Open `http://127.0.0.1:8080`. Settings, recordings, and clips are stored in `./d
 
 ## Installer build
 
-Windows packaging requires Python 3.14 for the build environment and Inno Setup 6:
+Windows packaging requires the .NET Framework C# compiler and Inno Setup 6:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
@@ -115,7 +117,7 @@ The installer intentionally does not require FFmpeg or Python packages to be emb
 | `ai_highlights.py` | Ollama, Gemini, and Hugging Face highlight analysis |
 | `zernio_poster.py` | Zernio publishing integration |
 | `requirements.txt` | Runtime Python dependencies |
-| `AutoClip.spec` | PyInstaller application build |
+| `AutoClip.spec` | Legacy PyInstaller full-bundle configuration (not used by the thin installer) |
 | `build_windows.ps1` | Windows app and installer build |
 | `installer/AutoClip.iss` | Inno Setup installer definition |
 | `installer/setup_windows.ps1` | Target-PC dependency setup launched by the installer |

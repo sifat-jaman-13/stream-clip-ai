@@ -44,8 +44,6 @@ while recording, rendering, or publishing. Closing that terminal or choosing Qui
 - Adds streamer credit from the source URL, optional on-video credit, and a configurable CTA.
 - Shows render/transcription and Zernio publishing progress bars, selection, bulk delete, and activity history.
 - Publishes selected or all clips through optional local Zernio configuration.
-- Includes a persistent Live monitor that watches a Twitch or YouTube URL, waits safely while it is offline,
-  and starts the existing clipping engine automatically when the stream goes live.
 
 ## Requirements
 
@@ -208,18 +206,6 @@ Live recording targets 1080p when the source provides it, falls back to 720p whe
 with an 8,000 kbps minimum video bitrate by default. Clips render at the selected Full HD output dimensions
 (1080×1920, 1920×1080, 1080×1080, or 1080×1350). A source stream below 1080p cannot contain real 1080p detail,
 so the app preserves the best available source rather than inventing detail.
-
-## Live monitor
-
-Open **Settings → Live monitor**, enter a full Twitch or YouTube URL, choose the polling interval and
-quality preference, then select **Start monitor**. The monitor keeps checking in the background and reports
-`waiting`, `queued`, `clipping`, or `error` status in the same panel. When a stream becomes live it hands
-the URL to the normal StreamSnip clipping engine, so the configured captions, framing, GPU/CPU mode,
-recording folder, output folder, and optional Zernio auto-posting are reused.
-
-Monitor definitions are stored locally in `live_monitors.json`. They are restored as paused after a restart
-and must be started again deliberately. The monitor does not bypass Streamlink, does not publish directly,
-and does not run a second clipping engine when another run is already active.
 
 ## Runtime and app updates
 

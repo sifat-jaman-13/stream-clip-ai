@@ -1,5 +1,5 @@
 #define MyAppName "StreamSnip AI"
-#define MyAppVersion "1.1.3"
+#define MyAppVersion "1.1.4"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 
@@ -20,7 +20,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
 Source: "..\autoclip.py"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\live_monitor.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\zernio_poster.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\selfhost_publishers.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion

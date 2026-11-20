@@ -28,6 +28,8 @@ if (Test-Path dist) { Remove-Item dist -Recurse -Force }
     --collect-submodules zernio_poster `
     autoclip.py
 
+& $py -m PyInstaller --noconfirm --clean --onefile --console --name StreamSnipAI --icon assets\app-icon.png launcher.py
+
 # Include FFmpeg in the portable/installable application when it is available.
 $ffmpeg = (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue).Source
 if ($ffmpeg) {

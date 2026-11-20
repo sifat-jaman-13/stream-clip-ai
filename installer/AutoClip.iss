@@ -1,5 +1,5 @@
 #define MyAppName "StreamSnip AI"
-#define MyAppVersion "1.0.11"
+#define MyAppVersion "1.0.12"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "AutoClip.exe"
 
@@ -23,16 +23,17 @@ Source: "..\autoclip.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\zernio_poster.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\run_streamsnip.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\StreamSnipAI.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "bootstrap.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\StreamSnip AI"; Filename: "{app}\run_streamsnip.cmd"
-Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\run_streamsnip.cmd"; Tasks: desktopicon
+Name: "{group}\StreamSnip AI"; Filename: "{app}\StreamSnipAI.exe"
+Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\StreamSnipAI.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\bootstrap.ps1"""; Flags: waituntilterminated
-Filename: "{app}\run_streamsnip.cmd"; Description: "Launch StreamSnip AI"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\StreamSnipAI.exe"; Description: "Launch StreamSnip AI"; Flags: nowait postinstall skipifsilent

@@ -1,6 +1,13 @@
-# StreamSnip AI — Auto Stream Clipper
+# StreamSnip AI
+
+### Local AI clipping for live streams, VODs, Shorts, Reels, and YouTube
 
 > Turn Twitch and YouTube streams—or local video files—into captioned, social-ready clips on your own machine.
+
+<p align="center">
+  <strong>Capture → transcribe → score → render → publish</strong><br>
+  Runs locally with optional NVIDIA GPU acceleration and automatic runtime setup.
+</p>
 
 [![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
 [![Windows installer](https://img.shields.io/badge/download-Windows%20installer-e94560?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe)
@@ -48,13 +55,31 @@ Native install:
 - NVIDIA CUDA hardware is optional; CPU fallback is supported
 - In Settings, choose GPU for CUDA speech + NVENC rendering or CPU for INT8 speech + software rendering, then click Save settings. An RTX 3060 Ti is supported.
 
-## Disk space after installation
+## Installation storage and downloads
 
 The installer is small, but it downloads the Python runtime, speech/GPU packages, and the default
 `distil-large-v3` speech model during setup. Plan for approximately **4–6 GB of free space** for a
 complete first-time installation. Larger models such as `medium` and `large-v3` can require additional
 model storage when selected. Recordings and finished clips are stored separately in the configured
 recording/output folders and can require **many additional GB**, depending on stream length and clip count.
+
+### What the Windows installer downloads
+
+The installer automatically downloads or installs the following when needed:
+
+| Component | Purpose |
+|---|---|
+| Python 3.10–3.14 | Runtime for the app; Python 3.12 is installed only as a compatibility fallback |
+| NumPy | Audio analysis and processing |
+| faster-whisper | Speech transcription |
+| CTranslate2, ONNX Runtime, Tokenizers, PyAV | Speech-model dependencies |
+| Streamlink | Twitch and YouTube live capture |
+| NVIDIA cuBLAS CUDA package | GPU speech acceleration for supported NVIDIA cards |
+| `distil-large-v3` model | Default speech model, downloaded before first launch |
+
+Plan for approximately **4–6 GB** for the complete first-time installation. `medium` and `large-v3`
+can use additional model storage. FFmpeg is not silently downloaded by the installer; install FFmpeg
+separately and place it on PATH. CPU mode remains available when CUDA is unavailable.
 
 Docker files are included. The current app binds its UI to a local ephemeral port and prints that port
 at startup; use Docker as a packaging/headless starting point, or adapt the bind/port setup when you

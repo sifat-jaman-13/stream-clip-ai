@@ -156,13 +156,32 @@ def _gemini_available_models(key):
         for item in data.get("models", []):
             name = str(item.get("name", ""))
             methods = item.get("supportedGenerationMethods", [])
-            if name.startswith("models/gemini-") and "generateContent" in methods:
-                names.append(name.removeprefix("models/"))
+            model = name.removeprefix("models/")
+            lower = model.lower()
+            unsuitable = any(term in lower for term in (
+                "image", "tts", "embedding", "vision", "robotics", "live",
+                "native-audio", "computer-use",
+            ))
+            if model.startswith("gemini-") and "generateContent" in methods and not unsuitable:
+                names.append(model)
         page_token = str(data.get("nextPageToken", ""))
         if not page_token or page_token in seen_tokens:
             break
         seen_tokens.add(page_token)
-    return list(dict.fromkeys(names))
+    names = list(dict.fromkeys(names))
+
+    def priority(model):
+        lower = model.lower()
+        if "flash-lite" in lower:
+            return 3
+        if "flash" in lower:
+            return 1
+        if "pro" in lower:
+            return 2
+        return 4
+
+    names.sort(key=lambda model: (priority(model), model))
+    return names[:4]
 
 
 def _gemini(prompt, config):
@@ -213,6 +232,8 @@ def _gemini(prompt, config):
             return result
         except AIProviderError as exc:
             last_error = exc
+            if "invalid JSON" in str(exc) or "did not contain valid JSON" in str(exc) or "no highlight response" in str(exc):
+                exc.retryable = True
             if not exc.retryable:
                 break
             if cached_models is None:

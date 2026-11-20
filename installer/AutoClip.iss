@@ -1,5 +1,5 @@
 #define MyAppName "StreamSnip AI"
-#define MyAppVersion "1.1.9"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 
@@ -22,6 +22,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Source: "..\dist\StreamSnipAI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\autoclip.py"; DestDir: "{app}\source"; Flags: ignoreversion
+Source: "..\ai_highlights.py"; DestDir: "{app}\source"; Flags: ignoreversion
+Source: "..\zernio_poster.py"; DestDir: "{app}\source"; Flags: ignoreversion
+Source: "..\requirements.txt"; DestDir: "{app}\source"; Flags: ignoreversion
+Source: "..\installer\setup_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\StreamSnip AI"; Filename: "{app}\StreamSnipAI.exe"
@@ -31,4 +36,4 @@ Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\StreamSnipAI.exe"; Tasks: 
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\StreamSnipAI.exe"; Description: "Launch StreamSnip AI"; Flags: nowait postinstall skipifsilent
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_windows.ps1"" -AppDir ""{app}"""; WorkingDir: "{app}"; Description: "Install dependencies and launch StreamSnip AI"; Flags: waituntilterminated

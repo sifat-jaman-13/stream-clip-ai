@@ -24,7 +24,7 @@ from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
 from live_monitor import LiveMonitorRegistry
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -1658,10 +1658,11 @@ select.text option{background:#14161f}
 .editor h4{font-size:17px;margin-bottom:4px}.editor .sub{color:var(--dim);font-size:13px;margin-bottom:14px}
 .cstage{position:relative;width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,#2c3150,#12141f);border-radius:12px;overflow:hidden;touch-action:none;user-select:none}
 .cstage .cimg{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;pointer-events:none}
-.crect{position:absolute;border:2px solid #ff40ff;background:rgba(255,64,255,.12);cursor:move}
-.crect span{position:absolute;left:4px;top:3px;font-size:10px;font-weight:700;letter-spacing:.8px;color:#fff;text-shadow:0 1px 3px #000}
+.crect{position:absolute;border:2px solid #ff40ff;background:rgba(255,64,255,.12);pointer-events:auto}
+.crect .move-hit{position:absolute;inset:12px;cursor:move;pointer-events:auto;touch-action:none;z-index:1}
+.crect span{position:absolute;left:4px;top:3px;font-size:10px;font-weight:700;letter-spacing:.8px;color:#fff;text-shadow:0 1px 3px #000;z-index:2}
 .crect.game{border:2px dashed #22d3ee;background:rgba(34,211,238,.07);cursor:default;pointer-events:none}
-.crect .hdl{position:absolute;width:14px;height:14px;background:#fff;border:2px solid #ff40ff;border-radius:3px}
+.crect .hdl{position:absolute;width:14px;height:14px;background:#fff;border:2px solid #ff40ff;border-radius:3px;pointer-events:auto;touch-action:none;z-index:3}
 .crect .hdl.nw{left:-7px;top:-7px;cursor:nwse-resize}.crect .hdl.ne{right:-7px;top:-7px;cursor:nesw-resize}
 .crect .hdl.sw{left:-7px;bottom:-7px;cursor:nesw-resize}.crect .hdl.se{right:-7px;bottom:-7px;cursor:nwse-resize}
 .erow{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}
@@ -1858,7 +1859,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <select id="compute-device" class="text"><option value="gpu">GPU — CUDA speech + NVENC rendering</option><option value="cpu">CPU — INT8 speech + software rendering</option></select>
     <p class="hint">GPU mode is recommended for an NVIDIA RTX 3060 Ti. If CUDA or NVENC is unavailable, the app logs the fallback.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.1.1. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.1.2. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -2146,7 +2147,8 @@ function openCamEditor(){
   const box={x:+S.cam_x,y:+S.cam_y,w:+S.cam_w,h:+S.cam_h};let gx=+S.game_x,ar=16/9;
   const img=h("img",{class:"cimg",draggable:false});
   const handles=["nw","ne","sw","se"].map(pos=>h("i",{class:"hdl "+pos}));
-  const rc=h("div",{class:"crect"},h("span",{},"FACECAM"),handles);
+  const moveHit=h("i",{class:"move-hit",title:"Drag to move the facecam"});
+  const rc=h("div",{class:"crect"},moveHit,h("span",{},"FACECAM"),handles);
   const rg=h("div",{class:"crect game"},h("span",{},"GAME"));
   const stage=h("div",{class:"cstage"},img,rg,rc);
   const hh=w=>w*ar/(1080/768);                       /* keeps the box the same shape as the top 40% area */
@@ -2157,10 +2159,10 @@ function openCamEditor(){
   function fit(){box.h=hh(box.w);if(box.y+box.h>100){box.h=100-box.y;box.w=box.h*(1080/768)/ar}if(box.x+box.w>100){box.w=100-box.x;box.h=hh(box.w)}}
   fit();
   const drag=(el,mode,corner)=>el.addEventListener("pointerdown",e=>{
-    e.preventDefault();e.stopPropagation();el.setPointerCapture(e.pointerId);
-    const r=stage.getBoundingClientRect(),s0={x:box.x,y:box.y,w:box.w,px:e.clientX,py:e.clientY};
-    const mv=ev=>{const dx=(ev.clientX-s0.px)/r.width*100,dy=(ev.clientY-s0.py)/r.height*100;
-      if(mode==="move"){box.x=clamp(s0.x+dx,0,100-box.w);box.y=clamp(s0.y+dy,0,100-box.h)}
+    e.preventDefault();e.stopPropagation();
+    const r=stage.getBoundingClientRect(),s0={x:box.x,y:box.y,w:box.w,h:box.h,px:e.clientX,py:e.clientY};
+    const mv=ev=>{if(ev.pointerId!==e.pointerId)return;const dx=(ev.clientX-s0.px)/r.width*100,dy=(ev.clientY-s0.py)/r.height*100;
+      if(mode==="move"){box.x=clamp(s0.x+dx,0,100-s0.w);box.y=clamp(s0.y+dy,0,100-s0.h)}
       else{
         const left=corner.includes("w"),top=corner.includes("n"),right=s0.x+s0.w,bottom=s0.y+s0.h;
         /* Use the dominant movement axis. The old code only used dx, so
@@ -2176,16 +2178,16 @@ function openCamEditor(){
         box.x=clamp(x,0,100-w);box.y=clamp(y,0,100-h);box.w=w;box.h=h
       }
       paint()};
-    const up=()=>{el.removeEventListener("pointermove",mv);el.removeEventListener("pointerup",up)};
-    el.addEventListener("pointermove",mv);el.addEventListener("pointerup",up)});
-  drag(rc,"move");handles.forEach(hdl=>drag(hdl,"resize",hdl.classList[1]));
+    const up=()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);window.removeEventListener("pointercancel",up)};
+    window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up,{once:true});window.addEventListener("pointercancel",up,{once:true})});
+  drag(moveHit,"move");handles.forEach(hdl=>drag(hdl,"resize",hdl.classList[1]));
   img.addEventListener("load",()=>{if(img.naturalWidth){ar=img.naturalWidth/img.naturalHeight;stage.style.aspectRatio=img.naturalWidth+"/"+img.naturalHeight;fit();paint()}});
   const gs=h("input",{type:"range",min:0,max:100,step:1,value:Math.round(gx)});paintRange(gs);
   gs.addEventListener("input",()=>{gx=+gs.value;paintRange(gs);paint()});
   const msg=h("span",{class:"hint",style:"margin:0"},"");
   const grab=h("button",{class:"btn ghost"},"Grab a frame");
-  const center=h("button",{class:"btn ghost"},"Center crop");
-  const centerCrop=()=>{box.h=100;box.w=Math.min(100,100*targetAr/sourceAr);box.x=(100-box.w)/2;box.y=0;paint();msg.textContent="Crop centered."};
+  const center=h("button",{class:"btn ghost"},"Center game frame");
+  const centerCrop=()=>{gx=50;gs.value=50;paintRange(gs);paint();msg.textContent="Game frame centered."};
   center.onclick=centerCrop;
   const doGrab=async()=>{grab.disabled=true;msg.textContent="Grabbing a frame...";try{const r=await api("/api/frame",{mode:S.mode,target:S.target});img.src=r.image;msg.textContent="Drag the pink box over the facecam and pull the corner to resize."}catch(e){msg.textContent=e.message}grab.disabled=false};
   grab.onclick=doGrab;
@@ -2196,7 +2198,7 @@ function openCamEditor(){
     h("div",{class:"editor"},h("h4",{},"Set the facecam area"),
       h("div",{class:"sub"},"Pink = the facecam (becomes the top 40% of the clip). Dashed blue = the part of the game that fills the bottom 60%."),
       stage,
-      h("div",{class:"erow"},grab,msg),
+       h("div",{class:"erow"},grab,center,msg),
       h("div",{class:"erow"},h("div",{class:"grow"},h("div",{class:"row",style:"margin:0 0 8px"},h("label",{},"Game crop position (left to right)")),gs)),
       h("div",{class:"erow",style:"justify-content:flex-end"},h("button",{class:"btn ghost",onclick:close},"Cancel"),h("button",{class:"btn danger",style:"background:var(--a1)",onclick:save},"Save area"))));
   document.body.append(m);document.addEventListener("keydown",esc);paint();

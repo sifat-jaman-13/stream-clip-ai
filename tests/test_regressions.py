@@ -139,6 +139,31 @@ class RegressionTests(unittest.TestCase):
             self.assertLess(command.index("-ss"), command.index("-i"))
             self.assertIn("-accurate_seek", command)
             self.assertEqual(command[command.index("-ss") + 1], "4.00")
+            self.assertIn("+genpts", command)
+            filter_graph = command[command.index("-filter_complex") + 1]
+            self.assertIn("setpts=PTS-STARTPTS", filter_graph)
+            self.assertIn("asetpts=PTS-STARTPTS", command[command.index("-af") + 1])
+
+    def test_live_capture_bitrate_defaults_and_clamps_to_6000_kbps(self):
+        self.assertEqual(autoclip.clean_cfg({})["capture_bitrate_kbps"], 6000)
+        self.assertEqual(autoclip.clean_cfg({"capture_bitrate_kbps": 1000})["capture_bitrate_kbps"], 6000)
+
+    def test_gemini_tries_other_available_models_after_temporary_failure(self):
+        calls = []
+        def fake_request(url, payload=None, headers=None, timeout=90):
+            calls.append(url)
+            if url.endswith("/models?" + "pageSize=1000"):
+                return {"models": [{"name": "models/gemini-backup-flash",
+                                    "supportedGenerationMethods": ["generateContent"]}]}
+            if "/gemini-3.8-flash:generateContent" in url:
+                raise ai_highlights.AIProviderError("HTTP 503 busy", retryable=True)
+            return {"candidates": [{"content": {"parts": [{"text": '{"moments":[]}'}]}}]}
+
+        with patch.object(ai_highlights, "_json_request", side_effect=fake_request):
+            result = ai_highlights._gemini("transcript", {"gemini_api_key": "test-key",
+                                                           "gemini_model": "gemini-3.8-flash"})
+        self.assertEqual(result, {"moments": []})
+        self.assertTrue(any("gemini-backup-flash:generateContent" in url for url in calls))
 
     @unittest.skipUnless(autoclip.shutil.which("ffmpeg") or autoclip.ffmpeg_exe() != "ffmpeg", "FFmpeg is not installed")
     def test_render_burns_relative_captions_after_input_seek(self):

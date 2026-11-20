@@ -48,7 +48,7 @@ in local app data and are not included in the page sent to the browser.
 - Renders Karaoke/Classic subtitles with Classic, Hormozi, Neon, MrBeast, Minimal, and Fire presets.
 - Adds streamer credit from the source URL, optional on-video credit, and a configurable CTA.
 - Shows render/transcription and publishing progress, clip selection, bulk delete, and activity history.
-- Publishes selected or all clips through Zernio, self-hosted Postiz, or self-hosted Mixpost.
+- Publishes selected or all clips through Zernio, Postiz, or Mixpost.
 
 ## Requirements
 
@@ -191,26 +191,39 @@ Raw live segments are stored in the recording folder and can be deleted after cl
 
 ## Publishing providers
 
-Publishing is optional. Automatic posting is off by default and starts only when enabled in Settings.
-StreamSnip AI supports Zernio plus self-hosted Postiz and Mixpost. Choose the provider in Settings → Publishing provider:
+Publishing is optional. Automatic posting is off by default. Before configuring StreamSnip, connect the social accounts you want to use inside the provider dashboard. StreamSnip can only list channels the provider already reports as connected.
 
-1. Choose Zernio, Postiz, or Mixpost; enter the provider API key and, for self-hosted services, the base URL (and Mixpost workspace UUID).
-2. Identify connected Instagram and YouTube channels through the provider's official API.
-3. Choose channel IDs, visibility, schedule delay, and auto-post behavior.
-4. Select individual clips, double-click a clip, select all, or publish the whole batch.
+### Zernio
 
-Credentials are saved locally in `publishing.json` and must never be committed or shared. Auto-post is off by default for every provider. Enable it explicitly to submit newly generated clips automatically. Errors from automatic uploads appear in Activity; failed uploads are not counted as successful.
+1. Sign in at [Zernio](https://zernio.com), open [API keys](https://zernio.com/dashboard/api-keys), choose **Create API key**, and copy the key. Zernio shows it once; see its [official quickstart](https://docs.zernio.com/quickstart).
+2. In StreamSnip, open **Settings → Publishing**, select **Zernio**, and paste the key into **API key**. No base URL or workspace is needed.
+3. Click **Save & identify channels**, select your connected Instagram and/or YouTube channel, and save.
 
-Zernio is available through `zernio_poster.py`; Postiz and Mixpost use their documented REST APIs. Self-hosted instances still enforce the legitimate platform and provider rate limits.
+### Postiz (Cloud or self-hosted)
 
-Postiz uses its public API base URL and integration IDs. Mixpost uses its instance URL, personal key,
-workspace UUID, account IDs, and the instance's `/api` endpoints. Connect Instagram and YouTube inside
-Postiz or Mixpost first; StreamSnip only submits clips to accounts that the provider reports as connected.
+1. In Postiz, connect your social channel. Open **Settings → Developers → Public API** and create/copy the API key. The [Postiz public API guide](https://docs.postiz.com/public-api/introduction) explains its API-key authentication.
+2. In StreamSnip, select **Postiz** and paste the key. For Postiz Cloud, leave **Base URL** blank (the app uses `https://api.postiz.com`). For self-hosted Postiz, enter the instance root (for example, `https://postiz.example.com`). Do not add `/public/v1`; StreamSnip adds that API path. Leave **Workspace UUID** blank.
+3. Click **Save & identify channels** once to save the key and load accounts. Choose the connected channel(s), then click the button again to save those selections.
+
+### Mixpost (Cloud or self-hosted)
+
+1. In Mixpost, connect your social channel. Open the user menu → **API** → **Create a personal key**, then copy it when Mixpost displays it. Find the workspace UUID in the dashboard URL or use Mixpost's [List your workspaces](https://docs.mixpost.app/api/reference/list-my-workspaces) API guide. See the [Mixpost API reference](https://docs.mixpost.app/api/) for personal keys and base URLs.
+2. In StreamSnip, select **Mixpost**, paste the personal key, enter the Mixpost address in **Base URL**, and enter the workspace UUID in **Workspace UUID**. For Mixpost Cloud, use `https://cloud.mixpost.app/p`; for self-hosting, enter your instance address. Include any installed path in the base URL. Do not add `/api` or the workspace UUID; StreamSnip builds the API path.
+3. Click **Save & identify channels** once to save the credentials and load accounts. Choose the connected channel(s), then click the button again to save those selections.
+
+### Posting safely
+
+- API credentials and publishing settings are saved locally in `publishing.json`. Keep API keys private; do not commit or share them.
+- Select one clip using its checkbox, then click **Publish selected (1)** for a manual test. Keep **Auto-post** off until the provider and channel work as expected.
+- **Auto-post** submits newly generated clips automatically when enabled. Configure **Schedule delay** and **YouTube visibility** in Publishing settings (visibility is currently sent by the Zernio and Postiz adapters). Repeat **Save & identify channels** if you reconnect or change accounts.
+- Successful and failed publishing activity appears in **Activity**. If a channel does not appear, confirm it is connected in the provider dashboard and that your key has access.
+
+Zernio is hosted. Postiz and Mixpost can use hosted or self-hosted instances and their REST APIs. Provider and social-platform plans, permissions, quotas, and media limits still apply. Some Mixpost instances require chunked uploads for videos over 10 MB, which this integration may not support.
 
 ## Capture quality
 
-Live recording targets 1080p when the source provides it, falls back to 720p when necessary, and records
-with an 8,000 kbps minimum video bitrate by default. Clips render at the selected Full HD output dimensions
+Live recording targets 1080p when the source provides it, falls back to 720p when necessary, and uses a
+6,000 kbps capture video bitrate target by default (the lowest setting allowed). Clips render at the selected Full HD output dimensions
 (1080×1920, 1920×1080, 1080×1080, or 1080×1350). A source stream below 1080p cannot contain real 1080p detail,
 so the app preserves the best available source rather than inventing detail.
 
@@ -224,18 +237,42 @@ Settings includes:
 
 ## AI highlight providers
 
-Open **Settings → AI highlight selection** to choose how StreamSnip AI selects moments from the transcript. This is separate from the faster-whisper speech model setting.
+Choose a provider in the prominent **Choose your highlight engine** card at the very top of the main screen. Its four choices stay visible so you can switch at any time. This setting controls transcript highlight analysis, separately from the faster-whisper speech-to-text model setting.
 
-| Provider | What it does | Setup |
-|---|---|---|
-| **Built-in and custom hook words** | Scores transcript words and audio locally; this is the default and works offline. | Edit phrases in the **Hype words** tab. |
-| **Ollama local AI** | Analyzes timestamped transcript windows on your computer. | Install and start Ollama, install a model, click **Detect models**, choose the model, and save. |
-| **Gemini API** | Sends transcript windows to Gemini for moment selection. | Enter and save a Gemini API key. Quota/rate-limit errors are logged; after a quota error the app switches the remaining windows to Ollama when a local model is available. |
-| **Hugging Face hosted model** | Sends transcript windows to the Hugging Face Inference Providers router. | Enter a model ID and a Hugging Face token with Inference Providers access. Provider usage may require credits or be rate limited. |
+### Free built-in hook words (no AI service)
 
-AI analysis uses timestamped transcript windows across the recording, rather than truncating a long recording to its opening minutes. When no AI moments are returned or a provider fails, the app logs the issue and uses the built-in audio and hook-word scoring. Stop requests cancel the waiting AI analysis. AI results are capped by **Clips per chunk** and **Minimum viral score**.
+The default **Built-in and custom hook words** option analyzes speech and audio locally and works offline. Open the **Hype words** tab to review and edit hook phrases. Add phrases that fit your language, game, community, and content (such as reactions, surprising outcomes, or recurring catchphrases); remove defaults that do not fit. Save your changes. Hook words work together with audio-energy and speech-rate scoring.
 
-To check Ollama, choose Ollama and click **Detect models**; the app contacts its configured Ollama server and lists installed models. There is no standalone Gemini connection test button: save the key, process a video, and check **Activity** for Gemini results or authentication/quota errors. The app can report API quota errors returned for a request, but it cannot display your account's remaining quota before a request. Gemini quota fallback requires Ollama to be running with a model installed. Whisper speech models are open models downloaded from Hugging Face and run locally; the optional hosted Hugging Face chat service is separate and may charge for inference.
+### Gemini API key (Google AI Studio)
+
+1. Sign in to [Google AI Studio](https://aistudio.google.com/), open **API keys**, and choose **Create API key**. Google says AI Studio creates a project and key for new users; see the [Gemini API getting-started guide](https://ai.google.dev/gemini-api/docs/get-started).
+2. Copy the key and keep it private. In StreamSnip, choose **Gemini API** in the **Choose your highlight engine** card, paste the key into **Gemini API key**, and save AI settings. The key is stored locally by the app.
+3. Process a short recording and check **Activity** for successful analysis or an authentication/quota error.
+
+Google offers a free tier for eligible Gemini API models, but availability, model limits, and rate quotas can vary by model, project, and account. Check Google's current [Gemini API pricing and free-tier table](https://ai.google.dev/gemini-api/docs/pricing); a key does not mean unlimited free usage. StreamSnip reports quota/rate-limit errors returned by Google but cannot show remaining quota in advance. On quota/rate-limit, timeout, or temporary service errors, StreamSnip tries other available Gemini models that support text generation before trying Ollama for the remaining transcript windows. If Gemini models are unavailable or fail and a local Ollama model is configured and reachable, Ollama is used; otherwise the app falls back to built-in audio and hook-word scoring.
+
+### Ollama local AI (runs on your computer)
+
+Ollama runs the selected open model locally. Model inference is separate from Whisper transcription; both use computer resources, and larger Ollama models need more memory and may run more slowly.
+
+1. Install Ollama from its [official download page](https://ollama.com/download). On Windows, use the installer. Ollama normally runs in the background and exposes its local API at `http://127.0.0.1:11434`.
+2. Download a model. A modest starting point is Qwen 3 4B. Open PowerShell or Terminal and run:
+
+   ~~~powershell
+   ollama pull qwen3:4b
+   ~~~
+
+   The [Ollama model library](https://ollama.com/library) lists models and download sizes. Start with a smaller model; try a larger one if your computer has enough memory and you want to compare its results. Speed depends on your hardware and model choice.
+3. In StreamSnip, choose **Ollama local AI** in the **Choose your highlight engine** card, leave **Ollama address** as `http://127.0.0.1:11434` for a standard local install, and click **Detect models**. Select the model that appears and save AI settings.
+4. To check Ollama later, click **Detect models** again. If no models appear, confirm Ollama is running and a model is installed. `ollama list` shows installed model names.
+
+To use a different model, choose one from the [Ollama library](https://ollama.com/library), copy its exact name/tag, and run `ollama pull MODEL_NAME` (replace `MODEL_NAME` with that name). After the download, click **Detect models** in StreamSnip and select it. For Gemini quota fallback, leave Ollama running and keep an installed model selected. In Docker, `127.0.0.1` points inside the container; use the host Ollama address from the Docker instructions instead.
+
+### Hugging Face hosted model
+
+Choose **Hugging Face open model (hosted)** to send transcript windows to the Hugging Face Inference Providers router. Enter a model ID and a Hugging Face token with Inference Providers access, then save. This is a hosted service; availability, credits, and rate limits depend on Hugging Face and the selected provider.
+
+AI analysis processes timestamped transcript windows across the recording. The **Activity** log identifies the provider and model, says whether analysis is running locally or through a hosted API, reports the transcript window being analyzed, records Gemini model retries and Ollama fallback, and reports how many moments the model returned. If an AI provider returns no moments or fails, the app logs the issue and falls back to built-in audio and hook-word scoring. Stop requests cancel waiting AI analysis. AI results are limited by **Clips per chunk** and **Minimum viral score**. Whisper models from Hugging Face are separate downloads that run locally; they are not the hosted Hugging Face chat-analysis provider.
 
 The app update control opens the release page; it does not replace files during a running recording.
 

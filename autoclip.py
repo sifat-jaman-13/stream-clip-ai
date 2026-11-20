@@ -219,7 +219,7 @@ DEFAULTS = {
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "streamer_tag": "", "show_tag_video": True,
     "cta_enabled": True, "cta_text": "Subscribe for more clips", "cta_voice_enabled": True,
-    "capture_bitrate_kbps": 8000,
+    "capture_bitrate_kbps": 6000,
     "layout": "Facecam + game (Twitch)", "output_format": "9:16", "crop_x": 34.2, "crop_y": 0.0,
     "crop_w": 31.6, "crop_h": 100.0, "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
@@ -247,7 +247,7 @@ def clean_cfg(raw):
         c[k] = max(lo, min(hi, v))
     num("clips_per_chunk", 0, 10, int); num("chunk_min", 1, 30, int)
     num("pre", 3, 90, int); num("post", 3, 90, int)
-    num("capture_bitrate_kbps", 8000, 50000, int)
+    num("capture_bitrate_kbps", 6000, 50000, int)
     num("min_score", 0, 100, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
     num("subtitle_font_size", 60, 180, int); num("subtitle_nudge", -400, 400, int)
     c["min_score"] = round(c["min_score"], 1)
@@ -847,8 +847,12 @@ class Engine:
         score = np.clip(50 + 20 * raw_score, 0, 100)
         ai_cfg = load_ai_settings()
         provider = ai_cfg["provider"]
+        if provider == "hooks":
+            self.log("Highlight scoring: built-in/custom hook words + audio energy and speech rate (local, offline; no AI model).")
         if provider != "hooks":
-            self.status(f"Finding viral moments with {provider.title()}...", "transcribing", 100)
+            mode = {"ollama": "Ollama local model", "gemini": "Gemini cloud model", "huggingface": "Hugging Face hosted model"}.get(provider, provider.title())
+            self.log(f"Highlight analysis starting with {mode}; analyzing timestamped transcript windows.")
+            self.status(f"Finding viral moments with {mode}...", "transcribing", 100)
             try:
                 ai_picks = select_moments(provider, words, n, ai_cfg, self.log, self.ai_cancel.is_set)
                 if ai_picks:
@@ -857,15 +861,15 @@ class Engine:
                         if 0 <= int(second) < n:
                             ai_score[int(second)] = max(ai_score[int(second)], float(value))
                     score = ai_score
-                    self.log(f"{provider.title()} identified {len(ai_picks)} transcript highlights.")
+                    self.log(f"AI highlight analysis returned {len(ai_picks)} transcript highlights; see the model/provider entries above for the engine used on each window.")
                 else:
-                    self.log(f"{provider.title()} found no moments; using hook-word and audio scoring.")
+                    self.log("AI highlight analysis returned no moments; using hook-word and audio scoring.")
             except AIAnalysisCancelled:
                 raise Stopped()
             except AIProviderError as exc:
-                self.log(f"{provider.title()} highlight analysis failed: {exc}. Using hook-word and audio scoring.")
+                self.log(f"AI highlight analysis failed: {exc}. Using hook-word and audio scoring.")
             except Exception as exc:
-                self.log(f"{provider.title()} returned an invalid response: {exc}. Using hook-word and audio scoring.")
+                self.log(f"AI highlight analysis returned an invalid response: {exc}. Using hook-word and audio scoring.")
         self.best_score = float(score.max())
         requested = int(self.cfg["clips_per_chunk"])
         # Zero means unlimited: keep selecting non-overlapping moments while they
@@ -891,14 +895,14 @@ class Engine:
             # Twitch-style portrait: facecam on the top 40% (1080x768), game on the bottom 60% (1080x1152)
             cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("cam_x", "cam_y", "cam_w", "cam_h"))
             gx = float(cfg["game_x"]) / 100
-            vf = ("[0:v]split=2[a][b];"
+            vf = ("[0:v]setpts=PTS-STARTPTS,split=2[a][b];"
                   f"[a]crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f},"
                   "scale=1080:768:force_original_aspect_ratio=increase,crop=1080:768[cam];"
                   f"[b]crop=min(iw\\,ih*1080/1152):ih:(iw-min(iw\\,ih*1080/1152))*{gx:.4f}:0,"
                   "scale=1080:1152[game];"
                   f"[cam][game]vstack=inputs=2,setsar=1,subtitles={name}.ass[v]")
         elif cfg["layout"].startswith("Blur"):
-            vf = ("[0:v]split=2[a][b];"
+            vf = ("[0:v]setpts=PTS-STARTPTS,split=2[a][b];"
                   f"[a]scale={round(out_w/4)}:{round(out_h/4)}:force_original_aspect_ratio=increase,crop={out_w//4}:{out_h//4},boxblur=8:2,scale={out_w}:{out_h}[bg];"
                   f"[b]scale={out_w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,"
                   f"setsar=1,subtitles={name}.ass[v]")
@@ -908,16 +912,16 @@ class Engine:
                 crop = f"crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f},"
             else:
                 crop = ""
-            vf = (f"[0:v]{crop}scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
+            vf = (f"[0:v]setpts=PTS-STARTPTS,{crop}scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
                   f"setsar=1,subtitles={name}.ass[v]")
         enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if cfg.get("compute_device", "gpu") == "gpu" and has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
         tmp = f"{name}.tmp.mp4"
-        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-ss", f"{start:.2f}", "-accurate_seek",
+        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-fflags", "+genpts", "-ss", f"{start:.2f}", "-accurate_seek",
                "-t", f"{end - start:.2f}", "-i", str(pathlib.Path(src).resolve()),
                "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
-               *enc, "-pix_fmt", "yuv420p", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
-               "-c:a", "aac", "-b:a", "160k", "-r", "30", "-movflags", "+faststart", tmp]
+               *enc, "-pix_fmt", "yuv420p", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS",
+               "-c:a", "aac", "-b:a", "160k", "-r", "30", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", tmp]
         r = run(cmd, cwd=OUT, capture_output=True, text=True)
         (OUT / f"{name}.ass").unlink(missing_ok=True)
         if r.returncode != 0:
@@ -1056,7 +1060,7 @@ class Engine:
         except Exception:
             slog.close()
             raise
-        bitrate = int(self.cfg.get("capture_bitrate_kbps", 8000))
+        bitrate = int(self.cfg.get("capture_bitrate_kbps", 6000))
         if self.cfg.get("compute_device", "gpu") == "gpu" and has_nvenc():
             capture_enc = ["-c:v", "h264_nvenc", "-preset", "p5", "-b:v", f"{bitrate}k",
                            "-maxrate", f"{bitrate}k", "-bufsize", f"{bitrate * 2}k"]
@@ -1758,9 +1762,16 @@ header{display:flex;align-items:center;gap:14px;padding:16px 22px}
 .sp{flex:1}
 .main{position:relative;display:grid;grid-template-columns:430px minmax(0,1fr);gap:18px;padding:0 22px 22px;min-height:0}
 .left{display:flex;flex-direction:column;min-height:0;gap:0}
-.scroll{flex:1;overflow:auto;padding-right:6px;margin-right:-6px}
+.scroll{display:flex;flex-direction:column;flex:1;overflow:auto;padding-right:6px;margin-right:-6px}
 .right{display:flex;flex-direction:column;min-height:0;gap:14px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px;backdrop-filter:blur(8px)}
+.ai-card{order:-1;border-color:rgba(139,92,246,.48);background:radial-gradient(520px 180px at 0 0,rgba(139,92,246,.14),transparent 72%),var(--card)}
+.ai-card .num{width:24px;font-size:9px;letter-spacing:-.5px}
+.ai-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.ai-choice{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.2);color:var(--tx);text-align:left;transition:.15s}
+.ai-choice:hover{border-color:rgba(139,92,246,.65);transform:translateY(-1px)}
+.ai-choice.on{border-color:var(--a1);background:rgba(139,92,246,.16);box-shadow:0 0 0 1px rgba(139,92,246,.2) inset}
+.ai-choice b{font-size:13px}.ai-choice small{font-size:11px;color:var(--mute)}
 .ch{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .ch h3{font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim);font-weight:600}
 .num{width:20px;height:20px;border-radius:7px;background:var(--grad);font-size:11px;font-weight:700;display:grid;place-items:center}
@@ -1938,6 +1949,27 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <p class="hint" id="src-hint"></p>
   </div>
 
+  <div class="card ai-card" id="ai-card">
+    <div class="ch"><span class="num">AI</span><h3>Choose your highlight engine</h3></div>
+    <p class="hint" style="margin-top:0">Pick how StreamSnip finds viral moments, then save your choice. Whisper still creates the transcript separately.</p>
+    <div class="ai-choices" role="group" aria-label="AI highlight provider">
+      <button type="button" class="ai-choice" data-ai-provider="hooks"><b>Hook words</b><small>Free · offline · default</small></button>
+      <button type="button" class="ai-choice" data-ai-provider="ollama"><b>Ollama local AI</b><small>Free · private · local model</small></button>
+      <button type="button" class="ai-choice" data-ai-provider="gemini"><b>Gemini API</b><small>Google API key · quota based</small></button>
+      <button type="button" class="ai-choice" data-ai-provider="huggingface"><b>Hugging Face</b><small>Hosted open models</small></button>
+    </div>
+    <select id="ai-provider" class="text" hidden><option value="hooks">Built-in and custom hook words</option><option value="ollama">Ollama local AI</option><option value="huggingface">Hugging Face hosted model</option><option value="gemini">Gemini API</option></select>
+    <div id="ollama-ai-fields" hidden>
+      <div class="row"><label>Ollama address</label></div><input id="ollama-url" class="text" value="http://127.0.0.1:11434">
+      <div class="row"><label>Installed Ollama model</label><button class="btn ghost" id="ai-detect-ollama">Detect models</button></div>
+      <select id="ollama-model" class="text"><option value="">Click Detect models</option></select>
+      <p class="hint">Install Ollama and at least one model first. Only models already installed and detected by Ollama are available.</p>
+    </div>
+    <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><b id="gemini-key-state">Not saved</b></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><p class="hint">If a model is busy, times out, or hits quota, StreamSnip tries other available Gemini models before Ollama fallback.</p></div>
+    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="Qwen/Qwen2.5-7B-Instruct-1M"><div class="row"><label>Hugging Face access token</label><b id="hf-token-state">Not saved</b></div><input id="hf-token" class="text" type="password" placeholder="Token with Inference Providers access"><p class="hint">Open model weights are free; hosted inference providers may charge or enforce account limits.</p></div>
+    <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
+  </div>
+
   <div class="card">
     <div class="ch"><span class="num">2</span><h3>Moment detection</h3></div>
     <div class="row"><label>Min viral score</label><b id="v-sens"></b></div>
@@ -2020,18 +2052,6 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 
   <div class="card" id="settings-card">
     <div class="ch"><span class="num">5</span><h3>App settings</h3></div>
-    <div class="row"><label>AI highlight selection</label></div>
-    <p class="hint">Whisper creates the transcript with free Hugging Face speech models. Choose how the app identifies shareable moments.</p>
-    <select id="ai-provider" class="text"><option value="hooks">Built-in and custom hook words (free, offline)</option><option value="ollama">Ollama local AI (free, private)</option><option value="huggingface">Hugging Face open model (hosted)</option><option value="gemini">Gemini API</option></select>
-    <div id="ollama-ai-fields" hidden>
-      <div class="row"><label>Ollama address</label></div><input id="ollama-url" class="text" value="http://127.0.0.1:11434">
-      <div class="row"><label>Installed Ollama model</label><button class="btn ghost" id="ai-detect-ollama">Detect models</button></div>
-      <select id="ollama-model" class="text"><option value="">Click Detect models</option></select>
-      <p class="hint">Install Ollama and at least one model first. The app only uses models already installed on this computer.</p>
-    </div>
-    <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><b id="gemini-key-state">Not saved</b></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><p class="hint">Quota and rate-limit errors are reported in the activity log. On quota exhaustion, analysis switches to Ollama when available.</p></div>
-    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="Qwen/Qwen2.5-7B-Instruct-1M"><div class="row"><label>Hugging Face access token</label><b id="hf-token-state">Not saved</b></div><input id="hf-token" class="text" type="password" placeholder="Token with Inference Providers access"><p class="hint">Open model weights are free; hosted inference providers may charge or enforce account limits.</p></div>
-    <div class="prow"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
     <div class="row"><label>Storage folders</label></div>
     <p class="hint">Choose where recordings and finished clips are saved. Changes apply after clipping is stopped.</p>
     <div class="row"><label>Recording folder</label></div>
@@ -2041,9 +2061,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Processing hardware</label></div>
     <select id="compute-device" class="text"><option value="gpu">GPU — CUDA speech + NVENC rendering</option><option value="cpu">CPU — INT8 speech + software rendering</option></select>
     <p class="hint">GPU mode is recommended for an NVIDIA RTX 3060 Ti. If CUDA or NVENC is unavailable, the app logs the fallback.</p>
-    <div class="row"><label>Live recording quality</label><b>Full HD target</b></div>
-    <input id="capture-bitrate" class="text" type="number" min="8000" max="50000" step="500" value="8000">
-    <p class="hint">Captures at 1080p when the source provides it, falls back to 720p, and records at least 8,000 kbps. Source streams below 1080p cannot be upscaled into real detail.</p>
+    <div class="row"><label>Live video bitrate target (kbps)</label><b>Full HD</b></div>
+    <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
+    <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
     <p class="hint">Current app version: v1.1.7. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
@@ -2051,8 +2071,8 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
     <div class="hint update-list" id="updates-list"></div>
     <div class="row"><label>Publishing provider</label></div>
-    <select id="pub-provider" class="text"><option value="zernio">Zernio</option><option value="postiz">Postiz — self-hosted</option><option value="mixpost">Mixpost — self-hosted</option></select>
-    <p class="hint">Postiz and Mixpost connect through their official APIs. Zernio remains available as an option.</p>
+    <select id="pub-provider" class="text"><option value="zernio">Zernio</option><option value="postiz">Postiz</option><option value="mixpost">Mixpost</option></select>
+    <p class="hint">Connect through Zernio, Postiz, or Mixpost. Leave Postiz Base URL blank for Postiz Cloud; Mixpost needs its instance URL and workspace UUID.</p>
     <div class="row"><label>API key</label><b id="z-key-state">Not saved</b></div>
     <input id="z-api" class="text" type="password" placeholder="Enter a new key to replace the saved key">
     <div class="two" id="selfhost-fields" hidden><div><div class="row"><label>Base URL</label></div><input id="pub-base" class="text" placeholder="https://postiz.example.com"></div><div><div class="row"><label>Workspace UUID (Mixpost)</label></div><input id="pub-workspace" class="text" placeholder="Required for Mixpost"></div></div>
@@ -2170,8 +2190,8 @@ $("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.oll
 $("#hf-model").value=AI.huggingface_model||"Qwen/Qwen2.5-7B-Instruct-1M";
 $("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";
 $("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";
-function showAIFields(){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface"}
-$("#ai-provider").onchange=showAIFields;showAIFields();
+function showAIFields(){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
+$("#ai-provider").onchange=showAIFields;$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields()});showAIFields();
 $("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
 $("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:AI.gemini_model||"gemini-3.8-flash",huggingface_model:$("#hf-model").value};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 function setSelectOptions(el,items,chosen){
@@ -2206,7 +2226,7 @@ $("#btn-about").onclick=openAbout;
 $("#btn-about-close").onclick=closeAbout;
 aboutOverlay.onclick=e=>{if(e.target===aboutOverlay)closeAbout()};
 document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(!settingsOverlay.hidden)closeSettings();if(!aboutOverlay.hidden)closeAbout()});
-$("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||""; $("#capture-bitrate").value=S.capture_bitrate_kbps||8000;
+$("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||""; $("#capture-bitrate").value=S.capture_bitrate_kbps||6000;
 function wireFolderPicker(inputId,buttonId,key){
   const input=$(inputId), button=$(buttonId);
   input.addEventListener("change",()=>{S[key]=input.value.trim();scheduleSave()});
@@ -2216,7 +2236,7 @@ wireFolderPicker("#rec-dir","#rec-dir-browse","rec_dir");
 wireFolderPicker("#out-dir","#out-dir-browse","out_dir");
 $("#compute-device").value=S.compute_device||"gpu";
 $("#compute-device").addEventListener("change",e=>{S.compute_device=e.target.value;scheduleSave()});
-$("#capture-bitrate").addEventListener("change",e=>{S.capture_bitrate_kbps=Math.max(8000,Math.min(50000,+e.target.value||8000));e.target.value=S.capture_bitrate_kbps;scheduleSave()});
+$("#capture-bitrate").addEventListener("change",e=>{S.capture_bitrate_kbps=Math.max(6000,Math.min(50000,+e.target.value||6000));e.target.value=S.capture_bitrate_kbps;scheduleSave()});
 $("#btn-settings-save").onclick=async()=>{const b=$("#btn-settings-save");b.disabled=true;try{await api("/api/settings",S);toast("Settings saved","ok")}catch(e){toast(e.message,"bad")}b.disabled=false};
 $("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?" — "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
 $("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new AutoClip version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
@@ -2450,7 +2470,7 @@ $("#btn-words-save").onclick=saveWords;
 $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveWords()}});
 
 /* ---------- actions ---------- */
-function loadProviderForm(){const cfg=(P.providers&&P.providers[activeProvider])||{};Z=Object.assign({},cfg);$("#pub-provider").value=activeProvider;$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post;$("#pub-base").value=cfg.base_url||"";$("#pub-workspace").value=cfg.workspace||"";$("#selfhost-fields").hidden=activeProvider==="zernio"}
+function loadProviderForm(){const cfg=(P.providers&&P.providers[activeProvider])||{};Z=Object.assign({},cfg);$("#pub-provider").value=activeProvider;$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post;$("#pub-base").value=cfg.base_url||"";$("#pub-base").placeholder=activeProvider==="postiz"?"Leave blank for Postiz Cloud":"https://cloud.mixpost.app/p or your instance URL";$("#pub-workspace").value=cfg.workspace||"";$("#pub-workspace").placeholder="Required: workspace UUID";$("#selfhost-fields").hidden=activeProvider==="zernio"}
 $("#pub-provider").onchange=async e=>{activeProvider=e.target.value;accountsLoadedFor="";loadProviderForm();$("#z-ig").replaceChildren(h("option",{value:""},"Not selected"));$("#z-yt").replaceChildren(h("option",{value:""},"Not selected"));if((P.providers[activeProvider]||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
 $("#z-key-state").textContent=Z.api_key_set?"Saved locally":"Not saved";
 $("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";

@@ -26,6 +26,7 @@
 | Option | Use it when | Link |
 |---|---|---|
 | **Windows installer** | Start Menu/desktop shortcuts; downloads its runtime on first setup | [Download installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe) |
+| **Portable Windows app** | Run the compiled app directly without the installer | [Download portable app](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Portable.zip) |
 | **Manual terminal** | Full control over Python, FFmpeg, CUDA, and dependencies | Follow the source setup below |
 
 The Windows installer opens a visible terminal through the real `StreamSnipAI.exe` launcher and prints the local server URL. Keep that terminal open
@@ -283,10 +284,11 @@ powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 ~~~
 
 The script creates a PyInstaller compatibility build in `dist\AutoClip`, a real
-`dist\StreamSnipAI.exe` terminal launcher, and compiles
-`dist\installer\StreamSnipAI-Setup.exe` when Inno Setup 6 is installed. The installer ships the
-Python source and bootstrap files; it downloads the runtime and dependencies on first setup. No
-portable package is published by the current release workflow.
+`dist\StreamSnipAI.exe` terminal launcher, a portable app archive at
+`dist\StreamSnipAI-Portable.zip`, and compiles `dist\installer\StreamSnipAI-Setup.exe` when Inno
+Setup 6 is installed. The portable archive contains the compiled app as `StreamSnipAI.exe` plus
+its required runtime files; extract the whole archive and run that EXE. The installer ships the
+Python source and bootstrap files; it downloads the runtime and dependencies on first setup.
 
 ## Troubleshooting
 

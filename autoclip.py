@@ -23,6 +23,7 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
+from live_monitor import LiveMonitorRegistry
 APP_VERSION = "1.0.13"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -159,6 +160,7 @@ def update_components():
 SETTINGS_FILE = HERE / "settings.json"
 CUSTOM_FILE = HERE / "custom_words.txt"
 ZERNIO_FILE = HERE / "zernio.json"
+LIVE_MONITOR_FILE = HERE / "live_monitors.json"
 BRAND_LOGO = HERE / "assets" / "brand-logo.png"
 INSTANCE_LOCK_FILE = HERE / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
@@ -1281,7 +1283,27 @@ def grab_frame(mode, target):
         raise ValueError("Grabbing a frame took too long.")
     raise ValueError("Couldn't read a frame from that source.")
 
+def probe_live_monitor(target, quality):
+    """Return True only when Streamlink resolves an actual playable stream."""
+    if not streamlink_available():
+        raise ValueError("streamlink is not installed in this Python environment.")
+    result = run(streamlink_cmd() + [target, quality, "--stream-url"], capture_output=True,
+                 text=True, env=streamlink_env(), timeout=45)
+    return result.returncode == 0 and bool((result.stdout or "").strip())
+
 CORE = Core()
+
+def start_monitored_capture(target):
+    cfg = dict(CORE.settings, mode="live", target=target)
+    CORE.start(clean_cfg(cfg))
+
+LIVE_MONITORS = LiveMonitorRegistry(
+    LIVE_MONITOR_FILE,
+    probe=probe_live_monitor,
+    start_capture=start_monitored_capture,
+    is_busy=lambda: CORE.running,
+    log=CORE.push,
+)
 TOKEN = secrets.token_urlsafe(24)
 
 # ------------------------------------------------------------------ http server
@@ -1363,6 +1385,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, CORE.state(since))
             if path == "/api/words":
                 return self._send(200, {"text": read_custom_text(), "words": sorted(HYPE_WORDS), "phrases": sorted(HYPE_PHRASES)})
+            if path == "/api/live-monitor/status":
+                q = urllib.parse.parse_qs(u.query)
+                mid = q.get("id", [None])[0]
+                try:
+                    return self._send(200, LIVE_MONITORS.status(mid))
+                except ValueError as e:
+                    return self._send(404, {"error": str(e)})
             if path in ("/assets/brand-logo.png", "/assets/app-icon.png"):
                 asset = BRAND_LOGO if path.endswith("brand-logo.png") else HERE / "assets" / "app-icon.png"
                 if asset.is_file():
@@ -1390,6 +1419,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 if path == "/api/start":
                     CORE.start(clean_cfg(body)); return self._send(200, {"ok": True})
+                if path == "/api/live-monitor/start":
+                    return self._send(200, {"monitor": LIVE_MONITORS.start(body)})
+                if path == "/api/live-monitor/stop":
+                    return self._send(200, LIVE_MONITORS.stop(body.get("id")))
+                if path.startswith("/api/live-monitor/") and path.endswith("/config"):
+                    mid = urllib.parse.unquote(path[len("/api/live-monitor/"):-len("/config")])
+                    return self._send(200, {"monitor": LIVE_MONITORS.update(mid, body)})
                 if path == "/api/settings":
                     if CORE.running:
                         return self._send(400, {"error": "Stop clipping before changing storage folders."})
@@ -1508,6 +1544,7 @@ def main():
             pass
     except KeyboardInterrupt:
         pass
+    LIVE_MONITORS.shutdown()
     CORE.shutdown()
     try:
         time.sleep(0.3)
@@ -1826,6 +1863,14 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
     <div class="hint update-list" id="updates-list"></div>
+    <div class="row"><label>Live monitor</label></div>
+    <p class="hint">Watch a Twitch or YouTube channel and start clipping automatically when it goes live. The monitor waits safely when the stream is offline.</p>
+    <input id="monitor-target" class="text" type="text" placeholder="https://www.twitch.tv/channel">
+    <div class="two">
+      <div><div class="row"><label>Check every (seconds)</label></div><input id="monitor-poll" class="text" type="number" min="10" max="3600" value="30"></div>
+      <div><div class="row"><label>Quality preference</label></div><select id="monitor-quality" class="text"><option>1080p60,1080p,720p60,720p,best</option><option>best</option></select></div>
+    </div>
+    <div class="prow"><button class="btn ghost" id="monitor-start">Start monitor</button><button class="btn ghost" id="monitor-stop" disabled>Stop monitor</button><span class="msg" id="monitor-msg">No monitor configured</span></div>
     <div class="row"><label>Zernio posting</label></div>
     <p class="hint">Save your API key locally, identify connected channels, and control publishing for finished clips.</p>
     <div class="row"><label>Zernio API key</label><b id="z-key-state">Not saved</b></div>
@@ -1981,6 +2026,20 @@ $("#btn-settings-save").onclick=async()=>{const b=$("#btn-settings-save");b.disa
 $("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?" — "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
 $("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new AutoClip version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
 $("#btn-update-components").onclick=async()=>{if(!(await confirmBox("Update components?","This updates Python packages and downloads the selected speech model. FFmpeg is bundled into the next installer build.","Update")))return;const b=$("#btn-update-components");b.disabled=true;$("#updates-msg").textContent="Updating...";try{const r=await api("/api/update_components");$("#updates-msg").textContent=r.message;toast("Components updated","ok")}catch(e){$("#updates-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
+let monitorId=null;
+async function refreshLiveMonitor(){
+  try{
+    const r=await (await fetch("/api/live-monitor/status",{cache:"no-store"})).json();
+    const m=(r.monitors||[])[0];
+    monitorId=m?.id||null;
+    $("#monitor-msg").textContent=m?m.message:"No monitor configured";
+    $("#monitor-stop").disabled=!m;
+    if(m){$("#monitor-target").value=m.target;$("#monitor-poll").value=m.poll_interval;$("#monitor-quality").value=m.quality;}
+  }catch(e){$("#monitor-msg").textContent="Monitor status unavailable"}
+}
+$("#monitor-start").onclick=async()=>{const target=$("#monitor-target").value.trim();if(!target){toast("Enter a Twitch or YouTube URL first","bad");return}const b=$("#monitor-start");b.disabled=true;try{const r=await api("/api/live-monitor/start",{target,poll_interval:+$("#monitor-poll").value||30,quality:$("#monitor-quality").value});monitorId=r.monitor.id;toast("Live monitor started","ok");refreshLiveMonitor()}catch(e){toast(e.message,"bad")}b.disabled=false};
+$("#monitor-stop").onclick=async()=>{try{await api("/api/live-monitor/stop",{id:monitorId});monitorId=null;toast("Live monitor stopped","ok");refreshLiveMonitor()}catch(e){toast(e.message,"bad")}};
+refreshLiveMonitor();setInterval(refreshLiveMonitor,3000);
 function confirmBox(title,msg,ok){return new Promise(res=>{
   const done=v=>{m.remove();res(v)};
   const m=h("div",{class:"overlay"},h("div",{class:"dialog"},h("h4",{},title),h("p",{},msg),h("div",{class:"dlg-actions"},h("button",{class:"btn ghost",onclick:()=>done(false)},"Cancel"),h("button",{class:"btn danger",onclick:()=>done(true)},ok||"Delete"))));
@@ -2104,7 +2163,12 @@ function openCamEditor(){
       if(mode==="move"){box.x=clamp(s0.x+dx,0,100-box.w);box.y=clamp(s0.y+dy,0,100-box.h)}
       else{
         const left=corner.includes("w"),top=corner.includes("n"),right=s0.x+s0.w,bottom=s0.y+s0.h;
-        let w=clamp(s0.w+(left?-dx:dx),8,100),h=hh(w),x=left?right-w:s0.x,y=top?bottom-h:s0.y;
+        /* Use the dominant movement axis. The old code only used dx, so
+           dragging the upper-right/lower-left handle vertically did nothing
+           and made the facecam look stuck at the top edge. */
+        const ratio=hh(1), horizontal= Math.abs(dx) >= Math.abs(dy)/ratio;
+        const deltaW=horizontal ? (left?-dx:dx) : (top?-dy:dy)/ratio;
+        let w=clamp(s0.w+deltaW,8,100),h=hh(w),x=left?right-w:s0.x,y=top?bottom-h:s0.y;
         if(x<0){x=0;w=right;h=hh(w);y=top?bottom-h:y}
         if(x+w>100){x=left?0:s0.x;w=100-x;h=hh(w);y=top?bottom-h:y}
         if(y<0){y=0;h=bottom;w=h*(1080/768)/ar;x=left?right-w:x}

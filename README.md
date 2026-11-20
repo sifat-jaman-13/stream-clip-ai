@@ -44,6 +44,8 @@ while recording, rendering, or publishing. Closing that terminal or choosing Qui
 - Adds streamer credit from the source URL, optional on-video credit, and a configurable CTA.
 - Shows render/transcription and Zernio publishing progress bars, selection, bulk delete, and activity history.
 - Publishes selected or all clips through optional local Zernio configuration.
+- Includes a persistent Live monitor that watches a Twitch or YouTube URL, waits safely while it is offline,
+  and starts the existing clipping engine automatically when the stream goes live.
 
 ## Requirements
 
@@ -193,6 +195,18 @@ Zernio is optional and disabled until configured. In Settings → Zernio posting
 
 The key is saved in local zernio.json and must never be committed or shared. Posting depends on the
 separate zernio_poster.py integration and a working Zernio account.
+
+## Live monitor
+
+Open **Settings → Live monitor**, enter a full Twitch or YouTube URL, choose the polling interval and
+quality preference, then select **Start monitor**. The monitor keeps checking in the background and reports
+`waiting`, `queued`, `clipping`, or `error` status in the same panel. When a stream becomes live it hands
+the URL to the normal StreamSnip clipping engine, so the configured captions, framing, GPU/CPU mode,
+recording folder, output folder, and optional Zernio auto-posting are reused.
+
+Monitor definitions are stored locally in `live_monitors.json`. They are restored as paused after a restart
+and must be started again deliberately. The monitor does not bypass Streamlink, does not publish directly,
+and does not run a second clipping engine when another run is already active.
 
 ## Runtime and app updates
 

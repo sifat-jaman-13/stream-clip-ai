@@ -9,6 +9,7 @@ hiddenimports += collect_submodules('streamlink')
 hiddenimports += collect_submodules('streamlink_cli')
 hiddenimports += collect_submodules('zernio_poster')
 hiddenimports += collect_submodules('selfhost_publishers')
+hiddenimports += ['ai_highlights', 'tkinter', 'tkinter.filedialog']
 tmp_ret = collect_all('faster_whisper')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('ctranslate2')
@@ -37,7 +38,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='AutoClip',
+    name='StreamSnipAI',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -57,5 +58,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='AutoClip',
+    name='StreamSnipAI',
 )

@@ -6,6 +6,10 @@ import urllib.parse
 import urllib.request
 import queue
 import threading
+import hashlib
+
+_GEMINI_MODEL_CACHE = {}
+_GEMINI_ACTIVE_CACHE = {}
 
 
 class AIProviderError(RuntimeError):
@@ -51,8 +55,13 @@ def ollama_models(base_url="http://127.0.0.1:11434"):
 
 
 def _transcript(words, duration):
-    return "\n".join(f"{max(0, int(start))}s: {text}" for start, _end, text in words
-                     if text and 0 <= float(start) < duration)
+    # Group rapid word timestamps into readable five-second lines to keep prompts compact.
+    buckets = {}
+    for start, _end, text in words:
+        if text and 0 <= float(start) < duration:
+            bucket = max(0, int(float(start) // 5) * 5)
+            buckets.setdefault(bucket, []).append(str(text).strip())
+    return "\n".join(f"{second}s: {' '.join(tokens)}" for second, tokens in sorted(buckets.items()))
 
 
 def _prompt(words, duration):
@@ -92,12 +101,16 @@ def _parse_moments(value, duration):
 
 def _extract_json(text):
     text = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", str(text), flags=re.I)
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end <= start:
+    starts = [pos for pos in (text.find("{"), text.find("[")) if pos >= 0]
+    if not starts:
         raise AIProviderError("AI response did not contain valid JSON.")
+    decoder = json.JSONDecoder()
     try:
-        return json.loads(text[start:end + 1])
-    except json.JSONDecodeError as exc:
+        value, _end = decoder.raw_decode(text[min(starts):].lstrip())
+        if not isinstance(value, (dict, list)):
+            raise ValueError("JSON root must be an object or array")
+        return value
+    except (json.JSONDecodeError, ValueError) as exc:
         raise AIProviderError("AI response contained invalid JSON.") from exc
 
 
@@ -157,8 +170,13 @@ def _gemini(prompt, config):
     selected = str(config.get("gemini_model", "gemini-3.8-flash")).strip()
     if not key:
         raise AIProviderError("Add a Gemini API key in AI settings.")
+    cache_id = hashlib.sha256(key.encode("utf-8")).hexdigest()
     cached_models = config.get("_gemini_fallback_models")
-    active = str(config.get("_gemini_active_model", selected)).strip()
+    if cached_models is None:
+        cached_models = _GEMINI_MODEL_CACHE.get(cache_id)
+    previous = _GEMINI_ACTIVE_CACHE.get(cache_id)
+    preferred = previous[1] if previous and previous[0] == selected else selected
+    active = str(config.get("_gemini_active_model", preferred)).strip()
     models = list(dict.fromkeys(model for model in [active, selected, *(cached_models or [])] if model))
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}
     last_error = None
@@ -183,6 +201,9 @@ def _gemini(prompt, config):
                 detail = json.dumps(data.get("promptFeedback", data))[:500]
                 raise AIProviderError("Gemini returned no highlight response: " + detail) from exc
             config["_gemini_active_model"] = model
+            if len(_GEMINI_ACTIVE_CACHE) >= 8 and cache_id not in _GEMINI_ACTIVE_CACHE:
+                _GEMINI_ACTIVE_CACHE.pop(next(iter(_GEMINI_ACTIVE_CACHE)))
+            _GEMINI_ACTIVE_CACHE[cache_id] = (selected, model)
             if model != selected:
                 config["_gemini_using_alternate"] = model
             report = config.get("_ai_log")
@@ -200,6 +221,9 @@ def _gemini(prompt, config):
                 except AIProviderError:
                     cached_models = []
                 config["_gemini_fallback_models"] = cached_models
+                if len(_GEMINI_MODEL_CACHE) >= 8:
+                    _GEMINI_MODEL_CACHE.pop(next(iter(_GEMINI_MODEL_CACHE)))
+                _GEMINI_MODEL_CACHE[cache_id] = cached_models
                 models.extend(candidate for candidate in cached_models if candidate not in models)
             if index + 1 < len(models):
                 report = config.get("_gemini_log")
@@ -290,22 +314,29 @@ def select_moments(provider, words, duration, config, log=lambda _message: None,
         current_backend = _ollama if active_provider == "ollama" else backend
         try:
             raw = _call_backend(current_backend, prompt, config, cancelled)
+            parsed_window = _parse_moments(raw, window_end - window_start)
         except AIProviderError as exc:
-            if active_provider != "gemini" or not (exc.quota or exc.retryable):
-                raise
-            fallback_reason = "quota/rate limit" if exc.quota else "temporary model/API failures"
-            log(f"Gemini model rotation is exhausted ({fallback_reason}): {exc}. Switching remaining transcript windows to local Ollama.")
-            try:
-                raw = _call_backend(_ollama, prompt, config, cancelled)
-            except AIAnalysisCancelled:
-                raise
-            except AIProviderError as fallback_error:
-                reason = "Gemini quota/rate limit" if exc.quota else "Gemini model failures"
-                raise AIProviderError(f"{reason}; Ollama fallback failed: {fallback_error}",
-                                      quota=exc.quota, retryable=exc.retryable) from fallback_error
-            active_provider = "ollama"
-            fell_back = True
-        for second, score in _parse_moments(raw, window_end - window_start):
+            if active_provider == "gemini" and (exc.quota or exc.retryable):
+                fallback_reason = "quota/rate limit" if exc.quota else "temporary model/API failures"
+                log(f"Gemini model rotation is exhausted ({fallback_reason}): {exc}. Switching remaining transcript windows to local Ollama.")
+                try:
+                    raw = _call_backend(_ollama, prompt, config, cancelled)
+                    parsed_window = _parse_moments(raw, window_end - window_start)
+                except AIAnalysisCancelled:
+                    raise
+                except AIProviderError as fallback_error:
+                    log(f"Ollama could not analyze transcript window {int(window_start)}–{int(window_end)}s: {fallback_error}. Skipping this window; keeping earlier highlights.")
+                    active_provider = "ollama"
+                    fell_back = True
+                    window_start += window_size
+                    continue
+                active_provider = "ollama"
+                fell_back = True
+            else:
+                log(f"{active_provider.title()} could not analyze transcript window {int(window_start)}–{int(window_end)}s: {exc}. Skipping this window; keeping earlier highlights.")
+                window_start += window_size
+                continue
+        for second, score in parsed_window:
             absolute_second = int(window_start + second)
             picks[absolute_second] = max(picks.get(absolute_second, 0.0), score)
         window_start += window_size

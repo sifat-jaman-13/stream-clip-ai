@@ -74,6 +74,19 @@ def _caption(path):
     title = (lines[0] if lines else pathlib.Path(path).stem).replace("#", "").strip()[:100]
     return caption[:2200] or title or "StreamSnip AI clip", title or "StreamSnip AI clip"
 
+
+def _platform(value):
+    value = str(value or "").strip().lower().replace("-", "_")
+    if value.startswith("instagram"):
+        return "instagram"
+    if value in {"youtube", "youtube_shorts"}:
+        return "youtube"
+    if value in {"facebook", "facebook_page", "facebook_pages"}:
+        return "facebook"
+    if value in {"tiktok", "tik_tok"}:
+        return "tiktok"
+    return ""
+
 def _auto_publish(publisher, path):
     try:
         publisher.publish_one(path)
@@ -90,28 +103,33 @@ class PostizPublisher:
 
     def configure(self, config):
         self.enabled = bool(config.get("enabled", config.get("auto_post", False)))
-        self.base = str(config.get("base_url", "https://api.postiz.com")).strip().rstrip("/")
+        self.base = str(config.get("base_url", "")).strip().rstrip("/")
         self.key = str(config.get("api_key", "")).strip()
         self.instagram_id = str(config.get("instagram_id", "")).strip()
         self.youtube_id = str(config.get("youtube_id", "")).strip()
+        self.facebook_id = str(config.get("facebook_id", "")).strip()
+        self.tiktok_id = str(config.get("tiktok_id", "")).strip()
+        self.tiktok_consent = bool(config.get("tiktok_consent", False))
         self.visibility = str(config.get("visibility", "public")).lower()
         self.delay = max(0, int(config.get("schedule_minutes", 0) or 0))
         self.http = _HTTP(self.log, {"Authorization": self.key, "User-Agent": "StreamSnipAI/1.1"})
 
     def accounts(self):
+        if not self.base:
+            raise RuntimeError("Enter the URL of your self-hosted Postiz instance. StreamSnip will not connect to paid Postiz Cloud by default.")
         result = self.http.request("GET", _url(self.base, "/public/v1/integrations"))
         rows = result.get("integrations", result.get("data", result)) if isinstance(result, dict) else result
         out = []
         for row in rows if isinstance(rows, list) else []:
-            platform = str(row.get("providerIdentifier", row.get("platform", ""))).lower()
-            if platform not in {"instagram", "instagram-standalone", "youtube"}:
+            platform = _platform(row.get("providerIdentifier", row.get("platform", "")))
+            if not platform:
                 continue
-            out.append({"id": str(row.get("id", "")), "platform": "instagram" if platform.startswith("instagram") else "youtube",
+            out.append({"id": str(row.get("id", "")), "platform": platform,
                         "name": row.get("name") or row.get("profile", {}).get("username") or row.get("id", "")})
         return [x for x in out if x["id"]]
 
     def submit(self, video_path):
-        if not (self.enabled and self.key and (self.instagram_id or self.youtube_id)):
+        if not (self.enabled and self.key and (self.instagram_id or self.youtube_id or self.facebook_id or self.tiktok_id)):
             return
         threading.Thread(target=_auto_publish, args=(self, video_path), daemon=True, name="postiz-publisher").start()
 
@@ -121,11 +139,17 @@ class PostizPublisher:
             raise RuntimeError("Postiz did not return uploaded media details.")
         return {"id": result["id"], "path": result["path"]}
 
-    def publish_one(self, path, instagram_id=None, youtube_id=None, schedule_minutes=None):
+    def publish_one(self, path, instagram_id=None, youtube_id=None, schedule_minutes=None,
+                    facebook_id=None, tiktok_id=None, tiktok_consent=None):
         caption, title = _caption(path)
         ig = str(self.instagram_id if instagram_id is None else instagram_id).strip()
         yt = str(self.youtube_id if youtube_id is None else youtube_id).strip()
+        fb = str(self.facebook_id if facebook_id is None else facebook_id).strip()
+        tt = str(self.tiktok_id if tiktok_id is None else tiktok_id).strip()
+        consent = self.tiktok_consent if tiktok_consent is None else bool(tiktok_consent)
         delay = self.delay if schedule_minutes is None else max(0, int(schedule_minutes))
+        if tt and not consent:
+            raise RuntimeError("TikTok publishing is paused until you confirm in Publishing settings that StreamSnip may directly publish these videos.")
         media = self._upload(path)
         posts = []
         if ig:
@@ -135,6 +159,16 @@ class PostizPublisher:
             posts.append({"integration": {"id": yt}, "value": [{"content": caption, "image": [media]}],
                           "settings": {"__type": "youtube", "title": title[:100], "type": self.visibility,
                                        "selfDeclaredMadeForKids": "no", "tags": []}})
+        if fb:
+            posts.append({"integration": {"id": fb}, "value": [{"content": caption, "image": [media]}],
+                          "settings": {"__type": "facebook", "post_type": "post", "title": title[:100]}})
+        if tt:
+            posts.append({"integration": {"id": tt}, "value": [{"content": caption, "image": [media]}],
+                          "settings": {"__type": "tiktok", "title": title[:90],
+                                       "privacy_level": "PUBLIC_TO_EVERYONE", "duet": False,
+                                       "stitch": False, "comment": False, "autoAddMusic": "no",
+                                       "brand_content_toggle": False, "brand_organic_toggle": False,
+                                       "video_made_with_ai": False, "content_posting_method": "DIRECT_POST"}})
         if not posts:
             raise RuntimeError("Select at least one Postiz integration.")
         body = {"type": "schedule" if delay else "now", "date": (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(minutes=delay)).isoformat(),
@@ -157,6 +191,8 @@ class MixpostPublisher:
         self.key = str(config.get("api_key", "")).strip()
         self.instagram_id = str(config.get("instagram_id", "")).strip()
         self.youtube_id = str(config.get("youtube_id", "")).strip()
+        self.facebook_id = str(config.get("facebook_id", "")).strip()
+        self.tiktok_id = str(config.get("tiktok_id", "")).strip()
         self.visibility = str(config.get("visibility", "public")).lower()
         self.delay = max(0, int(config.get("schedule_minutes", 0) or 0))
         self.http = _HTTP(self.log, {"Authorization": "Bearer " + self.key, "Accept": "application/json", "User-Agent": "StreamSnipAI/1.1"})
@@ -171,32 +207,39 @@ class MixpostPublisher:
         rows = result.get("data", result) if isinstance(result, dict) else result
         out = []
         for row in rows if isinstance(rows, list) else []:
-            platform = str(row.get("provider", row.get("platform", row.get("name", "")))).lower()
-            if "instagram" not in platform and "youtube" not in platform:
+            platform = _platform(row.get("provider", row.get("platform", row.get("name", ""))))
+            if not platform or platform == "tiktok":
                 continue
-            out.append({"id": str(row.get("id", row.get("uuid", ""))), "platform": "instagram" if "instagram" in platform else "youtube",
+            out.append({"id": str(row.get("id", row.get("uuid", ""))), "platform": platform,
                         "name": row.get("name") or row.get("username") or row.get("id", "")})
         return [x for x in out if x["id"]]
 
     def submit(self, video_path):
-        if not (self.enabled and self.key and self.base and self.workspace and (self.instagram_id or self.youtube_id)):
+        if not (self.enabled and self.key and self.base and self.workspace and
+                (self.instagram_id or self.youtube_id or self.facebook_id or self.tiktok_id)):
             return
         threading.Thread(target=_auto_publish, args=(self, video_path), daemon=True, name="mixpost-publisher").start()
 
     def _upload(self, path):
         result = self.http.multipart(self._path("media"), "file", path)
-        media_id = result.get("id") or result.get("uuid")
+        data = result.get("data", result) if isinstance(result, dict) else {}
+        media_id = data.get("id") or data.get("uuid")
         if not media_id:
             raise RuntimeError("Mixpost did not return uploaded media details. Files over 10 MB may require the chunked upload flow on your instance.")
         return media_id
 
-    def publish_one(self, path, instagram_id=None, youtube_id=None, schedule_minutes=None):
+    def publish_one(self, path, instagram_id=None, youtube_id=None, schedule_minutes=None,
+                    facebook_id=None, tiktok_id=None, tiktok_consent=None):
         caption, title = _caption(path)
         ig = str(self.instagram_id if instagram_id is None else instagram_id).strip()
         yt = str(self.youtube_id if youtube_id is None else youtube_id).strip()
+        fb = str(self.facebook_id if facebook_id is None else facebook_id).strip()
+        tt = str(self.tiktok_id if tiktok_id is None else tiktok_id).strip()
+        if tt:
+            raise RuntimeError("Mixpost Lite does not support TikTok. Use a compatible self-hosted Postiz instance; Mixpost TikTok requires its paid editions and platform app approval.")
         delay = self.delay if schedule_minutes is None else max(0, int(schedule_minutes))
         media_id = self._upload(path)
-        accounts = [int(x) if x.isdigit() else x for x in (ig, yt) if x]
+        accounts = [int(x) if x.isdigit() else x for x in (ig, yt, fb) if x]
         if not accounts:
             raise RuntimeError("Select at least one Mixpost account.")
         versions = [{"account_id": 0, "is_original": True, "content": [{"body": caption, "media": [media_id]}]}]

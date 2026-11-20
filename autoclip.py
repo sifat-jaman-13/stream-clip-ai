@@ -26,7 +26,7 @@ from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
 from ai_highlights import AIAnalysisCancelled, AIProviderError, ollama_models, select_moments
-APP_VERSION = "1.1.8"
+APP_VERSION = "1.1.9"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -80,7 +80,8 @@ def _patch_pyav():
         pass
 _patch_pyav()
 
-HERE = pathlib.Path(__file__).resolve().parent
+HERE = (pathlib.Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+        else pathlib.Path(__file__).resolve().parent)
 _in_site_packages = any(part.lower() in {"site-packages", "dist-packages"} for part in HERE.parts)
 _data_override = os.environ.get("STREAMSNIP_DATA_DIR")
 _data_root = (pathlib.Path(_data_override).expanduser() if _data_override else
@@ -95,6 +96,61 @@ def ensure_runtime_dirs():
     REC.mkdir(parents=True, exist_ok=True)
 
 ensure_runtime_dirs()
+
+def cuda_device_count():
+    """Return the number of CUDA devices visible to CTranslate2 (0 if unavailable)."""
+    try:
+        import ctranslate2
+        return int(ctranslate2.get_cuda_device_count())
+    except Exception:
+        return 0
+
+def preferred_speech_device():
+    return "cuda" if cuda_device_count() > 0 else "cpu"
+
+def whisper_model_cache_dir(name):
+    """Return this model's Hugging Face cache directory, never the whole cache root."""
+    repos = {
+        "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+        "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+        "large-v3": "Systran/faster-whisper-large-v3",
+        "medium": "Systran/faster-whisper-medium",
+        "small": "Systran/faster-whisper-small",
+        "base": "Systran/faster-whisper-base",
+    }
+    repo_id = repos.get(name)
+    if not repo_id:
+        return None
+    cache_root = (os.environ.get("HF_HUB_CACHE") or
+                  str(pathlib.Path(os.environ.get("HF_HOME", pathlib.Path.home() / ".cache" / "huggingface")) / "hub"))
+    root = pathlib.Path(cache_root).expanduser().resolve()
+    target = (root / ("models--" + repo_id.replace("/", "--"))).resolve()
+    return target if target.parent == root else None
+
+def repair_incomplete_whisper_cache(name, error):
+    """Discard only a broken cache for this known model so HF Hub can download it again."""
+    if "model.bin" not in str(error).lower():
+        return False
+    cache_dir = whisper_model_cache_dir(name)
+    if not cache_dir or not cache_dir.is_dir():
+        return False
+    shutil.rmtree(cache_dir)
+    return True
+
+def apply_huggingface_token():
+    """Expose the saved HF credential to huggingface_hub/faster-whisper downloads."""
+    try:
+        token = str(load_ai_settings().get("huggingface_token", "")).strip()
+    except Exception:
+        token = ""
+    token = token or os.environ.get("HF_TOKEN", "").strip() or os.environ.get("HUGGING_FACE_HUB_TOKEN", "").strip()
+    if token:
+        # huggingface_hub reads HF_TOKEN when resolving gated/private model files.
+        # Never log or return this value to the UI.
+        os.environ["HF_TOKEN"] = token
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = token  # compatibility with older hub clients
+        return True
+    return False
 
 def ffmpeg_exe():
     """Prefer a bundled FFmpeg in portable builds, then fall back to system PATH."""
@@ -130,12 +186,9 @@ def check_updates():
         except Exception: pass
         add(package, current, latest)
     model = str(load_settings().get("model", "distil-large-v3"))
-    cache_root = pathlib.Path(os.environ.get("HF_HOME", pathlib.Path.home() / ".cache" / "huggingface")) / "hub"
-    repo_ids = {"distil-large-v3": "Systran/faster-distil-whisper-large-v3",
-                "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo"}
-    repo_id = repo_ids.get(model, "Systran/faster-whisper-" + model)
-    repo_cache = "models--" + repo_id.replace("/", "--")
-    cached = (cache_root / repo_cache).is_dir() if cache_root.is_dir() else False
+    repo_cache = whisper_model_cache_dir(model)
+    snapshots = (repo_cache / "snapshots") if repo_cache else None
+    cached = bool(snapshots and snapshots.is_dir() and any(p.is_file() for p in snapshots.glob("*/model.bin")))
     add("Speech model: " + model, "Cached" if cached else "Not downloaded", "",
         "Selected model is " + ("available locally." if cached else "downloaded on first use."))
     return {"checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "items": result}
@@ -159,19 +212,22 @@ def update_components():
     """Update Python runtime components and download the selected speech model.
     FFmpeg is reported by the checker; bundled FFmpeg is replaced only by a new build.
     """
+    if getattr(sys, "frozen", False):
+        raise RuntimeError("This app bundles its runtime components. Download and install the latest StreamSnipAI-Setup.exe to update them.")
     commands = [sys.executable, "-m", "pip", "install", "--upgrade", "faster-whisper", "streamlink", "ctranslate2", "numpy"]
     result = run(commands, capture_output=True, text=True, timeout=900)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout or "Package update failed").strip()[-800:])
     model = str(load_settings().get("model", "distil-large-v3"))
     try:
+        apply_huggingface_token()
         from faster_whisper import WhisperModel
-        device = str(load_settings().get("compute_device", "gpu"))
-        if device == "gpu":
+        device = preferred_speech_device()
+        if device == "cuda":
             try:
                 WhisperModel(model, device="cuda", compute_type="float16")
             except Exception:
-                WhisperModel(model, device="cpu", compute_type="int8")
+                WhisperModel(model, device="cuda", compute_type="int8_float16")
         else:
             WhisperModel(model, device="cpu", compute_type="int8")
         model_status = model + " ready"
@@ -186,6 +242,7 @@ AI_SETTINGS_FILE = _data_root / "ai_settings.json"
 BRAND_LOGO = HERE / "assets" / "brand-logo.png"
 INSTANCE_LOCK_FILE = _data_root / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
+STORAGE_PATH_WARNING = ""
 
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
 def run(cmd, **kw):   return subprocess.run(cmd, creationflags=CF, **kw)
@@ -259,7 +316,9 @@ def clean_cfg(raw):
     for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x", "crop_x", "crop_y", "crop_w", "crop_h"): c[k] = round(c[k], 1)
     if raw.get("mode") in ("live", "file"): c["mode"] = raw["mode"]
     c["target"] = str(raw.get("target", "")).strip()[:1000]
-    c["compute_device"] = "cpu" if raw.get("compute_device") == "cpu" else "gpu"
+    # Hardware is automatic: CUDA whenever a supported NVIDIA GPU is visible.
+    # Keep the setting key for compatibility with existing settings files.
+    c["compute_device"] = "gpu"
     for k, opts in (("color", CAPTION_COLORS), ("position", CAPTION_POS), ("layout", LAYOUTS),
                     ("output_format", OUTPUT_FORMATS), ("model", MODELS)):
         if raw.get(k) in opts: c[k] = raw[k]
@@ -289,7 +348,8 @@ def clean_cfg(raw):
 
 def apply_storage_paths(cfg):
     """Switch runtime folders to the user-selected locations."""
-    global OUT, REC
+    global OUT, REC, STORAGE_PATH_WARNING
+    STORAGE_PATH_WARNING = ""
     def chosen(key, fallback):
         value = str(cfg.get(key, "") or "").strip()
         try:
@@ -299,20 +359,34 @@ def apply_storage_paths(cfg):
             return fallback
     OUT = chosen("out_dir", _data_root / "out")
     REC = chosen("rec_dir", _data_root / "rec")
-    ensure_runtime_dirs()
+    for name, selected, fallback in (("clips", OUT, _data_root / "out"),
+                                     ("recordings", REC, _data_root / "rec")):
+        try:
+            selected.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            local = fallback.resolve()
+            local.mkdir(parents=True, exist_ok=True)
+            if name == "clips":
+                OUT = local
+                cfg["out_dir"] = ""
+            else:
+                REC = local
+                cfg["rec_dir"] = ""
+            warning = f"Couldn't use the saved {name} folder '{selected}': {exc}. Using '{local}' instead."
+            STORAGE_PATH_WARNING = (STORAGE_PATH_WARNING + " " + warning).strip()
 
 def streamer_credit(cfg):
     """Use an explicit credit when supplied; otherwise infer common channel handles."""
-    override = re.sub(r"[\r\n{}]", "", str(cfg.get("streamer_tag", "")).strip())[:80]
+    override = re.sub(r"[\r\n{}\\]", "", str(cfg.get("streamer_tag", "")).strip())[:80]
     if override:
         return override
     target = str(cfg.get("target", "")).strip().strip('"')
     m = re.search(r"(?:twitch\.tv)/([^/?#]+)", target, re.I)
     if m and m.group(1).lower() not in {"videos", "directory", "search"}:
-        return "@" + m.group(1)
+        return "@" + re.sub(r"[\r\n{}\\]", "", m.group(1))
     m = re.search(r"(?:youtube\.com)/@([^/?#]+)", target, re.I)
     if m:
-        return "@" + m.group(1)
+        return "@" + re.sub(r"[\r\n{}\\]", "", m.group(1))
     return ""
 
 def normalize_stream_target(value):
@@ -350,7 +424,7 @@ def save_zernio_settings(cfg):
     ZERNIO_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 def load_publishing_settings():
-    defaults = {"provider": "zernio", "zernio": load_zernio_settings(), "postiz": {}, "mixpost": {}}
+    defaults = {"provider": "postiz", "zernio": load_zernio_settings(), "postiz": {}, "mixpost": {}}
     try:
         raw = json.loads(PUBLISHING_FILE.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
@@ -359,7 +433,7 @@ def load_publishing_settings():
     except Exception:
         pass
     if not isinstance(defaults["provider"], str) or defaults["provider"] not in {"zernio", "postiz", "mixpost"}:
-        defaults["provider"] = "zernio"
+        defaults["provider"] = "postiz"
     for key in ("zernio", "postiz", "mixpost"):
         if not isinstance(defaults[key], dict): defaults[key] = {}
     return defaults
@@ -370,10 +444,10 @@ def save_publishing_settings(cfg):
 def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
                 "gemini_model": "gemini-3.8-flash", "huggingface_model": "Qwen/Qwen2.5-7B-Instruct-1M",
-                "gemini_api_key": "", "huggingface_token": ""}
+                "gemini_api_key": "", "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", ""))}
     try:
         data = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
-        if isinstance(data, dict): defaults.update({k: str(v) for k, v in data.items() if k in defaults})
+        if isinstance(data, dict): defaults.update({k: str(v) for k, v in data.items() if k in defaults and v is not None})
     except Exception:
         pass
     if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
@@ -402,6 +476,7 @@ def save_ai_settings(body):
     if body.get("clear_gemini_key"): cfg["gemini_api_key"] = ""
     if body.get("clear_huggingface_token"): cfg["huggingface_token"] = ""
     AI_SETTINGS_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    apply_huggingface_token()
     return public_ai_settings()
 
 # ------------------------------------------------------------------ hype words
@@ -592,14 +667,13 @@ def has_audio_stream(path):
 def make_ass(words, start, end, path, cfg):
     ws = []
     for s, e, w in words:
-        if s >= start and e <= end:
+        if e > start and s < end:
             cw = clean_word(w)
             if cw:
-                ws.append((s - start, e - start, cw))
+                ws.append((max(0.0, s - start), min(end - start, e - start), cw))
     custom = bool(cfg.get("subtitle_custom"))
     out_w, out_h = output_size(cfg)
     preset = SUBTITLE_PRESETS.get(cfg.get("subtitle_style", "Classic"), SUBTITLE_PRESETS["Classic"])
-    col = _ass_color(cfg.get("subtitle_text_color"), "#FFFFFF") if custom else CAPTION_COLORS.get(cfg["color"], "00FFFF")
     stroke = _ass_color(cfg.get("subtitle_stroke_color"), "#000000") if custom else "000000"
     size = int(cfg.get("subtitle_font_size", cfg["caption_size"])) if custom else int(cfg["caption_size"])
     font = preset["font"] if custom else cfg["font"]
@@ -613,16 +687,18 @@ def make_ass(words, start, end, path, cfg):
         outline, shadow = preset["outline"], preset["shadow"]
     else:
         alignment, mv, outline, shadow = 2, round(CAPTION_POS.get(cfg["position"], 520) * out_h / 1920), 9, 4
+    base_col = _ass_color(cfg.get("subtitle_text_color"), "#FFFFFF") if custom else "FFFFFF"
+    highlight_col = CAPTION_COLORS.get(cfg["color"], "00FFFF")
     header = (
         f"[Script Info]\nScriptType: v4.00+\nPlayResX: {out_w}\nPlayResY: {out_h}\nWrapStyle: 0\n\n"
         "[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,"
         "BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,"
         "Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n"
-        f"Style: Default,{font},{size},&H00{col},&H00{col},&H00{stroke},&H64000000,0,0,0,0,100,100,2,0,1,{outline},{shadow},{alignment},{round(70 * out_w / 1080)},{round(70 * out_w / 1080)},{mv},1\n\n"
+        f"Style: Default,{font},{size},&H00{base_col},&H00{base_col},&H00{stroke},&H64000000,0,0,0,0,100,100,2,0,1,{outline},{shadow},{alignment},{round(70 * out_w / 1080)},{round(70 * out_w / 1080)},{mv},1\n\n"
         "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n")
-    pop = (r"{\1c&H" + col + r"&\fscx120\fscy120\t(0,90,\fscx100\fscy100)}"
+    pop = (r"{\1c&H" + highlight_col + r"&\fscx120\fscy120\t(0,90,\fscx100\fscy100)}"
            if (not custom or (preset["pop"] and cfg.get("subtitle_mode", "Karaoke") == "Karaoke"))
-           else r"{\1c&H" + col + r"&}")
+           else r"{\1c&H" + highlight_col + r"&}")
     max_chars = max(8, int(1750 / size))
     lines = []
     groups = group_words(ws, int(cfg["words_per_line"]), max_chars)
@@ -641,12 +717,12 @@ def make_ass(words, start, end, path, cfg):
         tag_size = round(38 * out_w / 1080)
         tag_margin = round(70 * out_w / 1080)
         lines.append(f"Dialogue: 0,{ts(0)},{ts(max(0.08, end - start))},Default,,0,0,0,,"
-                     f"{{\\an7\\fs{tag_size}\\bord3\\3c&H000000&\\pos({tag_margin},{tag_margin})}}Clip from {tag}")
+                     f"{{\\an7\\fs{tag_size}\\bord3\\1c&H00FFFFFF&\\3c&H000000&\\pos({tag_margin},{tag_margin})}}Clip from {tag}")
     if cfg.get("cta_enabled", True) and cfg.get("cta_text"):
         cta_start = max(0, end - start - 2.8)
         cta_size = round(48 * out_w / 1080)
         lines.append(f"Dialogue: 0,{ts(cta_start)},{ts(max(cta_start + 0.08, end - start))},Default,,0,0,0,,"
-                     f"{{\\an8\\fs{cta_size}\\bord4\\3c&H000000&}}{cfg['cta_text']}")
+                     f"{{\\an8\\fs{cta_size}\\bord4\\1c&H00FFFFFF&\\3c&H000000&}}{cfg['cta_text']}")
     pathlib.Path(path).write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
 
 # ------------------------------------------------------------------ engine
@@ -704,23 +780,150 @@ STALL_SECONDS = 90
 class Stopped(Exception):
     pass
 
+
+class FileBusyError(RuntimeError):
+    def __init__(self, details):
+        self.details = details
+        super().__init__(details["message"])
+
 def clip_bounds(peak, duration, before, after, words, limit=60):
     """Choose a bounded clip window that always contains its detected peak."""
-    start = max(0, peak - before)
+    duration = max(0.0, float(duration))
+    if duration == 0:
+        return 0.0, 0.0
+    limit = min(duration, max(0.0, float(limit)))
+    peak = min(duration, max(0.0, float(peak)))
+    before = max(0.0, float(before))
+    after = max(0.0, float(after))
+    start = max(0.0, peak - before)
     end = min(duration, peak + after)
+
+    # If requested context exceeds the cap, center the allowed window on the
+    # detected peak (shifting at source boundaries). This trims both sides
+    # and cannot cut the peak off, even with 90 seconds of pre-roll.
     if end - start > limit:
-        start = max(0, min(peak - limit / 2, duration - limit))
+        start = max(0.0, min(peak - limit / 2, duration - limit))
         end = min(duration, start + limit)
+
     starts = [w for w in words if abs(w[0] - start) < 3 and w[0] <= peak]
     if starts:
         start = max(0, min(starts, key=lambda w: abs(w[0] - start))[0] - 0.25)
     start = min(start, peak)
     max_end = min(duration, start + limit)
     end = min(max(end, peak), max_end)
-    ends = [w for w in words if w[1] >= end]
+    # Extend only through speech adjacent to this clip boundary. A later
+    # conversation elsewhere in a long recording must not pull the clip out
+    # to the 60-second cap and fill it with silence.
+    ends = [w for w in words if abs(w[1] - end) < 3 and w[1] >= peak]
     if ends:
-        end = min(max_end, max(end, ends[0][1] + 0.35))
+        nearest = min(ends, key=lambda w: abs(w[1] - end))
+        end = min(max_end, max(end, nearest[1] + 0.35))
     return start, end
+
+
+def windows_file_lock_owners(path):
+    """Ask Windows Restart Manager which processes currently have a file open."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    class FILETIME(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+    class RM_UNIQUE_PROCESS(ctypes.Structure):
+        _fields_ = [("dwProcessId", wintypes.DWORD), ("ProcessStartTime", FILETIME)]
+
+    class RM_PROCESS_INFO(ctypes.Structure):
+        _fields_ = [
+            ("Process", RM_UNIQUE_PROCESS), ("strAppName", wintypes.WCHAR * 256),
+            ("strServiceShortName", wintypes.WCHAR * 64), ("ApplicationType", ctypes.c_int),
+            ("AppStatus", wintypes.ULONG), ("TSSessionId", wintypes.DWORD),
+            ("bRestartable", wintypes.BOOL),
+        ]
+
+    try:
+        rm = ctypes.WinDLL("rstrtmgr", use_last_error=True)
+        rm.RmStartSession.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD, wintypes.LPWSTR]
+        rm.RmStartSession.restype = wintypes.DWORD
+        rm.RmRegisterResources.argtypes = [wintypes.DWORD, wintypes.UINT,
+                                           ctypes.POINTER(wintypes.LPCWSTR), wintypes.UINT,
+                                           ctypes.c_void_p, wintypes.UINT, ctypes.c_void_p]
+        rm.RmRegisterResources.restype = wintypes.DWORD
+        rm.RmGetList.argtypes = [wintypes.DWORD, ctypes.POINTER(wintypes.UINT),
+                                 ctypes.POINTER(wintypes.UINT), ctypes.POINTER(RM_PROCESS_INFO),
+                                 ctypes.POINTER(wintypes.DWORD)]
+        rm.RmGetList.restype = wintypes.DWORD
+        rm.RmEndSession.argtypes = [wintypes.DWORD]
+        rm.RmEndSession.restype = wintypes.DWORD
+        session = wintypes.DWORD()
+        session_key = ctypes.create_unicode_buffer(33)
+        if rm.RmStartSession(ctypes.byref(session), 0, session_key) != 0:
+            return []
+        try:
+            resources = (wintypes.LPCWSTR * 1)(str(pathlib.Path(path).resolve()))
+            if rm.RmRegisterResources(session.value, 1, resources, 0, None, 0, None) != 0:
+                return []
+            needed, count, reasons = wintypes.UINT(), wintypes.UINT(), wintypes.DWORD()
+            result = rm.RmGetList(session.value, ctypes.byref(needed), ctypes.byref(count), None,
+                                  ctypes.byref(reasons))
+            if result != 234 or needed.value > 512:  # ERROR_MORE_DATA
+                return []
+            processes = (RM_PROCESS_INFO * needed.value)()
+            count.value = needed.value
+            result = rm.RmGetList(session.value, ctypes.byref(needed), ctypes.byref(count), processes,
+                                  ctypes.byref(reasons))
+            if result != 0:
+                return []
+            owners = []
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                                            wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+            kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            for info in processes[:count.value]:
+                pid = int(info.Process.dwProcessId)
+                if pid <= 0:
+                    continue
+                image = ""
+                handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+                if handle:
+                    try:
+                        buffer = ctypes.create_unicode_buffer(32768)
+                        size = wintypes.DWORD(len(buffer))
+                        if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                            image = buffer.value
+                    finally:
+                        kernel32.CloseHandle(handle)
+                owners.append({
+                    "pid": pid,
+                    "name": pathlib.Path(image).name if image else str(info.strAppName or "Unknown application"),
+                    "path": image,
+                })
+            return owners
+        finally:
+            rm.RmEndSession(session.value)
+    except Exception:
+        return []
+
+
+def describe_file_lock(path, error):
+    """Build an Activity entry and optional Stop-process actions for a locked file."""
+    target = pathlib.Path(path)
+    owners = windows_file_lock_owners(target)
+    message = f"Windows could not finish using {target.resolve()}: {error}."
+    if owners:
+        who = "; ".join(
+            f"{owner['name']} (PID {owner['pid']})" + (f" at {owner['path']}" if owner.get("path") else "")
+            for owner in owners
+        )
+        message += f" File holder(s): {who}. Use Stop process in Activity to close a holder."
+    else:
+        message += " Windows did not identify the holder; close the video player or Explorer preview and retry."
+    return {"message": message, "file_lock": {"name": target.name, "holders": owners} if owners else None}
 
 class Engine:
     def __init__(self, cfg, emit):
@@ -736,9 +939,9 @@ class Engine:
     def stop(self, force=False):
         """Live: graceful (finish what is recorded) unless force. File: always immediate."""
         self.stop_flag = True
-        self.ai_cancel.set()
         if force or self.cfg["mode"] != "live":
             self.abort = True
+            self.ai_cancel.set()
         for p in list(self.procs):
             try: p.terminate()
             except Exception: pass
@@ -747,28 +950,56 @@ class Engine:
         if self.abort:
             raise Stopped()
 
+    def replace_output(self, source, destination):
+        try:
+            os.replace(source, destination)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) in (32, 33):
+                raise FileBusyError(describe_file_lock(destination, exc)) from exc
+            raise
+
     # ---- transcription
     def get_model(self, name):
         global _model, _model_key
-        device = self.cfg.get("compute_device", "gpu")
+        device = preferred_speech_device()
         cache_key = (name, device)
-        if _model is not None and (_model_key == cache_key or (device == "gpu" and _model_key == (name, "cpu"))):
+        if _model is not None and _model_key == cache_key:
             return _model
         try:
+            apply_huggingface_token()
             from faster_whisper import WhisperModel
         except ImportError:
             raise RuntimeError("faster-whisper isn't installed. Run:  pip install --only-binary=:all: faster-whisper")
         self.status(f"Loading speech model '{name}' (first run downloads it)...", "transcribing")
-        if device == "gpu":
-            for ct in ("float16", "int8_float16"):
-                try:
-                    _model = WhisperModel(name, device="cuda", compute_type=ct); _model_key = cache_key
-                    self.log(f"Speech model ready on GPU ({ct}).")
-                    return _model
-                except Exception as e:
-                    self.log(f"GPU load failed ({ct}): {e}")
-        _model = WhisperModel(name, device="cpu", compute_type="int8"); _model_key = (name, "cpu")
-        self.log("Speech model ready on CPU (INT8).")
+        def load_selected_device():
+            if device == "cuda":
+                failures = []
+                for compute_type in ("float16", "int8_float16"):
+                    try:
+                        return WhisperModel(name, device="cuda", compute_type=compute_type), compute_type
+                    except Exception as exc:
+                        failures.append(exc)
+                        self.log(f"GPU load failed ({compute_type}): {exc}")
+                raise failures[-1]
+            return WhisperModel(name, device="cpu", compute_type="int8"), "INT8 CPU"
+        try:
+            _model, compute_type = load_selected_device()
+        except Exception as first_error:
+            try:
+                repaired = repair_incomplete_whisper_cache(name, first_error)
+            except OSError as repair_error:
+                raise RuntimeError(f"The cached Whisper model is incomplete and could not be cleared: {repair_error}") from first_error
+            if not repaired:
+                if device == "cuda":
+                    raise RuntimeError("A CUDA GPU is available but the speech model could not start on it. Check the NVIDIA driver/CUDA setup. CPU fallback is disabled while a GPU is available. " + str(first_error)[-700:]) from first_error
+                raise
+            self.log(f"The cached '{name}' model is incomplete (model.bin is missing). Clearing only its cache and downloading a fresh copy now.")
+            try:
+                _model, compute_type = load_selected_device()
+            except Exception as retry_error:
+                raise RuntimeError(f"Fresh download of speech model '{name}' failed: {retry_error}") from retry_error
+        _model_key = cache_key
+        self.log(f"Speech model ready on {'GPU' if device == 'cuda' else 'CPU'} ({compute_type}).")
         return _model
 
     def load_audio(self, path):
@@ -801,12 +1032,8 @@ class Engine:
             except Stopped:
                 raise
             except Exception as e:
-                if attempt == 0 and any(k in str(e).lower() for k in ("cublas", "cuda", "dll", "cudnn")):
-                    from faster_whisper import WhisperModel
-                    self.log(f"GPU error ({e}) - falling back to CPU.")
-                    self.cfg["compute_device"] = "cpu"
-                    _model = WhisperModel(self.cfg["model"], device="cpu", compute_type="int8"); _model_key = (self.cfg["model"], "cpu")
-                    continue
+                if any(k in str(e).lower() for k in ("cublas", "cuda", "dll", "cudnn")) and cuda_device_count() > 0:
+                    self.log(f"GPU transcription failed; not switching to CPU because a CUDA GPU is available: {e}")
                 raise
         return []
 
@@ -820,6 +1047,7 @@ class Engine:
         return np.sqrt((a[: n * 8000].reshape(n, 8000) ** 2).mean(axis=1))
 
     def find_peaks(self, path, words):
+        self.best_score = 0.0
         rms = self.rms_per_second(path)
         n = len(rms)
         if n < 10:
@@ -878,7 +1106,7 @@ class Engine:
         picks, s = [], score.copy()
         while n_clips is None or len(picks) < n_clips:
             i = int(s.argmax())
-            if s[i] < float(self.cfg["min_score"]) or s[i] <= 0:
+            if s[i] < float(self.cfg["min_score"]) or s[i] <= 0 or rms[i] < 0.0025:
                 break
             picks.append((i, float(s[i])))
             s[max(0, i - 40): i + 40] = -99          # never pick overlapping moments
@@ -914,7 +1142,7 @@ class Engine:
                 crop = ""
             vf = (f"[0:v]setpts=PTS-STARTPTS,{crop}scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
                   f"setsar=1,subtitles={name}.ass[v]")
-        enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if cfg.get("compute_device", "gpu") == "gpu" and has_nvenc()
+        enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
         tmp = f"{name}.tmp.mp4"
         cmd = [ffmpeg_exe(), "-y", "-v", "error", "-fflags", "+genpts", "-ss", f"{start:.2f}", "-accurate_seek",
@@ -946,7 +1174,7 @@ class Engine:
                                "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", mixed]
                     mr = run(mix_cmd, cwd=OUT, capture_output=True, text=True)
                     if mr.returncode == 0 and mixed.is_file():
-                        os.replace(mixed, OUT / tmp)
+                        self.replace_output(mixed, OUT / tmp)
                     else:
                         self.log("CTA voice unavailable for this clip; keeping the original audio.")
                         mixed.unlink(missing_ok=True)
@@ -959,7 +1187,7 @@ class Engine:
         credit = f"Clip from {tag}\n\n" if tag else ""
         (OUT / f"{name}.txt").write_text(
             f"{hook}\n\n{credit}#shorts #fyp #streamer #funny #clips #viral\n", encoding="utf-8")
-        os.replace(OUT / tmp, OUT / f"{name}.mp4")
+        self.replace_output(OUT / tmp, OUT / f"{name}.mp4")
         self.emit("clip", f"{name}.mp4")
 
     def process(self, path):
@@ -981,12 +1209,20 @@ class Engine:
         for i, (p, sc) in enumerate(peaks, 1):
             self.check()
             start, end = clip_bounds(p, dur, self.cfg["pre"], self.cfg["post"], words)
+            base_name = f"{stem}_{stamp}_clip{i}"
+            name = base_name
+            suffix = 2
+            while (OUT / f"{name}.mp4").exists() or (OUT / f"{name}.tmp.mp4").exists():
+                name = f"{base_name}_{suffix}"
+                suffix += 1
             self.status(f"Rendering clip {i} of {len(peaks)} (hype score {sc:.1f})...", "rendering",
                         int((i - 1) / max(1, len(peaks)) * 100))
             try:
-                self.render(path, start, end, words, f"{stem}_{stamp}_clip{i}")
+                self.render(path, start, end, words, name)
                 self.status(f"Rendered clip {i} of {len(peaks)}.", "rendering",
                             int(i / max(1, len(peaks)) * 100))
+            except FileBusyError as e:
+                self.emit("file_lock", e.details)
             except Exception as e:
                 self.log(f"Render error: {e}")
         self.emit("chunk", "")
@@ -1061,7 +1297,7 @@ class Engine:
             slog.close()
             raise
         bitrate = int(self.cfg.get("capture_bitrate_kbps", 6000))
-        if self.cfg.get("compute_device", "gpu") == "gpu" and has_nvenc():
+        if has_nvenc():
             capture_enc = ["-c:v", "h264_nvenc", "-preset", "p5", "-b:v", f"{bitrate}k",
                            "-maxrate", f"{bitrate}k", "-bufsize", f"{bitrate * 2}k"]
         else:
@@ -1150,6 +1386,7 @@ class Engine:
 
 # ------------------------------------------------------------------ app core (state shared with the UI)
 CLIP_RE = re.compile(r"^[A-Za-z0-9_\-]+\.mp4$")
+LOCK_FILE_RE = re.compile(r"^[A-Za-z0-9_\-]+(?:\.tmp\.mp4|\.mp4|\.txt)$")
 QUIT = threading.Event()
 
 class Core:
@@ -1168,6 +1405,9 @@ class Core:
         self.session = {"clips": 0, "chunks": 0, "started": None, "ended": None}
         self.settings = load_settings()
         apply_storage_paths(self.settings)
+        if STORAGE_PATH_WARNING:
+            save_settings(self.settings)
+            self.push(STORAGE_PATH_WARNING)
 
     def _config_for(self, provider=None):
         return self.publishing.get(provider or self.publishing.get("provider", "zernio"), {})
@@ -1186,14 +1426,22 @@ class Core:
         if provider == "zernio":
             return {"configured": bool(cfg.get("api_key")), "api_key_set": bool(cfg.get("api_key")),
                     "available": ZERNIO_AVAILABLE, "base_url": "https://zernio.com"}
-        return {"configured": bool(cfg.get("api_key") and (cfg.get("base_url") or provider == "postiz")),
+        return {"configured": bool(cfg.get("api_key") and cfg.get("base_url") and (provider != "mixpost" or cfg.get("workspace"))),
                 "api_key_set": bool(cfg.get("api_key")), "available": SELF_HOSTED_AVAILABLE,
                 "base_url": cfg.get("base_url", "")}
 
     def push(self, msg):
         with self.lock:
             self.log_id += 1
-            self.logs.append((self.log_id, time.strftime("%H:%M:%S"), str(msg)))
+            self.logs.append((self.log_id, time.strftime("%H:%M:%S"), str(msg), None))
+            if len(self.logs) > 800:
+                del self.logs[:200]
+
+    def push_file_lock(self, details):
+        with self.lock:
+            self.log_id += 1
+            self.logs.append((self.log_id, time.strftime("%H:%M:%S"), str(details["message"]),
+                              details.get("file_lock")))
             if len(self.logs) > 800:
                 del self.logs[:200]
 
@@ -1213,6 +1461,8 @@ class Core:
                     self.publisher.submit(OUT / payload)
                 except Exception as e:
                     self.push(f"{self.publishing.get('provider', 'Publisher').title()} auto-post error: " + str(e))
+        elif kind == "file_lock":
+            self.push_file_lock(payload)
         elif kind == "chunk":
             with self.lock: self.session["chunks"] += 1
         elif kind == "done":
@@ -1256,8 +1506,9 @@ class Core:
                 self.push("Stopping now." if (force or self.engine.cfg["mode"] != "live")
                           else "Stopping the recording - finishing the clips already captured.")
 
-    def state(self, since):
-        clips = list_clips()
+    def state(self, since, clip_offset=0):
+        clips = list_clips(offset=clip_offset)
+        clip_total = len(_clip_index())
         with self.lock:
             s = self.session
             el = int((s["ended"] or time.time()) - s["started"]) if s["started"] else 0
@@ -1269,11 +1520,39 @@ class Core:
                 "phase": self.phase, "status": self.status,
                 "progress": self.progress,
                 "posting": dict(self.posting),
-                "logs": [{"id": i, "t": t, "m": m} for (i, t, m) in self.logs if i > since],
+                "logs": [{"id": i, "t": t, "m": m, **({"file_lock": lock} if lock else {})}
+                         for (i, t, m, lock) in self.logs if i > since],
                 "last_id": self.log_id,
                 "session": {"clips": s["clips"], "chunks": s["chunks"], "elapsed": el},
                 "clips": clips,
+                "clip_total": clip_total,
             }
+
+    def stop_file_holder(self, name, pid):
+        if os.name != "nt":
+            raise ValueError("Stopping a file holder from Activity is available on Windows only.")
+        name = str(name or "")
+        if not LOCK_FILE_RE.fullmatch(name):
+            raise ValueError("That output file name is not valid.")
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            raise ValueError("That process ID is not valid.")
+        if pid <= 0 or pid == os.getpid():
+            raise ValueError("StreamSnip AI cannot stop its own process this way.")
+        target = (OUT / name).resolve()
+        if target.parent != OUT.resolve():
+            raise ValueError("That file is outside the clips folder.")
+        holder = next((item for item in windows_file_lock_owners(target) if item["pid"] == pid), None)
+        if not holder:
+            return {"ok": True, "message": "That process no longer holds the file. Try the clip again."}
+        result = run(["taskkill.exe", "/PID", str(pid)], capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "Windows could not close that process.").strip()
+            raise RuntimeError(f"Could not stop {holder['name']} (PID {pid}): {detail}")
+        message = f"Asked Windows to close {holder['name']} (PID {pid}) because it was using {name}."
+        self.push(message)
+        return {"ok": True, "message": message}
 
     def shutdown(self):
         with self.lock:
@@ -1285,7 +1564,8 @@ class Core:
         return dict(self._provider_status("zernio"), auto_post=bool(cfg.get("auto_post")),
                     schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
                     visibility=cfg.get("visibility", "public"),
-                    instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""))
+                    instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""),
+                    facebook_id=cfg.get("facebook_id", ""), tiktok_id=cfg.get("tiktok_id", ""))
 
     def publishing_status(self):
         provider = self.publishing.get("provider", "zernio")
@@ -1295,6 +1575,9 @@ class Core:
                 visibility=self._config_for(p).get("visibility", "public"),
                 instagram_id=self._config_for(p).get("instagram_id", ""),
                 youtube_id=self._config_for(p).get("youtube_id", ""),
+                facebook_id=self._config_for(p).get("facebook_id", ""),
+                tiktok_id=self._config_for(p).get("tiktok_id", ""),
+                tiktok_consent=bool(self._config_for(p).get("tiktok_consent", False)),
                 auto_post=bool(self._config_for(p).get("auto_post"))) for p in ("zernio", "postiz", "mixpost")},
                 **self._provider_status(provider)}
 
@@ -1302,12 +1585,19 @@ class Core:
         provider = str(body.get("provider", self.publishing.get("provider", "zernio"))).lower()
         if provider not in {"zernio", "postiz", "mixpost"}: raise ValueError("Unknown publishing provider.")
         cfg = dict(self._config_for(provider))
-        for key in ("api_key", "base_url", "workspace", "instagram_id", "youtube_id"):
-            if key in {"instagram_id", "youtube_id"} and key not in body:
+        for key in ("api_key", "base_url", "workspace", "instagram_id", "youtube_id", "facebook_id", "tiktok_id"):
+            if key in {"instagram_id", "youtube_id", "facebook_id", "tiktok_id"} and key not in body:
                 continue
             value = str(body.get(key, cfg.get(key, ""))).strip()
             if value: cfg[key] = value
-            elif key in {"base_url", "workspace", "instagram_id", "youtube_id"}: cfg[key] = ""
+            elif key in {"base_url", "workspace", "instagram_id", "youtube_id", "facebook_id", "tiktok_id"}: cfg[key] = ""
+        cfg["tiktok_consent"] = bool(body.get("tiktok_consent", cfg.get("tiktok_consent", False)))
+        if cfg.get("tiktok_id") and provider == "postiz" and not cfg["tiktok_consent"]:
+            raise ValueError("Confirm TikTok direct publishing before saving the selected TikTok account.")
+        if cfg.get("tiktok_id") and provider == "mixpost":
+            raise ValueError("Mixpost TikTok publishing is unavailable in the free integration. Use self-hosted Postiz for TikTok.")
+        if provider == "postiz" and not cfg.get("base_url"):
+            raise ValueError("Enter your self-hosted Postiz URL. The free setup does not use Postiz Cloud.")
         cfg["auto_post"] = bool(body.get("auto_post", False))
         try: cfg["schedule_minutes"] = max(0, int(body.get("schedule_minutes", 0)))
         except (TypeError, ValueError): cfg["schedule_minutes"] = 0
@@ -1336,54 +1626,86 @@ class Core:
         provider = self.publishing.get("provider", "zernio")
         cfg = self._config_for(provider)
         if not cfg.get("api_key"): raise ValueError(f"Save and verify a {provider.title()} API key first.")
-        if not (cfg.get("instagram_id") or cfg.get("youtube_id")): raise ValueError("Select at least one connected channel.")
+        if not any(cfg.get(key) for key in ("instagram_id", "youtube_id", "facebook_id", "tiktok_id")):
+            raise ValueError("Select at least one connected channel.")
+        if cfg.get("tiktok_id") and provider in {"postiz", "zernio"} and not cfg.get("tiktok_consent"):
+            raise ValueError("Confirm TikTok direct publishing in Publishing settings before posting.")
+        if cfg.get("tiktok_id") and provider == "mixpost":
+            raise ValueError("Mixpost TikTok publishing is unavailable in the free integration. Use self-hosted Postiz for TikTok.")
         valid = [n for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
         if not valid: raise ValueError("No valid clips selected.")
         if not self._make_publisher(provider, False): raise ValueError(f"{provider.title()} posting is unavailable.")
         with self.lock:
             if self.posting["active"]:
-                raise ValueError("A Zernio posting batch is already in progress.")
+                raise ValueError(f"A {provider.title()} posting batch is already in progress.")
             self.posting.update({"active": True, "total": len(valid), "completed": 0, "current": "",
                                  "started": time.time(), "done": 0, "last_name": "", "errors": 0})
         def publish_batch():
-            for index, name in enumerate(valid):
-                publisher = self._make_publisher(provider, False)
-                delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
-                with self.lock: self.posting["current"] = name
-                self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
-                try:
-                    publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay)
-                    with self.lock:
-                        self.posting["completed"] += 1
-                        self.posting["done"] += 1
-                        self.posting["last_name"] = name
-                    self.push(f"{provider.title()} upload complete: {name}.")
-                except Exception as e:
-                    with self.lock: self.posting["errors"] += 1
-                    self.push(f"{provider.title()} error for {name}: {e}")
-            with self.lock:
-                self.posting["active"] = False
-                self.posting["current"] = ""
-                errors = self.posting["errors"]
-                completed = self.posting["completed"]
-            self.push(f"{provider.title()} posting complete: {completed} uploaded, {errors} failed.")
+            try:
+                for index, name in enumerate(valid):
+                    try:
+                        publisher = self._make_publisher(provider, False)
+                        delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
+                        with self.lock: self.posting["current"] = name
+                        self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
+                        if provider == "zernio":
+                            publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay)
+                        else:
+                            publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay,
+                                                  facebook_id=cfg.get("facebook_id", ""),
+                                                  tiktok_id=cfg.get("tiktok_id", ""),
+                                                  tiktok_consent=cfg.get("tiktok_consent", False))
+                        with self.lock:
+                            self.posting["completed"] += 1
+                            self.posting["done"] += 1
+                            self.posting["last_name"] = name
+                        self.push(f"{provider.title()} upload complete: {name}.")
+                    except Exception as exc:
+                        with self.lock: self.posting["errors"] += 1
+                        self.push(f"{provider.title()} error for {name}: {exc}")
+            except Exception as exc:
+                with self.lock: self.posting["errors"] += 1
+                self.push(f"{provider.title()} posting batch stopped unexpectedly: {exc}")
+            finally:
+                with self.lock:
+                    self.posting["active"] = False
+                    self.posting["current"] = ""
+                    errors = self.posting["errors"]
+                    completed = self.posting["completed"]
+                self.push(f"{provider.title()} posting complete: {completed} uploaded, {errors} failed.")
         threading.Thread(target=publish_batch, daemon=True, name=f"{provider}-batch").start()
         self.push(f"{provider.title()}: queued {len(valid)} clip(s) for publishing.")
         return {"queued": len(valid)}
 
-def list_clips(limit=60):
+_CLIP_CACHE = {"dir_mtime": None, "items": []}
+
+def invalidate_clip_cache():
+    _CLIP_CACHE["dir_mtime"] = None
+    _CLIP_CACHE["items"] = []
+
+def _clip_index():
+    try: dir_mtime = OUT.stat().st_mtime_ns
+    except OSError: dir_mtime = None
+    if dir_mtime == _CLIP_CACHE["dir_mtime"]:
+        return _CLIP_CACHE["items"]
     items = []
     for p in OUT.glob("*.mp4"):
         if not CLIP_RE.match(p.name):          # skips the *.tmp.mp4 files that are still rendering
             continue
         try: st = p.stat()
         except OSError: continue
-        cap = ""
-        try: cap = p.with_suffix(".txt").read_text(encoding="utf-8")
-        except Exception: pass
-        items.append({"name": p.name, "mtime": st.st_mtime, "size_mb": round(st.st_size / 1048576, 1), "caption": cap})
+        items.append({"name": p.name, "mtime": st.st_mtime, "size_mb": round(st.st_size / 1048576, 1)})
     items.sort(key=lambda x: x["mtime"], reverse=True)
-    return items[:limit]
+    _CLIP_CACHE["dir_mtime"] = dir_mtime
+    _CLIP_CACHE["items"] = items
+    return items
+
+def list_clips(limit=60, offset=0):
+    items = [dict(item) for item in _clip_index()[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]]
+    for item in items:
+        try: item["caption"] = (OUT / item["name"]).with_suffix(".txt").read_text(encoding="utf-8")
+        except Exception: item["caption"] = ""
+    return items
 
 def reveal(path):
     path = pathlib.Path(path).resolve()
@@ -1414,30 +1736,31 @@ def open_folder(path):
     except Exception as e:
         raise RuntimeError(f"Couldn't open the clips folder: {e}") from e
 
-BROWSE_PY = (
-    "import tkinter as tk\nfrom tkinter import filedialog\n"
-    "r=tk.Tk();r.withdraw();r.attributes('-topmost',True)\n"
-    "print(filedialog.askopenfilename(title='Choose a stream recording / VOD',"
-    "filetypes=[('Video','*.mp4 *.mkv *.mov *.ts *.flv *.webm *.avi'),('All files','*.*')]))\n")
+def _browse_dialog(folder=False):
+    root = None
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        if folder:
+            return filedialog.askdirectory(title="Choose StreamSnip AI folder")
+        return filedialog.askopenfilename(title="Choose a stream recording / VOD",
+                                          filetypes=[("Video", "*.mp4 *.mkv *.mov *.ts *.flv *.webm *.avi"),
+                                                     ("All files", "*.*")])
+    except Exception:
+        return ""
+    finally:
+        if root is not None:
+            try: root.destroy()
+            except Exception: pass
 
 def browse_file():
-    try:
-        r = run([sys.executable, "-c", BROWSE_PY], capture_output=True, text=True)
-        return (r.stdout or "").strip().splitlines()[-1].strip() if (r.stdout or "").strip() else ""
-    except Exception:
-        return ""
-
-BROWSE_FOLDER_PY = (
-    "import tkinter as tk\nfrom tkinter import filedialog\n"
-    "r=tk.Tk();r.withdraw();r.attributes('-topmost',True)\n"
-    "print(filedialog.askdirectory(title='Choose AutoClip folder'))\n")
+    return _browse_dialog(False)
 
 def browse_folder():
-    try:
-        r = run([sys.executable, "-c", BROWSE_FOLDER_PY], capture_output=True, text=True)
-        return (r.stdout or "").strip().splitlines()[-1].strip() if (r.stdout or "").strip() else ""
-    except Exception:
-        return ""
+    return _browse_dialog(True)
 
 def grab_frame(mode, target):
     """One JPEG frame (as a data URL) from the live stream or a video file - used by the facecam-area picker."""
@@ -1445,6 +1768,7 @@ def grab_frame(mode, target):
     target = (target or "").strip().strip('"')
     try:
         if mode == "live":
+            target = normalize_stream_target(target)
             if not re.match(r"https?://", target):
                 raise ValueError("Paste the stream link first.")
             if not streamlink_available():
@@ -1478,7 +1802,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
     def _host_ok(self):
-        return self.headers.get("Host", "").split(":")[0] in ("127.0.0.1", "localhost")
+        host = self.headers.get("Host", "").strip()
+        try:
+            hostname = urllib.parse.urlsplit("//" + host).hostname or ""
+        except ValueError:
+            return False
+        return hostname.lower().rstrip(".") in ("127.0.0.1", "localhost", "::1")
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         if isinstance(body, (dict, list)):
@@ -1548,7 +1877,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 q = urllib.parse.parse_qs(u.query)
                 try: since = int(q.get("since", ["0"])[0])
                 except ValueError: since = 0
-                return self._send(200, CORE.state(since))
+                try: clip_offset = max(0, int(q.get("clip_offset", ["0"])[0]))
+                except ValueError: clip_offset = 0
+                return self._send(200, CORE.state(since, clip_offset))
             if path == "/api/words":
                 return self._send(200, {"text": read_custom_text(), "words": sorted(HYPE_WORDS), "phrases": sorted(HYPE_PHRASES)})
             if path in ("/assets/brand-logo.png", "/assets/app-icon.png"):
@@ -1569,7 +1900,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not self._host_ok() or not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
                 self.close_connection = True
                 return self._send(403, {"error": "forbidden"})
-            n = int(self.headers.get("Content-Length", "0") or 0)
+            try:
+                n = int(self.headers.get("Content-Length", "0") or 0)
+            except (TypeError, ValueError):
+                self.close_connection = True
+                return self._send(400, {"error": "invalid content length"})
+            if n < 0:
+                self.close_connection = True
+                return self._send(400, {"error": "invalid content length"})
             if n > 400_000:
                 self.close_connection = True
                 return self._send(413, {"error": "too large"})
@@ -1590,6 +1928,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True})
                 if path == "/api/stop":
                     CORE.stop(bool(body.get("force"))); return self._send(200, {"ok": True})
+                if path == "/api/stop_file_holder":
+                    return self._send(200, CORE.stop_file_holder(body.get("name"), body.get("pid")))
                 if path == "/api/words":
                     text = str(body.get("text", ""))[:100_000]
                     CUSTOM_FILE.write_text(text, encoding="utf-8")
@@ -1608,7 +1948,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"accounts": CORE.publishing_accounts(str(body.get("provider", "")).lower() or None)})
                 if path == "/api/publishing/publish":
                     names = body.get("names", [])
-                    if not isinstance(names, list): names = []
+                    if body.get("all"):
+                        names = [p.name for p in OUT.glob("*.mp4") if CLIP_RE.match(p.name)]
+                    elif not isinstance(names, list): names = []
                     return self._send(200, CORE.publish_clips([str(n) for n in names]))
                 if path == "/api/ai/settings":
                     return self._send(200, save_ai_settings(body))
@@ -1622,8 +1964,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     valid = [str(n) for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
                     if not valid: return self._send(400, {"error": "No valid clips selected."})
                     for name in valid:
-                        (OUT / name).unlink(missing_ok=True)
-                        (OUT / name).with_suffix(".txt").unlink(missing_ok=True)
+                        for target in (OUT / name, (OUT / name).with_suffix(".txt")):
+                            try:
+                                target.unlink(missing_ok=True)
+                            except OSError as exc:
+                                if os.name == "nt" and getattr(exc, "winerror", None) in (32, 33):
+                                    details = describe_file_lock(target, exc)
+                                    CORE.push_file_lock(details)
+                                    raise RuntimeError(details["message"]) from exc
+                                raise
                     return self._send(200, {"ok": True, "deleted": len(valid)})
                 if path in ("/api/delete", "/api/reveal"):
                     name = str(body.get("name", ""))
@@ -1632,8 +1981,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if path == "/api/reveal":
                         reveal(OUT / name)
                     else:
-                        (OUT / name).unlink()
-                        (OUT / name).with_suffix(".txt").unlink(missing_ok=True)
+                        for target in (OUT / name, (OUT / name).with_suffix(".txt")):
+                            try:
+                                target.unlink(missing_ok=True)
+                            except OSError as exc:
+                                if os.name == "nt" and getattr(exc, "winerror", None) in (32, 33):
+                                    details = describe_file_lock(target, exc)
+                                    CORE.push_file_lock(details)
+                                    raise RuntimeError(details["message"]) from exc
+                                raise
                     return self._send(200, {"ok": True})
                 if path == "/api/open_folder":
                     open_folder(OUT); return self._send(200, {"ok": True})
@@ -1710,6 +2066,8 @@ def main():
     srv = QuietServer((bind_host, bind_port), Handler)
     srv.daemon_threads = True
     public_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
+    if ":" in public_host and not public_host.startswith("["):
+        public_host = f"[{public_host}]"
     url = f"http://{public_host}:{srv.server_address[1]}/"
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     print(f"{PRODUCT_NAME} by ScarZero is running at {url}\nChoose Quit in the app, or keep this terminal open while it runs.")
@@ -1787,6 +2145,7 @@ header{display:flex;align-items:center;gap:14px;padding:16px 22px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:12px;font-weight:600;transition:.15s;white-space:nowrap}
 .btn.ghost{background:var(--card2);border:1px solid var(--line)}
 .btn.ghost:hover{background:rgba(255,255,255,.11);border-color:var(--line2)}
+.btn.lock-stop{font-size:11px;padding:4px 9px;margin:5px 0 2px 8px;border-color:rgba(248,113,113,.45);color:#ffd7db}
 .btn.danger{background:#dc4452;color:#fff}.btn.danger:hover{background:#ec5a68}
 .btn:disabled{opacity:.5;cursor:default}
 .settings-dialog{width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;background:#12141d;border:1px solid var(--line2);border-radius:20px;padding:18px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
@@ -1951,12 +2310,12 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 
   <div class="card ai-card" id="ai-card">
     <div class="ch"><span class="num">AI</span><h3>Choose your highlight engine</h3></div>
-    <p class="hint" style="margin-top:0">Pick how StreamSnip finds viral moments, then save your choice. Whisper still creates the transcript separately.</p>
+    <p class="hint" style="margin-top:0">Hook words and Ollama run locally and use no hosted AI quota. Gemini and Hugging Face send transcript windows to hosted services and can consume your account quota or credits. Whisper creates the transcript separately.</p>
     <div class="ai-choices" role="group" aria-label="AI highlight provider">
       <button type="button" class="ai-choice" data-ai-provider="hooks"><b>Hook words</b><small>Free · offline · default</small></button>
       <button type="button" class="ai-choice" data-ai-provider="ollama"><b>Ollama local AI</b><small>Free · private · local model</small></button>
-      <button type="button" class="ai-choice" data-ai-provider="gemini"><b>Gemini API</b><small>Google API key · quota based</small></button>
-      <button type="button" class="ai-choice" data-ai-provider="huggingface"><b>Hugging Face</b><small>Hosted open models</small></button>
+      <button type="button" class="ai-choice" data-ai-provider="gemini"><b>Gemini API</b><small>Hosted · uses Google quota</small></button>
+      <button type="button" class="ai-choice" data-ai-provider="huggingface"><b>Hugging Face</b><small>Hosted · may use provider credits</small></button>
     </div>
     <select id="ai-provider" class="text" hidden><option value="hooks">Built-in and custom hook words</option><option value="ollama">Ollama local AI</option><option value="huggingface">Hugging Face hosted model</option><option value="gemini">Gemini API</option></select>
     <div id="ollama-ai-fields" hidden>
@@ -1965,8 +2324,8 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <select id="ollama-model" class="text"><option value="">Click Detect models</option></select>
       <p class="hint">Install Ollama and at least one model first. Only models already installed and detected by Ollama are available.</p>
     </div>
-    <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><b id="gemini-key-state">Not saved</b></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><p class="hint">If a model is busy, times out, or hits quota, StreamSnip tries other available Gemini models before Ollama fallback.</p></div>
-    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="Qwen/Qwen2.5-7B-Instruct-1M"><div class="row"><label>Hugging Face access token</label><b id="hf-token-state">Not saved</b></div><input id="hf-token" class="text" type="password" placeholder="Token with Inference Providers access"><p class="hint">Open model weights are free; hosted inference providers may charge or enforce account limits.</p></div>
+    <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><b id="gemini-key-state">Not saved</b></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><div class="row"><label>Preferred Gemini model</label></div><input id="gemini-model" class="text" value="gemini-3.8-flash" placeholder="gemini-3.8-flash"><p class="hint">The app checks this model first, tries the other available Gemini models if needed, then falls back to Ollama. Model IDs can change; use one enabled for your API key.</p></div>
+    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="Qwen/Qwen2.5-7B-Instruct-1M"><div class="row"><label>Hugging Face access token</label><b id="hf-token-state">Not saved</b></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads, so the Hugging Face Hub warning should stop. Use a token with Inference Providers access; hosted providers may still enforce account limits.</p></div>
     <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
   </div>
 
@@ -2059,20 +2418,20 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Output / clips folder</label></div>
     <div class="folder-pick"><input id="out-dir" class="text" type="text" placeholder="Default: app folder\out"><button class="btn ghost" id="out-dir-browse">Browse</button></div>
     <div class="row"><label>Processing hardware</label></div>
-    <select id="compute-device" class="text"><option value="gpu">GPU — CUDA speech + NVENC rendering</option><option value="cpu">CPU — INT8 speech + software rendering</option></select>
-    <p class="hint">GPU mode is recommended for an NVIDIA RTX 3060 Ti. If CUDA or NVENC is unavailable, the app logs the fallback.</p>
+    <select id="compute-device" class="text"><option value="gpu">Automatic — use NVIDIA GPU when available</option></select>
+    <p class="hint">Speech uses CUDA when a supported NVIDIA GPU is detected; video recording and rendering use NVENC whenever FFmpeg provides it. CPU processing is used only when no supported GPU is detected. A GPU initialization failure is shown in Activity instead of silently switching to CPU.</p>
     <div class="row"><label>Live video bitrate target (kbps)</label><b>Full HD</b></div>
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.1.8. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.1.9. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
     <div class="hint update-list" id="updates-list"></div>
     <div class="row"><label>Publishing provider</label></div>
-    <select id="pub-provider" class="text"><option value="zernio">Zernio</option><option value="postiz">Postiz</option><option value="mixpost">Mixpost</option></select>
-    <p class="hint">Connect through Zernio, Postiz, or Mixpost. Leave Postiz Base URL blank for Postiz Cloud; Mixpost needs its instance URL and workspace UUID.</p>
+    <select id="pub-provider" class="text"><option value="postiz">Postiz self-hosted (recommended free route)</option><option value="mixpost">Mixpost (Lite platform limits)</option><option value="zernio">Zernio hosted</option></select>
+    <p class="hint">Postiz self-hosted avoids a scheduler subscription; your PC/server must stay online. Postiz Cloud and Zernio are hosted paid services. Mixpost Lite is free but does not include TikTok. Auto-post stays off until you turn it on.</p>
     <div class="row"><label>API key</label><b id="z-key-state">Not saved</b></div>
     <input id="z-api" class="text" type="password" placeholder="Enter a new key to replace the saved key">
     <div class="two" id="selfhost-fields" hidden><div><div class="row"><label>Base URL</label></div><input id="pub-base" class="text" placeholder="https://postiz.example.com"></div><div><div class="row"><label>Workspace UUID (Mixpost)</label></div><input id="pub-workspace" class="text" placeholder="Required for Mixpost"></div></div>
@@ -2081,6 +2440,11 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <div><div class="row"><label>Instagram</label></div><select id="z-ig" class="text"><option value="">Not selected</option></select></div>
       <div><div class="row"><label>YouTube</label></div><select id="z-yt" class="text"><option value="">Not selected</option></select></div>
     </div>
+    <div class="two">
+      <div><div class="row"><label>Facebook Page</label></div><select id="z-fb" class="text"><option value="">Not selected</option></select></div>
+      <div><div class="row"><label>TikTok</label></div><select id="z-tt" class="text"><option value="">Not selected</option></select></div>
+    </div>
+    <label class="toggle compact" style="margin-top:10px"><span>I approve direct publishing of selected clips to TikTok.</span><input type="checkbox" id="tiktok-consent"><i class="sl"></i></label>
     <div class="two">
       <div><div class="row"><label>Schedule delay (minutes)</label></div><input id="z-delay" class="text" type="number" min="0" value="0"></div>
       <div><div class="row"><label>YouTube visibility</label></div><select id="z-vis" class="text"><option>public</option><option>unlisted</option><option>private</option></select></div>
@@ -2118,6 +2482,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="post-progress" id="post-progress" hidden><div class="progress-meta"><span id="post-label">Preparing uploads...</span><span><span id="post-value">0%</span> · <span id="post-time">0:00</span></span></div><div class="progress-track"><div class="progress-fill" id="post-fill"></div></div></div>
     <div class="prow" style="justify-content:flex-end;margin-bottom:10px"><button class="btn ghost" id="btn-select-all">Select all</button><button class="btn ghost" id="btn-publish-selected">Publish selected (0)</button><button class="btn danger" id="btn-delete-selected">Delete selected (0)</button><button class="btn danger" id="btn-publish-all">Publish all clips</button></div>
     <div class="grid" id="grid"></div>
+    <div class="prow" id="clip-pages" style="justify-content:center;margin-top:12px"><button class="btn ghost" id="btn-clips-newer">Newer</button><span class="hint" id="clip-page-label"></span><button class="btn ghost" id="btn-clips-older">Older</button></div>
     <div class="empty" id="empty"><div class="big"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h4>No clips yet</h4><p>Paste a Twitch or YouTube live link (or choose a VOD file) and hit Start. Finished 9:16 clips with captions appear here, ready to post.</p></div>
   </div>
   <div class="panel" id="p-log" hidden><div id="log"></div></div>
@@ -2157,10 +2522,12 @@ const BOOT=__BOOT__;
 const TOKEN="__TOKEN__";
 let appClosing=false;
 const S=Object.assign({},BOOT.settings);
-const P=Object.assign({provider:"zernio",providers:{}},BOOT.publishing||{});
-let activeProvider=P.provider||"zernio";
-let Z=Object.assign({},(P.providers&&P.providers[activeProvider])||BOOT.zernio||{});
+const P=Object.assign({provider:"postiz",providers:{}},BOOT.publishing||{});
+let activeProvider=P.provider||"postiz";
+let Z=Object.assign({},(P.providers&&P.providers[activeProvider])||{});
 let accountsLoadedFor="";
+let clipOffset=0;
+const CLIP_PAGE_SIZE=60;
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
 const ICON={
  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
@@ -2189,11 +2556,12 @@ $("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
 $("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.ollama_model||"Click Detect models"));
 $("#hf-model").value=AI.huggingface_model||"Qwen/Qwen2.5-7B-Instruct-1M";
 $("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";
+$("#gemini-model").value=AI.gemini_model||"gemini-3.8-flash";
 $("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";
 function showAIFields(){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
 $("#ai-provider").onchange=showAIFields;$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields()});showAIFields();
 $("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
-$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:AI.gemini_model||"gemini-3.8-flash",huggingface_model:$("#hf-model").value};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
+$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 function setSelectOptions(el,items,chosen){
   el.replaceChildren(h("option",{value:""},"Not selected"));
   items.forEach(a=>el.append(h("option",{value:a.id},a.name+" ("+a.platform+")")));
@@ -2207,6 +2575,8 @@ async function loadPublishingAccounts(){
   if(provider!==activeProvider)return;
   setSelectOptions($("#z-ig"),r.accounts.filter(a=>a.platform==="instagram"),Z.instagram_id);
   setSelectOptions($("#z-yt"),r.accounts.filter(a=>a.platform==="youtube"),Z.youtube_id);
+  setSelectOptions($("#z-fb"),r.accounts.filter(a=>a.platform==="facebook"),Z.facebook_id);
+  setSelectOptions($("#z-tt"),r.accounts.filter(a=>a.platform==="tiktok"),Z.tiktok_id);
   accountsLoadedFor=provider;
   $("#z-msg").textContent=r.accounts.length?"Connected channels identified":"No Instagram/YouTube channels found";
   $("#z-msg").classList.add("show");
@@ -2330,13 +2700,15 @@ function preview(){
   ph.classList.toggle("fill",S.layout.startsWith("Fill"));ph.classList.toggle("cam",S.layout.startsWith("Facecam"));
   const k=ph.getBoundingClientRect().width/1080||0.2;
   const custom=!!S.subtitle_custom;
-  const col=custom?(S.subtitle_text_color||"#FFFFFF"):(BOOT.colors[S.color]||"#FFE600"),n=S.words_per_line;
+  const n=S.words_per_line;
   const subFont=custom?({Classic:"Impact",Hormozi:"Arial Black",Neon:"Arial Black",MrBeast:"Impact",Minimal:"Segoe UI Black",Fire:"Impact"}[S.subtitle_style]||"Impact"):S.font;
   const subPos=custom?S.subtitle_position:"Bottom";
   const bottom=custom?(subPos==="Bottom"?70:subPos==="Center"?760:null):(BOOT.positions[S.position]||520);
   const idx=tick%FLAT.length,g=Math.floor(idx/n),words=FLAT.slice(g*n,Math.min(FLAT.length,g*n+n));
   const o=Math.max(1,9*k),sh=[];for(let a=0;a<12;a++){const r=a/12*Math.PI*2;sh.push((Math.cos(r)*o).toFixed(1)+"px "+(Math.sin(r)*o).toFixed(1)+"px 0 #000")}
-  cap.style.cssText=(bottom==null?"top:"+(70+S.subtitle_nudge)*k+"px;":"bottom:"+((bottom+S.subtitle_nudge)*k)+"px;")+"padding:0 "+(70*k)+"px;font-size:"+((custom?S.subtitle_font_size:S.caption_size)*k)+"px;font-family:'"+subFont+"',Impact,'Arial Black',sans-serif;--cap:"+col+";text-shadow:"+sh.join(",")+";color:"+col;
+  const baseCol=custom?(S.subtitle_text_color||"#FFFFFF"):"#FFFFFF";
+  const highlightCol=BOOT.colors[S.color]||"#FFE600";
+  cap.style.cssText=(bottom==null?"top:"+(70+S.subtitle_nudge)*k+"px;":"bottom:"+((bottom+S.subtitle_nudge)*k)+"px;")+"padding:0 "+(70*k)+"px;font-size:"+((custom?S.subtitle_font_size:S.caption_size)*k)+"px;font-family:'"+subFont+"',Impact,'Arial Black',sans-serif;--cap:"+highlightCol+";text-shadow:"+sh.join(",")+";color:"+baseCol;
   cap.replaceChildren(...words.map((w,i)=>h("span",{class:(g*n+i===idx)?"hot":""},w)));
 }
 setInterval(()=>{tick++;preview()},430);preview();
@@ -2470,15 +2842,15 @@ $("#btn-words-save").onclick=saveWords;
 $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveWords()}});
 
 /* ---------- actions ---------- */
-function loadProviderForm(){const cfg=(P.providers&&P.providers[activeProvider])||{};Z=Object.assign({},cfg);$("#pub-provider").value=activeProvider;$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post;$("#pub-base").value=cfg.base_url||"";$("#pub-base").placeholder=activeProvider==="postiz"?"Leave blank for Postiz Cloud":"https://cloud.mixpost.app/p or your instance URL";$("#pub-workspace").value=cfg.workspace||"";$("#pub-workspace").placeholder="Required: workspace UUID";$("#selfhost-fields").hidden=activeProvider==="zernio"}
-$("#pub-provider").onchange=async e=>{activeProvider=e.target.value;accountsLoadedFor="";loadProviderForm();$("#z-ig").replaceChildren(h("option",{value:""},"Not selected"));$("#z-yt").replaceChildren(h("option",{value:""},"Not selected"));if((P.providers[activeProvider]||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
+function loadProviderForm(){const cfg=(P.providers&&P.providers[activeProvider])||{};Z=Object.assign({},cfg);$("#pub-provider").value=activeProvider;$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post;$("#tiktok-consent").checked=!!cfg.tiktok_consent;$("#pub-base").value=cfg.base_url||"";$("#pub-base").placeholder=activeProvider==="postiz"?"Enter your self-hosted Postiz URL":"https://cloud.mixpost.app/p or your instance URL";$("#pub-workspace").value=cfg.workspace||"";$("#pub-workspace").placeholder="Required for Mixpost";$("#selfhost-fields").hidden=activeProvider==="zernio"}
+$("#pub-provider").onchange=async e=>{activeProvider=e.target.value;accountsLoadedFor="";loadProviderForm();["#z-ig","#z-yt","#z-fb","#z-tt"].forEach(id=>$(id).replaceChildren(h("option",{value:""},"Not selected")));if((P.providers[activeProvider]||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
 $("#z-key-state").textContent=Z.api_key_set?"Saved locally":"Not saved";
 $("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";
 $("#z-check").onclick=async()=>{
   const b=$("#z-check");b.disabled=true;
   try{
-    const payload={provider:activeProvider,api_key:$("#z-api").value,base_url:$("#pub-base").value,workspace:$("#pub-workspace").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value};
-    if(accountsLoadedFor===activeProvider){payload.instagram_id=$("#z-ig").value;payload.youtube_id=$("#z-yt").value}
+    const payload={provider:activeProvider,api_key:$("#z-api").value,base_url:$("#pub-base").value,workspace:$("#pub-workspace").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value,tiktok_consent:$("#tiktok-consent").checked};
+    if(accountsLoadedFor===activeProvider){payload.instagram_id=$("#z-ig").value;payload.youtube_id=$("#z-yt").value;payload.facebook_id=$("#z-fb").value;payload.tiktok_id=$("#z-tt").value}
     const r=await api("/api/publishing",payload);
     Object.assign(P,r);Object.assign(Z,(r.providers||{})[activeProvider]||{});$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadPublishingAccounts();toast(activeProvider+" settings saved locally","ok");
   }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
@@ -2511,7 +2883,22 @@ const fmtT=s=>{const m=Math.floor(s/60),h2=Math.floor(m/60);return h2?h2+":"+Str
 function ago(t){const s=Math.max(0,Date.now()/1000-t);if(s<60)return"just now";if(s<3600)return Math.floor(s/60)+" min ago";if(s<86400)return Math.floor(s/3600)+" h ago";return Math.floor(s/86400)+" d ago"}
 function addLogs(list){
   if(!list.length)return;const box=$("#log"),pl=$("#p-log"),stick=pl.scrollHeight-pl.scrollTop-pl.clientHeight<60;
-  list.forEach(l=>{const cls=/error|failed/i.test(l.m)?"err":/clip ready|live - rec/i.test(l.m)?"okk":"";box.append(h("div",{class:cls},h("span",{class:"t"},l.t),l.m))});
+  list.forEach(l=>{
+    const cls=/error|failed|could not finish using/i.test(l.m)?"err":/clip ready|live - rec/i.test(l.m)?"okk":"";
+    const row=h("div",{class:cls},h("span",{class:"t"},l.t),l.m);
+    (l.file_lock&&l.file_lock.holders||[]).forEach(holder=>{
+      const stop=h("button",{class:"btn ghost lock-stop",onclick:async e=>{
+        const button=e.currentTarget;
+        const detail=(holder.path?"\n"+holder.path:"")+"\nPID "+holder.pid+"\n\nWindows will close this process to release the clip. Save any work in it first.";
+        if(!(await confirmBox("Stop "+holder.name+"?",detail,"Stop process")))return;
+        button.disabled=true;
+        try{const result=await api("/api/stop_file_holder",{name:l.file_lock.name,pid:holder.pid});button.textContent="Stop requested";toast(result.message,"ok");poll(true)}
+        catch(error){button.disabled=false;toast(error.message,"bad")}
+      }},"Stop "+holder.name+" (PID "+holder.pid+")");
+      row.append(document.createElement("br"),stop);
+    });
+    box.append(row);
+  });
   while(box.children.length>500)box.firstChild.remove();
   if(stick)pl.scrollTop=pl.scrollHeight;
 }
@@ -2588,10 +2975,14 @@ function clipCard(c){
           h("button",{class:"ib",title:"Show in folder",onclick:()=>api("/api/reveal",{name:c.name}).catch(e=>toast(e.message,"bad"))},ico("folder",15)),
           h("button",{class:"ib del",title:"Delete",onclick:del},ico("trash",15))))));
 }
-function renderClips(list){
+function renderClips(list,total=0){
+  if(!list.length&&clipOffset>0){clipOffset=Math.max(0,clipOffset-CLIP_PAGE_SIZE);return}
   const sig=list.map(c=>c.name).join("|");
   $("#empty").hidden=list.length>0;$("#grid").hidden=list.length===0;
   const cnt=$("#cnt");cnt.hidden=!list.length;cnt.textContent=list.length;
+  $("#clip-page-label").textContent=list.length?`${clipOffset+1}-${clipOffset+list.length} of ${total} clips`:"0 clips";
+  $("#btn-clips-newer").disabled=clipOffset===0;
+  $("#btn-clips-older").disabled=clipOffset+list.length>=total;
   if(sig!==order){
     order=sig;const keep=new Set(list.map(c=>c.name));
     for(const [n,el] of cards){if(!keep.has(n)){el.remove();cards.delete(n)}}
@@ -2613,7 +3004,9 @@ $("#btn-delete-selected").onclick=async()=>{
   if(!(await confirmBox("Delete selected clips?","This permanently removes "+names.length+" video(s) and their caption files.","Delete")))return;
   try{const r=await api("/api/delete_many",{names});selectedClips.clear();toast("Deleted "+r.deleted+" clip(s)","ok");poll(true)}catch(e){toast(e.message,"bad")}
 };
-$("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This can publish up to 60 clips to your connected channels.","Publish all")))return;try{const s=await (await fetch("/api/state?since=0",{cache:"no-store"})).json();publishNames(s.clips.map(c=>c.name))}catch(e){toast(e.message,"bad")}};
+$("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This submits every finished clip in your clips folder to the selected channels. This may publish many videos.","Publish all")))return;try{const r=await api("/api/publishing/publish",{all:true});toast("Started uploading "+r.queued+" clip(s) to "+activeProvider,"ok")}catch(e){toast(e.message,"bad")}};
+$("#btn-clips-newer").onclick=()=>{clipOffset=Math.max(0,clipOffset-CLIP_PAGE_SIZE);poll()};
+$("#btn-clips-older").onclick=()=>{clipOffset+=CLIP_PAGE_SIZE;poll()};
 function openClip(c){
   const v=h("video",{src:"/clips/"+encodeURIComponent(c.name),controls:true,autoplay:true,loop:true,playsinline:true});
   const close=()=>{v.pause();m.remove();document.removeEventListener("keydown",esc)};
@@ -2630,9 +3023,9 @@ function openClip(c){
 async function poll(){
   if(busy)return;busy=true;
   try{
-    const r=await fetch("/api/state?since="+lastLog,{cache:"no-store"});const s=await r.json();
+    const r=await fetch("/api/state?since="+lastLog+"&clip_offset="+clipOffset,{cache:"no-store"});const s=await r.json();
     fails=0;$("#offline").hidden=true;
-    lastLog=s.last_id;addLogs(s.logs);updateRun(s);renderClips(s.clips);
+    lastLog=s.last_id;addLogs(s.logs);updateRun(s);renderClips(s.clips,s.clip_total);
   }catch(e){if(++fails>=3)$("#offline").hidden=false}
   busy=false;
 }

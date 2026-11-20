@@ -9,7 +9,7 @@
 
 ## Download for Windows
 
-The [GitHub Releases page](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) provides one packaged Windows download: **StreamSnipAI-Setup.exe**. Run the installer and follow its prompts. It creates Start Menu and optional desktop shortcuts, installs the app files, then sets up the Python runtime and speech model if needed. An internet connection is required for first-time setup.
+The [GitHub Releases page](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) provides one packaged Windows download: **StreamSnipAI-Setup.exe**. Run the installer and follow its prompts. It installs and launches the actual StreamSnip AI app executable directly; no separate launcher or system Python setup is needed. An internet connection is required the first time the selected speech model is downloaded.
 
 The shortcut starts the app in a terminal and opens its local web interface in an app-style browser window. Keep the terminal open while StreamSnip AI is running. Use **Quit** in the app to stop it cleanly; this also stops an active recording. Closing only the browser window does not stop the server.
 
@@ -49,7 +49,7 @@ Each finished clip is saved as an `.mp4` and a matching `.txt` file containing s
 | Live chunk length | 3 minutes | Each captured segment is processed separately. |
 | Before / after the peak | 20 / 15 seconds | The app keeps context around each selected moment and caps a clip at 60 seconds. |
 | Speech model | `distil-large-v3` | Other available models trade speed, resource use, and transcription accuracy. |
-| Processing hardware | GPU | GPU mode tries CUDA speech and NVENC rendering; CPU mode uses INT8 speech and software rendering. GPU mode can fall back if CUDA or NVENC is unavailable. |
+| Processing hardware | Automatic | Uses CUDA for speech and NVENC for video whenever supported NVIDIA hardware and FFmpeg support are available. Uses INT8/software CPU processing only if no supported GPU is detected; GPU startup failures are reported instead of silently moving speech work to CPU. |
 | Live capture bitrate target | 6,000 kbps | This is the lowest allowed setting. Capture prefers 1080p60, then 1080p, 720p60, 720p, and the best available stream. A lower-resolution source cannot gain real detail from upscaling. |
 | Output format | 9:16 portrait | Other options are 16:9, 1:1, and 4:5. |
 | Auto-post | Off | Must be enabled separately in the selected publishing provider's settings. |
@@ -58,7 +58,7 @@ Settings can also be checked and edited in the app. Update controls check the ap
 
 ## Choose how highlights are selected
 
-The **Choose your highlight engine** panel is near the top of the app. It controls moment selection, not speech transcription. Whisper creates the transcript separately. Activity reports which provider and model handled each transcript window, where it ran, model retries, and fallback behavior.
+The **Choose your highlight engine** panel is near the top of the app. It controls moment selection, not speech transcription. Whisper creates the transcript separately. **Hook words and Ollama are local and do not use hosted AI quota. Gemini and Hugging Face send transcript windows to hosted services and can consume API quota or provider credits.** Gemini can try multiple models before Ollama fallback; those hosted attempts still count against the provider's limits. Activity reports which provider and model handled each transcript window, where it ran, model retries, and fallback behavior.
 
 ### Built-in and custom hook words
 
@@ -82,15 +82,17 @@ For Docker, use `http://host.docker.internal:11434` as the Ollama address; insid
 2. In StreamSnip AI, choose **Gemini API**, enter the key, and save the AI settings. The key is stored in the local app data folder and is not sent to the browser UI.
 3. Process a short recording and check **Activity** for the Gemini model and request status.
 
+The **Preferred Gemini model** field lets you choose the first model to try. The default is `gemini-3.8-flash`; available models depend on the API key, and StreamSnip checks the key's available models for fallback.
+
 Google offers a free tier for eligible models, but model availability and quotas vary by account and can change. See Google's [current pricing and free-tier information](https://ai.google.dev/gemini-api/docs/pricing). StreamSnip AI can show quota or rate-limit errors returned by Google; it cannot read your remaining quota before a request. When requests hit quota/rate limits or temporary model/API failures, StreamSnip AI tries other Gemini models available to the key before switching the remaining transcript windows to Ollama. Keep Ollama running and a model selected to use that fallback. Without a working Ollama fallback, the app uses local hook-word and audio scoring.
 
 ### Hugging Face hosted models
 
-Choose **Hugging Face**, enter a model ID and a token with access to [Inference Providers](https://huggingface.co/docs/inference-providers/index), then save AI settings. The app sends timestamped transcript windows to the hosted inference router. Hosted availability, account credits, and rate limits depend on Hugging Face and the selected provider. This is separate from faster-whisper's local speech models.
+Choose **Hugging Face**, enter a model ID and a token with access to [Inference Providers](https://huggingface.co/docs/inference-providers/index), then save AI settings. This sends timestamped transcript windows to hosted inference and may use provider credits or limits. StreamSnip also passes the saved token to Hugging Face Hub when faster-whisper downloads its speech model; downloading the public speech model is separate from hosted AI inference. You do not need to paste the token into a terminal or send it to support. The token is stored in local app settings and is never written to Activity. To avoid hosted usage entirely, choose **Hook words** or **Ollama**.
 
 ## Publishing clips
 
-Publishing is optional. Connect the social accounts in your selected provider first; StreamSnip AI lists connected Instagram and YouTube accounts reported by that provider. In **Settings → Publishing**, select the provider, enter its API credentials, click **Save & identify channels**, select accounts, and save again. Start with **Auto-post** off, then manually publish one clip to confirm the setup.
+Publishing is optional. Connect social accounts in your selected provider first; StreamSnip lists Instagram, YouTube, Facebook Pages, and TikTok accounts reported by Postiz. In **Settings → Publishing**, select Postiz, enter your self-hosted instance URL and API key, click **Save & identify channels**, select accounts, and save again. **Auto-post is off by default.** The no-subscription route is self-hosted Postiz: the software is free, but your own computer/server and internet connection must stay available. Your social accounts still have to meet each platform's developer/API requirements.
 
 ### Zernio
 
@@ -98,21 +100,22 @@ Publishing is optional. Connect the social accounts in your selected provider fi
 2. Choose **Zernio** and enter the key. The app uses Zernio's hosted API; no base URL or workspace is needed.
 3. Click **Save & identify channels**, select connected Instagram and/or YouTube accounts, and save those selections.
 
-### Postiz Cloud or self-hosted
+### Self-hosted Postiz (no scheduler subscription)
 
-1. Connect the social account in Postiz and create a key under **Settings → Developers → Public API**. See the [Postiz Public API guide](https://docs.postiz.com/public-api/introduction).
-2. Choose **Postiz** and enter the key. Leave **Base URL** blank for Postiz Cloud, or enter the root URL of your self-hosted instance (for example, `https://postiz.example.com`). Do not append `/public/v1`; the app adds the API paths.
-3. Click **Save & identify channels**, select the connected accounts, then save the selections.
+1. Install Postiz's free open-source edition on your own computer/server using its [self-hosting guide](https://docs.postiz.com/). This avoids a Postiz Cloud subscription, but you maintain the server, updates, backups, and social-network developer apps.
+2. Connect Instagram, YouTube, Facebook Page, and/or TikTok in Postiz. Create a key under **Settings → Developers → Public API**; see the [Postiz Public API guide](https://docs.postiz.com/public-api/introduction).
+3. Choose **Postiz** in StreamSnip. Enter your instance URL and API key. A self-hosted URL is required; StreamSnip will not default to paid Postiz Cloud. Do not append `/public/v1`; the app adds the API paths.
+4. Select the channels and save. For TikTok, also tick the direct-publishing confirmation. TikTok requires Postiz and its uploaded video media to be reachable over public HTTPS; TikTok may restrict unaudited apps to private posts and daily limits. Check the [Postiz TikTok self-hosting requirements](https://docs.postiz.com/self-host/providers/tiktok) before enabling it.
 
 ### Mixpost Cloud or self-hosted
 
-1. Connect the social account in Mixpost and create a personal API key. Obtain the workspace UUID from your Mixpost setup; see the [Mixpost API reference](https://docs.mixpost.app/api/).
-2. Choose **Mixpost**, enter the key, base URL, and workspace UUID. For Mixpost Cloud, the base URL is `https://cloud.mixpost.app/p`; for self-hosting, use your instance URL and include any installation path. Do not append `/api` or the workspace UUID.
-3. Click **Save & identify channels**, select the connected accounts, then save the selections.
+1. Mixpost Lite is free and self-hostable, but currently supports Facebook Pages, X, and Mastodon. Its official plan comparison lists Instagram, YouTube, and TikTok under paid Pro/Enterprise features. See [Mixpost's feature/pricing page](https://mixpost.app/pricing) before choosing it. Mixpost Cloud is hosted; its pricing can change.
+2. The API required by this StreamSnip connector and Mixpost's Instagram, YouTube, and TikTok integrations are plan-limited. Check [Mixpost's current feature and pricing list](https://mixpost.app/pricing) before using it. Mixpost is not the free four-platform route; use self-hosted Postiz for that.
 
 ### Posting behavior and limits
 
 - **Auto-post** is off by default. When enabled, newly rendered clips are submitted to the saved accounts for the selected provider.
+- StreamSnip does not charge for publishing. Postiz Cloud, Zernio, and Mixpost paid editions may charge separately. For the free route, select **Postiz** and enter your own self-hosted instance URL; a blank URL is rejected to prevent accidentally using Postiz Cloud.
 - Manual publishing is available for one or more selected clips, or all clips. Upload progress and failures appear in **Activity**.
 - The schedule delay is configured in minutes. YouTube visibility is sent by the Zernio and Postiz integrations; provider and platform rules still apply.
 - Credentials are saved locally in `publishing.json` (Zernio settings may also be kept in `zernio.json`). Do not share these files or commit API keys.
@@ -204,7 +207,9 @@ The file appears read-only inside the container; results are saved under `./data
 | UI buttons do not respond | Disable extensions such as ad blockers for `127.0.0.1` and `localhost`. |
 | No stream is found | Check the Twitch/YouTube URL and network connection. Offline streams are polled while the app waits. |
 | No clips are produced | Inspect **Activity** for transcription errors, check the speech model and FFmpeg, and lower the minimum viral score if needed. |
-| Transcription is slow or CUDA fails | Choose CPU mode or check NVIDIA drivers and CUDA support. The app can fall back to CPU if GPU initialization fails. |
+| Whisper reports that `model.bin` is missing | The local model cache was interrupted or damaged. The app clears only that model's broken Hugging Face cache and retries its download; allow the download to finish before closing the app. |
+| A clip says it is in use | Check **Activity** for the process name, path, and PID Windows identified. Use its **Stop process** button only after saving work in that app; if Windows cannot identify the holder, close the video player or Explorer preview pane and retry. |
+| Transcription is slow or CUDA fails | Check that the NVIDIA GPU and driver are available and that the installed runtime includes CUDA support. Activity shows GPU initialization errors; when a supported CUDA GPU is detected, speech processing does not silently switch to CPU. |
 | FFmpeg or FFprobe is missing | Install FFmpeg and add its `bin` folder to `PATH`, then restart StreamSnip AI. |
 | Ollama models are not detected | Start Ollama, download a model with `ollama pull MODEL_NAME`, confirm it appears in `ollama list`, then click **Detect models** again. |
 | Gemini reports quota/rate limits | Check the project's current Google AI Studio quota. Keep Ollama running with a model selected for automatic fallback. |
@@ -219,13 +224,13 @@ Settings, AI provider credentials, publishing credentials, and hook words are st
 
 ## Build the Windows installer
 
-The repository's Windows build script creates the PyInstaller runtime, the launcher required by the installer, and `dist\installer\StreamSnipAI-Setup.exe`. It requires Python 3.14 for the build environment and Inno Setup 6. FFmpeg and FFprobe are included when found on the build computer; otherwise, users must install them separately.
+The repository's Windows build script creates the self-contained PyInstaller app and `dist\installer\StreamSnipAI-Setup.exe`. It requires Python 3.14 for the build environment and Inno Setup 6. FFmpeg and FFprobe are included when found on the build computer; otherwise, users must install them separately.
 
 ~~~powershell
 powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 ~~~
 
-The installer includes the app source and runtime bootstrap. It installs Python packages and pre-downloads the default speech model during setup. The launcher is the Start Menu entry point; it starts the installed app and opens the local interface. The only packaged Windows download published on GitHub Releases is `StreamSnipAI-Setup.exe`.
+The installer contains the actual application executable and its bundled runtime files. Start Menu and optional desktop shortcuts open `StreamSnipAI.exe` directly. The only packaged Windows download published on GitHub Releases is `StreamSnipAI-Setup.exe`.
 
 ## Project files
 
@@ -235,8 +240,7 @@ The installer includes the app source and runtime bootstrap. It installs Python 
 | `ai_highlights.py` | Transcript analysis through Ollama, Gemini, or Hugging Face hosted inference. |
 | `zernio_poster.py` | Zernio publishing integration. |
 | `selfhost_publishers.py` | Postiz and Mixpost publishing integrations. |
-| `launcher.py`, `run_streamsnip.cmd` | Windows app launcher and runtime bootstrap entry point. |
-| `installer/bootstrap.ps1`, `installer/AutoClip.iss` | Windows runtime/model setup and installer definition. |
+| `AutoClip.spec`, `build_windows.ps1`, `installer/AutoClip.iss` | Self-contained Windows app build and Setup installer definition. |
 | `build_windows.ps1`, `AutoClip.spec` | Windows application build configuration. |
 | `docker-compose.yml`, `Dockerfile` | Local Docker deployment. |
 | `tests/test_regressions.py` | Automated regression coverage for the application. |

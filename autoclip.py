@@ -547,6 +547,11 @@ def streamlink_cmd():
     exe = _find_streamlink_exe()
     if exe:
         return [exe]
+    # In a PyInstaller build, sys.executable is AutoClip.exe rather than
+    # Python. Route the child process through an explicit worker mode so it
+    # runs Streamlink's CLI instead of starting a second AutoClip instance.
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--streamlink"]
     # last resort: run streamlink's CLI with the SAME packages this script can import
     return [sys.executable, "-c", "from streamlink_cli.main import main; main()"]
 
@@ -1420,6 +1425,10 @@ def open_window(url):
     webbrowser.open(url)
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--streamlink":
+        from streamlink_cli.main import main as streamlink_main
+        streamlink_main()
+        return
     try:
         acquire_instance_lock()
     except RuntimeError as e:

@@ -4,12 +4,18 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import queue
+import threading
 
 
 class AIProviderError(RuntimeError):
     def __init__(self, message, *, quota=False):
         super().__init__(message)
         self.quota = quota
+
+
+class AIAnalysisCancelled(RuntimeError):
+    pass
 
 
 def _json_request(url, payload=None, headers=None, timeout=90):
@@ -33,19 +39,19 @@ def _json_request(url, payload=None, headers=None, timeout=90):
 def ollama_models(base_url="http://127.0.0.1:11434"):
     base = base_url.rstrip("/")
     parsed = urllib.parse.urlparse(base)
-    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
-        raise AIProviderError("Ollama URL must point to this computer (localhost).")
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1", "host.docker.internal"}:
+        raise AIProviderError("Ollama URL must point to this computer (localhost or host.docker.internal in Docker).")
     data = _json_request(base + "/api/tags", timeout=5)
     return [str(model.get("name", "")) for model in data.get("models", []) if model.get("name")]
 
 
 def _transcript(words, duration):
     return "\n".join(f"{max(0, int(start))}s: {text}" for start, _end, text in words
-                     if text and 0 <= float(start) < duration)[:24000]
+                     if text and 0 <= float(start) < duration)
 
 
 def _prompt(words, duration):
-    return ("Find up to 12 short-form video highlights in this timestamped transcript. "
+    return ("Find up to 12 short-form video highlights in this timestamped transcript window. "
             "Favor surprising, funny, emotional, high-energy, or self-contained moments. "
             "Return ONLY JSON: {\"moments\":[{\"time\":seconds,\"score\":0-100,\"reason\":short string}]}. "
             "The time must point inside the moment, not at its start. Do not invent dialogue.\n"
@@ -58,7 +64,10 @@ def _parse_moments(value, duration):
     else:
         moments = value
     if isinstance(moments, str):
-        moments = json.loads(moments)
+        try:
+            moments = json.loads(moments)
+        except json.JSONDecodeError as exc:
+            raise AIProviderError("AI response contained an invalid moments JSON string.") from exc
         return _parse_moments(moments, duration)
     result = []
     if not isinstance(moments, list):
@@ -97,14 +106,14 @@ def _ollama(prompt, config):
     base = config.get("ollama_url", "http://127.0.0.1:11434").rstrip("/")
     result = _json_request(base + "/api/generate", {
         "model": model, "prompt": prompt, "stream": False,
-        "format": "json", "options": {"temperature": 0.2},
+        "format": "json", "options": {"temperature": 0.2, "num_ctx": 8192},
     }, timeout=240)
     return _extract_json(result.get("response", ""))
 
 
 def _gemini(prompt, config):
     key = str(config.get("gemini_api_key", "")).strip()
-    model = str(config.get("gemini_model", "gemini-2.0-flash")).strip()
+    model = str(config.get("gemini_model", "gemini-3.8-flash")).strip()
     if not key:
         raise AIProviderError("Add a Gemini API key in AI settings.")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='.-')}:generateContent"
@@ -120,7 +129,7 @@ def _gemini(prompt, config):
 
 def _huggingface(prompt, config):
     token = str(config.get("huggingface_token", "")).strip()
-    model = str(config.get("huggingface_model", "Qwen/Qwen2.5-7B-Instruct")).strip()
+    model = str(config.get("huggingface_model", "Qwen/Qwen2.5-7B-Instruct-1M")).strip()
     if not token:
         raise AIProviderError("Add a Hugging Face access token in AI settings to use hosted models.")
     data = _json_request("https://router.huggingface.co/v1/chat/completions", {
@@ -133,23 +142,69 @@ def _huggingface(prompt, config):
         raise AIProviderError("Hugging Face returned no highlight response.") from exc
 
 
-def select_moments(provider, words, duration, config, log=lambda _message: None):
-    """Return timestamp/score picks; Gemini quota exhaustion falls back to Ollama."""
+def _call_backend(backend, prompt, config, cancelled):
+    if cancelled is None:
+        return backend(prompt, config)
+    result = queue.Queue(maxsize=1)
+    def run():
+        try: result.put((True, backend(prompt, config)))
+        except Exception as exc: result.put((False, exc))
+    threading.Thread(target=run, daemon=True, name="highlight-ai-request").start()
+    while True:
+        if cancelled():
+            raise AIAnalysisCancelled("AI highlight analysis stopped by user.")
+        try:
+            ok, value = result.get(timeout=0.15)
+            if ok: return value
+            raise value
+        except queue.Empty:
+            continue
+
+
+def select_moments(provider, words, duration, config, log=lambda _message: None, cancelled=None):
+    """Analyze the full transcript in 5-minute windows; Gemini quota falls back to Ollama."""
     if provider == "hooks":
         return None
-    prompt = _prompt(words, duration)
     backend = {"ollama": _ollama, "gemini": _gemini, "huggingface": _huggingface}.get(provider)
     if backend is None:
         raise AIProviderError("Unknown highlight provider.")
-    try:
-        raw = backend(prompt, config)
-    except AIProviderError as exc:
-        if provider != "gemini" or not exc.quota:
-            raise
-        log("Gemini quota/rate limit reached. Checking local Ollama for automatic fallback.")
+    duration = max(0, float(duration))
+    if not duration:
+        return []
+    picks = {}
+    active_provider = provider
+    fell_back = False
+    window_size = 300
+    window_start = 0
+    while window_start < duration:
+        if cancelled and cancelled():
+            raise AIAnalysisCancelled("AI highlight analysis stopped by user.")
+        window_end = min(duration, window_start + window_size)
+        local_words = [(max(0, float(s) - window_start), min(window_end - window_start, float(e) - window_start), text)
+                       for s, e, text in words if window_start <= float(s) < window_end]
+        if not local_words:
+            window_start += window_size
+            continue
+        prompt = _prompt(local_words, window_end - window_start)
+        current_backend = _ollama if active_provider == "ollama" else backend
         try:
-            raw = _ollama(prompt, config)
-        except AIProviderError as fallback_error:
-            raise AIProviderError(f"Gemini quota is exhausted; Ollama fallback failed: {fallback_error}", quota=True) from fallback_error
-        log("Gemini quota reached; highlight analysis completed with Ollama.")
-    return _parse_moments(raw, duration)
+            raw = _call_backend(current_backend, prompt, config, cancelled)
+        except AIProviderError as exc:
+            if active_provider != "gemini" or not exc.quota:
+                raise
+            log("Gemini quota/rate limit reached. Switching remaining transcript windows to local Ollama.")
+            try:
+                raw = _call_backend(_ollama, prompt, config, cancelled)
+            except AIAnalysisCancelled:
+                raise
+            except AIProviderError as fallback_error:
+                raise AIProviderError(f"Gemini quota is exhausted; Ollama fallback failed: {fallback_error}", quota=True) from fallback_error
+            active_provider = "ollama"
+            fell_back = True
+        for second, score in _parse_moments(raw, window_end - window_start):
+            absolute_second = int(window_start + second)
+            picks[absolute_second] = max(picks.get(absolute_second, 0.0), score)
+        window_start += window_size
+    if fell_back:
+        log("Gemini quota reached; remaining transcript windows were analyzed with Ollama.")
+    return sorted(picks.items())

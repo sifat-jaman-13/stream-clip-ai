@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application modules used by optional publishing integrations.
 COPY autoclip.py ai_highlights.py zernio_poster.py selfhost_publishers.py ./
+COPY assets/ ./assets/
 
 RUN mkdir -p /data/out /data/rec
 

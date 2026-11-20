@@ -122,7 +122,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(core.publishing["postiz"]["instagram_id"], "ig-saved")
         self.assertEqual(core.publishing["postiz"]["youtube_id"], "yt-saved")
 
-    def test_render_uses_accurate_output_side_seeking(self):
+    def test_render_uses_frame_accurate_input_seeking_for_captions(self):
         engine = autoclip.Engine(autoclip.clean_cfg({"compute_device": "cpu"}), lambda *_: None)
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -136,8 +136,38 @@ class RegressionTests(unittest.TestCase):
                  patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"):
                 engine.render("input.mp4", 4, 12, [], "clip")
             command = commands[0]
-            self.assertLess(command.index("-i"), command.index("-ss"))
+            self.assertLess(command.index("-ss"), command.index("-i"))
+            self.assertIn("-accurate_seek", command)
             self.assertEqual(command[command.index("-ss") + 1], "4.00")
+
+    @unittest.skipUnless(autoclip.shutil.which("ffmpeg") or autoclip.ffmpeg_exe() != "ffmpeg", "FFmpeg is not installed")
+    def test_render_burns_relative_captions_after_input_seek(self):
+        ffmpeg = autoclip.ffmpeg_exe()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.mp4"
+            output = root / "out"
+            output.mkdir()
+            created = autoclip.run([
+                ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i",
+                "color=c=black:s=320x240:r=25:d=8", "-an", "-c:v", "libx264",
+                "-pix_fmt", "yuv420p", str(source),
+            ], capture_output=True, text=True)
+            self.assertEqual(created.returncode, 0, created.stderr)
+            cfg = autoclip.clean_cfg({"layout": "Fill (crop center)", "output_format": "16:9",
+                                     "compute_device": "cpu", "caption_size": 150,
+                                     "cta_enabled": False, "cta_voice_enabled": False})
+            engine = autoclip.Engine(cfg, lambda *_: None)
+            with patch.object(autoclip, "OUT", output), patch.dict(autoclip.OUTPUT_FORMATS, {"16:9": (320, 240)}):
+                engine.render(source, 5, 8, [(5.1, 6.8, "CAPTION VISIBLE")], "caption-test")
+            visible = autoclip.run([ffmpeg, "-v", "error", "-ss", "0.5", "-i",
+                                    str(output / "caption-test.mp4"), "-vf", "format=gray",
+                                    "-frames:v", "1", "-f", "rawvideo", "-"], capture_output=True)
+            absent = autoclip.run([ffmpeg, "-v", "error", "-ss", "2.5", "-i",
+                                   str(output / "caption-test.mp4"), "-vf", "format=gray",
+                                   "-frames:v", "1", "-f", "rawvideo", "-"], capture_output=True)
+            self.assertGreater(sum(value > 220 for value in visible.stdout), 1000)
+            self.assertLess(sum(value > 220 for value in absent.stdout), 100)
 
     def test_gemini_quota_exhaustion_falls_back_to_ollama(self):
         logs = []
@@ -151,8 +181,49 @@ class RegressionTests(unittest.TestCase):
         with patch.object(ai_highlights, "_gemini", side_effect=ai_highlights.AIProviderError("bad key")), \
              patch.object(ai_highlights, "_ollama") as ollama:
             with self.assertRaisesRegex(ai_highlights.AIProviderError, "bad key"):
-                ai_highlights.select_moments("gemini", [], 60, {})
+                ai_highlights.select_moments("gemini", [(1, 2, "hello")], 60, {})
         ollama.assert_not_called()
+
+    def test_ai_analysis_visits_every_transcript_window_and_offsets_results(self):
+        prompts = []
+        def fake_ollama(prompt, _config):
+            prompts.append(prompt)
+            return {"moments": [{"time": 10, "score": 80}]}
+        words = [(time, time + 1, "highlight") for time in (10, 305, 610)]
+        with patch.object(ai_highlights, "_ollama", side_effect=fake_ollama):
+            moments = ai_highlights.select_moments("ollama", words, 611, {})
+        self.assertEqual(moments, [(10, 80.0), (310, 80.0), (610, 80.0)])
+        self.assertEqual(len(prompts), 3)
+
+    def test_zero_score_threshold_does_not_turn_empty_ai_seconds_into_clips(self):
+        engine = autoclip.Engine(autoclip.clean_cfg({"clips_per_chunk": 0, "min_score": 0}), lambda *_: None)
+        engine.rms_per_second = lambda _path: autoclip.np.ones(120)
+        with patch.object(autoclip, "load_ai_settings", return_value={"provider": "ollama"}), \
+             patch.object(autoclip, "select_moments", return_value=[(35, 80.0)]):
+            picks, duration = engine.find_peaks("clip.mp4", [])
+        self.assertEqual(duration, 120)
+        self.assertEqual(picks, [(35, 80.0)])
+
+    def test_malformed_moments_string_becomes_provider_error(self):
+        with self.assertRaisesRegex(ai_highlights.AIProviderError, "invalid moments JSON"):
+            ai_highlights._parse_moments({"moments": "not json"}, 100)
+
+    def test_ollama_requests_receive_a_context_window(self):
+        with patch.object(ai_highlights, "ollama_models", return_value=["test-model"]), \
+             patch.object(ai_highlights, "_json_request", return_value={"response": '{"moments":[]}'}) as request:
+            ai_highlights._ollama("prompt", {"ollama_model": "test-model"})
+        self.assertEqual(request.call_args.args[1]["options"]["num_ctx"], 8192)
+
+    def test_ai_backend_calls_can_be_cancelled(self):
+        cancel = __import__("threading").Event()
+        timer = __import__("threading").Timer(0.05, cancel.set)
+        timer.start()
+        try:
+            with patch.object(ai_highlights, "_ollama", side_effect=lambda *_: __import__("time").sleep(2)):
+                with self.assertRaises(ai_highlights.AIAnalysisCancelled):
+                    ai_highlights.select_moments("ollama", [(1, 2, "hello")], 60, {}, cancelled=cancel.is_set)
+        finally:
+            timer.cancel()
 
     def test_ollama_detection_rejects_nonlocal_hosts(self):
         with self.assertRaisesRegex(ai_highlights.AIProviderError, "localhost"):

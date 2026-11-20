@@ -83,9 +83,10 @@ Plan for approximately **4–6 GB** for the complete first-time installation. `m
 can use additional model storage. FFmpeg is not downloaded by the installer; install FFmpeg separately
 and place it on PATH. CPU mode remains available when CUDA is unavailable.
 
-Docker Compose exposes the UI at [http://localhost:8080](http://localhost:8080). Persistent settings,
+Docker Compose exposes the UI only on this computer at [http://localhost:8080](http://localhost:8080). Persistent settings,
 custom words, clips, and recordings are stored under `./data` on the host; place a source video at
-`./data/rec` to process it from the container.
+`./data/rec` to process it from the container. For Ollama on the host, enable host access in Ollama and
+use the prefilled `host.docker.internal` address in AI settings.
 
 ## Manual installation
 

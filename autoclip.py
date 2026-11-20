@@ -25,8 +25,8 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-from ai_highlights import AIProviderError, ollama_models, select_moments
-APP_VERSION = "1.1.6"
+from ai_highlights import AIAnalysisCancelled, AIProviderError, ollama_models, select_moments
+APP_VERSION = "1.1.7"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -368,7 +368,7 @@ def save_publishing_settings(cfg):
     PUBLISHING_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 def load_ai_settings():
-    defaults = {"provider": "hooks", "ollama_url": "http://127.0.0.1:11434", "ollama_model": "",
+    defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
                 "gemini_model": "gemini-3.8-flash", "huggingface_model": "Qwen/Qwen2.5-7B-Instruct-1M",
                 "gemini_api_key": "", "huggingface_token": ""}
     try:
@@ -726,6 +726,7 @@ class Engine:
     def __init__(self, cfg, emit):
         self.cfg, self.emit = cfg, emit
         self.stop_flag = self.abort = False
+        self.ai_cancel = threading.Event()
         self.procs = []
         self.seg_seconds = int(cfg["chunk_min"]) * 60
 
@@ -735,6 +736,7 @@ class Engine:
     def stop(self, force=False):
         """Live: graceful (finish what is recorded) unless force. File: always immediate."""
         self.stop_flag = True
+        self.ai_cancel.set()
         if force or self.cfg["mode"] != "live":
             self.abort = True
         for p in list(self.procs):
@@ -848,7 +850,7 @@ class Engine:
         if provider != "hooks":
             self.status(f"Finding viral moments with {provider.title()}...", "transcribing", 100)
             try:
-                ai_picks = select_moments(provider, words, n, ai_cfg, self.log)
+                ai_picks = select_moments(provider, words, n, ai_cfg, self.log, self.ai_cancel.is_set)
                 if ai_picks:
                     ai_score = np.zeros(n, dtype=float)
                     for second, value in ai_picks:
@@ -858,8 +860,12 @@ class Engine:
                     self.log(f"{provider.title()} identified {len(ai_picks)} transcript highlights.")
                 else:
                     self.log(f"{provider.title()} found no moments; using hook-word and audio scoring.")
+            except AIAnalysisCancelled:
+                raise Stopped()
             except AIProviderError as exc:
                 self.log(f"{provider.title()} highlight analysis failed: {exc}. Using hook-word and audio scoring.")
+            except Exception as exc:
+                self.log(f"{provider.title()} returned an invalid response: {exc}. Using hook-word and audio scoring.")
         self.best_score = float(score.max())
         requested = int(self.cfg["clips_per_chunk"])
         # Zero means unlimited: keep selecting non-overlapping moments while they
@@ -868,7 +874,7 @@ class Engine:
         picks, s = [], score.copy()
         while n_clips is None or len(picks) < n_clips:
             i = int(s.argmax())
-            if s[i] < float(self.cfg["min_score"]):
+            if s[i] < float(self.cfg["min_score"]) or s[i] <= 0:
                 break
             picks.append((i, float(s[i])))
             s[max(0, i - 40): i + 40] = -99          # never pick overlapping moments
@@ -907,8 +913,9 @@ class Engine:
         enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if cfg.get("compute_device", "gpu") == "gpu" and has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
         tmp = f"{name}.tmp.mp4"
-        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", str(pathlib.Path(src).resolve()),
-               "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}", "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
+        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-ss", f"{start:.2f}", "-accurate_seek",
+               "-t", f"{end - start:.2f}", "-i", str(pathlib.Path(src).resolve()),
+               "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
                *enc, "-pix_fmt", "yuv420p", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
                "-c:a", "aac", "-b:a", "160k", "-r", "30", "-movflags", "+faststart", tmp]
         r = run(cmd, cwd=OUT, capture_output=True, text=True)
@@ -2038,7 +2045,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="8000" max="50000" step="500" value="8000">
     <p class="hint">Captures at 1080p when the source provides it, falls back to 720p, and records at least 8,000 kbps. Source streams below 1080p cannot be upscaled into real detail.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.1.6. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.1.7. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>

@@ -4,9 +4,13 @@ services:
     image: stream-clip-ai:latest
     container_name: streamclipai
     ports:
-      - "8080:8080"      # Web UI  →  open http://localhost:8080 in your browser
+      - "127.0.0.1:8080:8080"  # Keep the local app private to this computer.
     volumes:
       - ./data:/data           # settings, custom words, clips, and recordings
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      STREAMSNIP_OLLAMA_URL: http://host.docker.internal:11434
     restart: unless-stopped
     # Uncomment for headless live-stream mode (no web UI):
     # command: ["live", "https://www.twitch.tv/your_channel"]

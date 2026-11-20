@@ -23,7 +23,7 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -204,7 +204,7 @@ CAPTION_COLORS = {"Yellow": "00FFFF", "Green": "00FF00", "Cyan": "FFFF00", "Oran
 CAPTION_POS = {"Lower third": 520, "Middle": 800, "Low": 380}      # MarginV (px from bottom of 1920)
 LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)", "Selected crop"]
 OUTPUT_FORMATS = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080), "4:5": (1080, 1350)}
-MODELS = ["distil-large-v3", "large-v3-turbo", "small", "base"]
+MODELS = ["distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base"]
 STREAM_QUALITY = "1080p60,1080p,720p60,720p,best"
 SUBTITLE_MODES = ["Karaoke", "Classic"]
 SUBTITLE_STYLES = ["Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"]
@@ -1814,7 +1814,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <select id="compute-device" class="text"><option value="gpu">GPU — CUDA speech + NVENC rendering</option><option value="cpu">CPU — INT8 speech + software rendering</option></select>
     <p class="hint">GPU mode is recommended for an NVIDIA RTX 3060 Ti. If CUDA or NVENC is unavailable, the app logs the fallback.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.0.4. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.0.5. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -1998,7 +1998,7 @@ $$(".seg[data-key]").forEach(sg=>{
 const sw=$("#sw");
 Object.entries(BOOT.colors).forEach(([name,css])=>{sw.append(h("button",{title:name,style:"background:"+css,"data-v":name,onclick:()=>{S.color=name;paintSw();preview();scheduleSave()}}))});
 function paintSw(){$$("button",sw).forEach(b=>b.classList.toggle("on",b.dataset.v===S.color))}paintSw();
-BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large-v3"?"distil-large-v3 (fast, English)":m==="large-v3-turbo"?"large-v3-turbo (any language)":m==="small"?"small (light)":"base (lightest)")));
+BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large-v3"?"distil-large-v3 (fast, English)":m==="large-v3-turbo"?"large-v3-turbo (fast, any language)":m==="medium"?"medium (balanced)":m==="large-v3"?"large-v3 (highest accuracy)":m==="small"?"small (light)":"base (lightest)")));
 $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.target.value;scheduleSave()});
 $("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}function resetCropForFormat(){const r=({"9:16":9/16,"16:9":16/9,"1:1":1,"4:5":4/5}[S.output_format]||9/16),w=Math.min(100,100*r/(16/9));S.crop_w=+w.toFixed(1);S.crop_h=100;S.crop_x=+( (100-w)/2 ).toFixed(1);S.crop_y=0}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;resetCropForFormat();updateFormatUI();preview();scheduleSave()});updateFormatUI();
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});

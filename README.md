@@ -3,8 +3,8 @@
 > Turn Twitch and YouTube streams—or local video files—into captioned, social-ready clips on your own machine.
 
 [![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
-[![Windows installer](https://img.shields.io/badge/download-Windows%20installer-e94560?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-Setup.exe)
-[![Portable ZIP](https://img.shields.io/badge/download-portable%20ZIP-7c3aed?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-portable.zip)
+[![Windows installer](https://img.shields.io/badge/download-Windows%20installer-e94560?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe)
+[![Portable ZIP](https://img.shields.io/badge/download-portable%20ZIP-7c3aed?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-portable.zip)
 [![Native edition](https://img.shields.io/badge/download-StreamSnip%20Native-DEA584?logo=rust)](https://github.com/sifat-jaman-13/stream-clip-ai-rust/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -20,8 +20,8 @@
 
 | Option | Use it when | Link |
 |---|---|---|
-| **Windows installer** | Start Menu/desktop shortcuts and bundled runtime | [Download installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-Setup.exe) |
-| **Portable Windows** | Extract and run from a folder or USB drive | [Download portable ZIP](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/AutoClip-portable.zip) |
+| **Windows installer** | Start Menu/desktop shortcuts and bundled runtime | [Download installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe) |
+| **Portable Windows** | Extract and run from a folder or USB drive | [Download portable ZIP](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-portable.zip) |
 | **Manual terminal** | Full control over Python, FFmpeg, CUDA, and dependencies | Follow the source setup below |
 | **StreamSnip Native** | Rust launcher installer for Windows | [Open Native Edition](https://github.com/sifat-jaman-13/stream-clip-ai-rust) |
 
@@ -175,7 +175,7 @@ powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 ~~~
 
 The script creates a console-enabled PyInstaller one-folder build, bundles FFmpeg when found, creates
-dist\AutoClip-portable.zip, and compiles dist\installer\AutoClip-Setup.exe when Inno Setup 6 is
+dist\StreamSnipAI-portable.zip, and compiles dist\installer\StreamSnipAI-Setup.exe when Inno Setup 6 is
 installed. Installer metadata is StreamSnip AI 1.0.1 by ScarZero.
 
 ## Troubleshooting

@@ -38,7 +38,7 @@ if ($ffmpeg) {
 }
 
 Copy-Item README.md "dist\AutoClip\README.md" -Force
-Compress-Archive -Path "dist\AutoClip\*" -DestinationPath "dist\AutoClip-portable.zip" -Force
+Compress-Archive -Path "dist\AutoClip\*" -DestinationPath "dist\StreamSnipAI-portable.zip" -Force
 
 $iscc = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
@@ -52,4 +52,4 @@ if ($iscc) {
 } else {
     Write-Warning "Inno Setup is not installed; portable ZIP is ready, but no installer EXE was created."
 }
-Write-Host "Portable build: dist\AutoClip-portable.zip" -ForegroundColor Green
+Write-Host "Portable build: dist\StreamSnipAI-portable.zip" -ForegroundColor Green

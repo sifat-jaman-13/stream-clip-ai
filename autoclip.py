@@ -23,7 +23,7 @@ import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
 import numpy as np
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -134,7 +134,14 @@ def update_components():
     model = str(load_settings().get("model", "distil-large-v3"))
     try:
         from faster_whisper import WhisperModel
-        WhisperModel(model, device="cpu", compute_type="int8")
+        device = str(load_settings().get("compute_device", "gpu"))
+        if device == "gpu":
+            try:
+                WhisperModel(model, device="cuda", compute_type="float16")
+            except Exception:
+                WhisperModel(model, device="cpu", compute_type="int8")
+        else:
+            WhisperModel(model, device="cpu", compute_type="int8")
         model_status = model + " ready"
     except Exception as e:
         model_status = model + " download deferred: " + str(e)[:180]
@@ -171,7 +178,7 @@ DEFAULTS = {
     "mode": "live", "target": "",
     "rec_dir": "", "out_dir": "",
     "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 70,
-    "model": "distil-large-v3",
+    "model": "distil-large-v3", "compute_device": "gpu",
     "color": "Yellow", "position": "Lower third", "caption_size": 100, "words_per_line": 3, "font": "Impact",
     "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "Classic",
     "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
@@ -215,6 +222,7 @@ def clean_cfg(raw):
     for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x", "crop_x", "crop_y", "crop_w", "crop_h"): c[k] = round(c[k], 1)
     if raw.get("mode") in ("live", "file"): c["mode"] = raw["mode"]
     c["target"] = str(raw.get("target", "")).strip()[:1000]
+    c["compute_device"] = "cpu" if raw.get("compute_device") == "cpu" else "gpu"
     for k, opts in (("color", CAPTION_COLORS), ("position", CAPTION_POS), ("layout", LAYOUTS),
                     ("output_format", OUTPUT_FORMATS), ("model", MODELS)):
         if raw.get(k) in opts: c[k] = raw[k]
@@ -616,22 +624,25 @@ class Engine:
     # ---- transcription
     def get_model(self, name):
         global _model, _model_key
-        if _model is not None and _model_key == name:
+        device = self.cfg.get("compute_device", "gpu")
+        cache_key = (name, device)
+        if _model is not None and _model_key == cache_key:
             return _model
         try:
             from faster_whisper import WhisperModel
         except ImportError:
             raise RuntimeError("faster-whisper isn't installed. Run:  pip install --only-binary=:all: faster-whisper")
         self.status(f"Loading speech model '{name}' (first run downloads it)...", "transcribing")
-        for ct in ("float16", "int8_float16"):
-            try:
-                _model = WhisperModel(name, device="cuda", compute_type=ct); _model_key = name
-                self.log(f"Speech model ready on GPU ({ct}).")
-                return _model
-            except Exception as e:
-                self.log(f"GPU load failed ({ct}): {e}")
-        _model = WhisperModel("small", device="cpu", compute_type="int8"); _model_key = name
-        self.log("Using CPU for speech (slower).")
+        if device == "gpu":
+            for ct in ("float16", "int8_float16"):
+                try:
+                    _model = WhisperModel(name, device="cuda", compute_type=ct); _model_key = cache_key
+                    self.log(f"Speech model ready on GPU ({ct}).")
+                    return _model
+                except Exception as e:
+                    self.log(f"GPU load failed ({ct}): {e}")
+        _model = WhisperModel(name, device="cpu", compute_type="int8"); _model_key = (name, "cpu")
+        self.log("Speech model ready on CPU (INT8).")
         return _model
 
     def load_audio(self, path):
@@ -667,7 +678,7 @@ class Engine:
                 if attempt == 0 and any(k in str(e).lower() for k in ("cublas", "cuda", "dll", "cudnn")):
                     from faster_whisper import WhisperModel
                     self.log(f"GPU error ({e}) - falling back to CPU.")
-                    _model = WhisperModel("small", device="cpu", compute_type="int8"); _model_key = self.cfg["model"]
+                    _model = WhisperModel(self.cfg["model"], device="cpu", compute_type="int8"); _model_key = (self.cfg["model"], "cpu")
                     continue
                 raise
         return []
@@ -751,7 +762,7 @@ class Engine:
                 crop = ""
             vf = (f"[0:v]{crop}scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
                   f"setsar=1,subtitles={name}.ass[v]")
-        enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if has_nvenc()
+        enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if cfg.get("compute_device", "gpu") == "gpu" and has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
         tmp = f"{name}.tmp.mp4"
         cmd = [ffmpeg_exe(), "-y", "-v", "error", "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}",
@@ -1785,8 +1796,11 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="folder-pick"><input id="rec-dir" class="text" type="text" placeholder="Default: app folder\rec"><button class="btn ghost" id="rec-dir-browse">Browse</button></div>
     <div class="row"><label>Output / clips folder</label></div>
     <div class="folder-pick"><input id="out-dir" class="text" type="text" placeholder="Default: app folder\out"><button class="btn ghost" id="out-dir-browse">Browse</button></div>
+    <div class="row"><label>Processing hardware</label></div>
+    <select id="compute-device" class="text"><option value="gpu">GPU — CUDA speech + NVENC rendering</option><option value="cpu">CPU — INT8 speech + software rendering</option></select>
+    <p class="hint">GPU mode is recommended for an NVIDIA RTX 3060 Ti. If CUDA or NVENC is unavailable, the app logs the fallback.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.0.1. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.0.2. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -1853,7 +1867,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 </div>
 <div class="overlay" id="settings-overlay" hidden>
  <div class="settings-dialog">
-  <div class="settings-head"><div><h2>App settings</h2><p>Configure clipping defaults and Zernio publishing.</p></div><button class="btn ghost" id="btn-settings-close">Close</button></div>
+  <div class="settings-head"><div><h2>App settings</h2><p>Configure clipping defaults and Zernio publishing.</p></div><div class="prow"><button class="btn ghost" id="btn-settings-save">Save settings</button><button class="btn ghost" id="btn-settings-close">Close</button></div></div>
   <div id="settings-slot"></div>
  </div>
 </div>
@@ -1939,6 +1953,9 @@ function wireFolderPicker(inputId,buttonId,key){
 }
 wireFolderPicker("#rec-dir","#rec-dir-browse","rec_dir");
 wireFolderPicker("#out-dir","#out-dir-browse","out_dir");
+$("#compute-device").value=S.compute_device||"gpu";
+$("#compute-device").addEventListener("change",e=>{S.compute_device=e.target.value;scheduleSave()});
+$("#btn-settings-save").onclick=async()=>{const b=$("#btn-settings-save");b.disabled=true;try{await api("/api/settings",S);toast("Settings saved","ok")}catch(e){toast(e.message,"bad")}b.disabled=false};
 $("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?" — "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
 $("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new AutoClip version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
 $("#btn-update-components").onclick=async()=>{if(!(await confirmBox("Update components?","This updates Python packages and downloads the selected speech model. FFmpeg is bundled into the next installer build.","Update")))return;const b=$("#btn-update-components");b.disabled=true;$("#updates-msg").textContent="Updating...";try{const r=await api("/api/update_components");$("#updates-msg").textContent=r.message;toast("Components updated","ok")}catch(e){$("#updates-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};

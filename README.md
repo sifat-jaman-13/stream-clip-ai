@@ -50,6 +50,7 @@ Native install:
 - FFmpeg on PATH
 - Streamlink for live Twitch/YouTube sources
 - NVIDIA CUDA hardware is optional; CPU fallback is supported
+- In Settings, choose GPU for CUDA speech + NVENC rendering or CPU for INT8 speech + software rendering, then click Save settings. An RTX 3060 Ti is supported.
 
 Docker files are included. The current app binds its UI to a local ephemeral port and prints that port
 at startup; use Docker as a packaging/headless starting point, or adapt the bind/port setup when you
@@ -176,7 +177,7 @@ powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
 
 The script creates a console-enabled PyInstaller one-folder build, bundles FFmpeg when found, creates
 dist\StreamSnipAI-portable.zip, and compiles dist\installer\StreamSnipAI-Setup.exe when Inno Setup 6 is
-installed. Installer metadata is StreamSnip AI 1.0.1 by ScarZero.
+installed. Installer metadata is StreamSnip AI 1.0.2 by ScarZero.
 
 ## Troubleshooting
 

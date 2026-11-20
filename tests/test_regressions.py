@@ -618,6 +618,27 @@ class RegressionTests(unittest.TestCase):
             self.assertNotIn("secret", str(saved))
             self.assertIn("secret", stored)
 
+    def test_ai_settings_can_clear_saved_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                autoclip.save_ai_settings({
+                    "provider": "gemini",
+                    "gemini_api_key": "gemini-secret",
+                    "huggingface_token": "hf-secret",
+                })
+                cleared = autoclip.save_ai_settings({
+                    "clear_gemini_key": True,
+                    "clear_huggingface_token": True,
+                })
+                stored = path.read_text(encoding="utf-8")
+            self.assertFalse(cleared["gemini_key_set"])
+            self.assertFalse(cleared["huggingface_token_set"])
+            self.assertNotIn("gemini-secret", stored)
+            self.assertNotIn("hf-secret", stored)
+            self.assertNotEqual(__import__("os").environ.get("HF_TOKEN"), "hf-secret")
+            self.assertNotEqual(__import__("os").environ.get("HUGGING_FACE_HUB_TOKEN"), "hf-secret")
+
     def test_newer_installed_version_is_not_reported_as_outdated(self):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = b'{"tag_name":"v1.1.5"}'
@@ -669,7 +690,7 @@ class RegressionTests(unittest.TestCase):
             ffmpeg = ffmpeg_dir / ("ffmpeg.exe" if autoclip.os.name == "nt" else "ffmpeg")
             ffmpeg.touch()
             with patch.object(autoclip, "HERE", internal), patch.object(
-                autoclip.sys, "executable", str(root / ("AutoClip.exe" if autoclip.os.name == "nt" else "AutoClip"))
+                autoclip.sys, "executable", str(root / ("StreamSnipAI.exe" if autoclip.os.name == "nt" else "StreamSnipAI"))
             ):
                 self.assertEqual(autoclip.ffmpeg_exe(), str(ffmpeg))
 
@@ -681,6 +702,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('api("/api/quit")', autoclip.HTML)
         self.assertIn('const center=h("button",{class:"btn ghost"},"Center segment")', autoclip.HTML)
         self.assertIn('id="ai-test-provider"', autoclip.HTML)
+        self.assertIn('id="gemini-key-clear"', autoclip.HTML)
+        self.assertIn('id="hf-token-clear"', autoclip.HTML)
 
     def test_window_reload_cancels_pending_close_shutdown(self):
         timer = MagicMock()

@@ -1,7 +1,7 @@
-"""Optional Zernio publisher for finished AutoClip videos.
+"""Optional Zernio publisher for finished StreamSnip AI clips.
 
-Credentials and account IDs come from environment variables so they never
-need to be stored in settings.json or committed to the repository.
+Credentials and account IDs can come from the app's ignored local publishing
+settings or environment variables. They must never be logged or committed.
 """
 import datetime as _dt
 import json
@@ -57,7 +57,7 @@ class ZernioPublisher:
         return {
             "Authorization": "Bearer " + self.api_key,
             "Content-Type": content_type,
-            "User-Agent": "StreamClipAI/1.0",
+            "User-Agent": "StreamSnipAI/1.2",
         }
 
     def _json_request(self, method, url, body=None):
@@ -157,7 +157,7 @@ class ZernioPublisher:
             caption_path = path.with_suffix(".txt")
             caption = caption_path.read_text(encoding="utf-8", errors="replace").strip() if caption_path.is_file() else ""
             lines = [line.strip() for line in caption.splitlines() if line.strip()]
-            title = (lines[0] if lines else path.stem).replace("#", "").strip()[:100] or "AutoClip Short"
+            title = (lines[0] if lines else path.stem).replace("#", "").strip()[:100] or "StreamSnip Clip"
             content = caption[:2200] or title
             platforms = []
             if self.instagram_id:

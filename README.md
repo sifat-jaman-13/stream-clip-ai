@@ -2,142 +2,297 @@
   <img src="assets/brand-logo.png" alt="StreamSnip AI" width="760">
 </p>
 
-# StreamSnip AI
+<h1 align="center">StreamSnip AI</h1>
 
-StreamSnip AI turns Twitch and YouTube live streams or local video files into captioned short-form clips. Processing, transcription, rendering, settings, and generated clips stay local. Zernio is the supported publishing integration.
+<p align="center">
+  A local-first stream clipper for turning Twitch, YouTube, and video files into captioned clips for Shorts, Reels, TikTok, and YouTube.
+</p>
 
-[![Windows installer](https://img.shields.io/badge/download-Windows%20setup-e94560?logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe)
-[![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/sifat-jaman-13/stream-clip-ai)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+<p align="center">
+  <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sifat-jaman-13/stream-clip-ai?display_name=tag&sort=semver"></a>
+  <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe"><img alt="Windows installer" src="https://img.shields.io/badge/download-Windows%20installer-7c3aed?logo=windows"></a>
+  <a href="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-22c55e"></a>
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white">
+</p>
 
-## Download for Windows
+StreamSnip AI records supported live streams or reads local video files, transcribes speech with faster-whisper, finds promising moments, and renders share-ready clips with FFmpeg. The default hook-word workflow runs locally and requires no cloud API key. Ollama provides optional local AI analysis; Gemini and Hugging Face are optional hosted providers.
 
-Download **StreamSnipAI-Setup.exe** from the [latest GitHub release](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest).
+> [!IMPORTANT]
+> StreamSnip AI is local-first, not fully offline. Live-stream capture, first-time dependency/model downloads, hosted AI providers, update checks, and Zernio publishing require internet access.
 
-The installer packages only:
+## At a glance
 
-- a lightweight `StreamSnipAI.exe` launcher;
-- the StreamSnip AI source modules;
-- the icon and README;
-- a setup script that opens a Windows terminal and installs runtime dependencies.
+| Area | Support |
+|---|---|
+| Sources | Twitch live, YouTube live, and FFmpeg-supported local video/VOD files |
+| Transcription | Local faster-whisper models with word timestamps |
+| Highlight detection | Hook words, Ollama, Gemini, or Hugging Face |
+| Rendering | FFmpeg with automatic CUDA/NVENC use when supported |
+| Formats | 9:16, 16:9, 1:1, and 4:5 |
+| Captions | Karaoke/classic modes, presets, colors, fonts, position, and size controls |
+| Publishing | Manual or optional automatic publishing through Zernio |
+| Deployment | Windows installer, Python source, headless CLI, or Docker Compose |
 
-On first setup, the script:
+## How it works
 
-1. detects a supported 64-bit Python 3.10-3.12 installation;
-2. installs Python 3.12 with `winget` when a supported Python is missing;
-3. creates an isolated runtime inside the application folder;
-4. installs the packages from `requirements.txt` into that runtime;
-5. installs FFmpeg with `winget` when FFmpeg is missing;
-6. launches StreamSnip AI and records setup details in `%LOCALAPPDATA%\StreamSnip AI\setup.log`.
+1. **Capture or import** a Twitch/YouTube stream or local video.
+2. **Transcribe locally** with faster-whisper.
+3. **Score moments** with hook words or a selected AI provider.
+4. **Select bounded clips** around the strongest non-overlapping moments.
+5. **Render locally** with captions, layout, creator credit, and an optional CTA.
+6. **Review and publish** from the local gallery or send selected clips to Zernio.
 
-Later launches reuse the isolated runtime and do not reinstall unchanged dependencies.
+Recordings, settings, transcription, rendering, and generated clips remain on the machine unless a hosted AI or publishing feature is explicitly used.
 
-Internet access is required for the initial dependency and speech-model downloads. Keep the setup terminal open until installation finishes.
+## Install on Windows
 
-## Features
+Download **`StreamSnipAI-Setup.exe`** from the [latest release](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) or use the [direct installer link](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe).
 
-- Record supported Twitch and YouTube live streams.
-- Wait for an offline stream and begin recording when it goes live.
-- Process MP4, MKV, TS, FLV, and other FFmpeg-supported video files.
-- Transcribe speech locally with faster-whisper.
-- Choose built-in hook-word scoring or optional Ollama, Gemini, or Hugging Face analysis.
-- Test Ollama, Gemini, or Hugging Face directly from the AI card before processing a video.
-- Retry each available Gemini text model three times before falling back to local Ollama after retryable API failures.
-- Render 9:16, 16:9, 1:1, and 4:5 clips.
-- Add karaoke or classic captions, streamer credit, end cards, and optional voice CTA.
-- Preview, download, copy captions, reveal folders, select, publish, or delete clips.
-- Publish manually or enable automatic posting through Zernio.
-- Quit from the header or close the app window to stop recording, rendering, the local server, and all app child processes.
-
-## Run from source
-
-Install Python 3.10 or later and FFmpeg, then open PowerShell in the repository:
+The release also includes **`StreamSnipAI-Setup.exe.sha256`** so the installer can be verified:
 
 ```powershell
-py -3.12 -m venv venv
-.\venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-pip install -e ".[live]"
-python autoclip.py
+Get-FileHash .\StreamSnipAI-Setup.exe -Algorithm SHA256
+Get-Content .\StreamSnipAI-Setup.exe.sha256
 ```
 
-The web interface is available only on loopback at `http://127.0.0.1:8080` by default.
+The installer is currently unsigned, so Windows SmartScreen may display a warning. Download installers only from this repository's official Releases page.
 
-```bash
-python autoclip.py live https://www.twitch.tv/your_channel
-python autoclip.py live https://www.youtube.com/@channel
-python autoclip.py file /path/to/recording.mp4
-```
+### What first-time setup does
 
-The package also provides `autoclip` and `streamclip` commands.
+The lightweight installer:
+
+1. detects 64-bit Python 3.10, 3.11, or 3.12;
+2. installs Python 3.12 with WinGet if no supported Python is available;
+3. creates an isolated runtime inside the StreamSnip AI installation folder;
+4. installs the pinned/runtime dependencies from `requirements.txt`;
+5. installs FFmpeg with WinGet when FFmpeg is missing;
+6. launches the local app and writes setup diagnostics to `%LOCALAPPDATA%\StreamSnip AI\setup.log`.
+
+Later launches reuse the isolated runtime. Reinstalling a newer version over the existing installation preserves local settings and updates the packaged source files.
+
+## Quick start
+
+1. Open StreamSnip AI.
+2. Choose **Live stream** or **Video file / VOD**.
+3. Paste a supported URL or browse to a local video.
+4. Choose a highlight engine. **Hook words** is the offline default.
+5. Configure clip score, duration, captions, format, layout, credit, and CTA.
+6. Select **Start clipping**.
+7. Review finished clips in the gallery, copy captions, download files, reveal them in Explorer, or publish selected clips.
+
+Use **Stop & finish clips** to finish already captured live content, **Stop now** for an immediate stop, and **Quit** (or close the app window) to terminate the local server and all app-owned child processes.
+
+## Highlight engines
+
+| Engine | Runs where | Credential | Behavior |
+|---|---|---|---|
+| Hook words | Local | None | Default scoring using built-in and user-defined words/phrases |
+| Ollama | Local | None | Uses a model already installed in the local Ollama service |
+| Gemini | Google-hosted | Gemini API key | Sends transcript windows to Gemini; hosted quota and limits apply |
+| Hugging Face | Hosted inference providers | Hugging Face token | Sends transcript windows to the selected hosted model; provider credits may apply |
+
+Whisper transcription is separate from highlight analysis and stays local. The **Test connection** button makes a minimal authenticated inference request without returning stored credentials to the browser.
+
+Create or revoke Hugging Face tokens at <https://huggingface.co/settings/tokens>. Use the minimum permissions needed for Inference Providers/model downloads, then save the replacement token in the AI card and run **Test connection**.
+
+Gemini currently prefers `gemini-3.8-flash`. On retryable model/API failures, StreamSnip AI discovers every usable Gemini text model exposed by the key and tries each model three times before falling back to local Ollama. This resilience can make many hosted requests and consume quota when a provider is degraded.
+
+## Captions, layouts, and output
+
+- Output ratios: **9:16**, **16:9**, **1:1**, and **4:5**.
+- Portrait layouts: facecam + gameplay, blurred background, center fill, or a selected crop.
+- Captions: karaoke or classic timing with Classic, Hormozi, Neon, MrBeast, Minimal, and Fire presets.
+- Customization: highlight color, font, words per line, font size, vertical position, text/stroke colors, and alignment.
+- Branding: automatic streamer credit, optional custom credit, end-card CTA, and optional Windows voice CTA.
+- Output: an `.mp4` clip plus a matching `.txt` caption/hashtag file.
 
 ## Zernio publishing
 
-Zernio is the only supported posting provider.
+Zernio is the supported posting integration.
 
-1. Create a Zernio API key.
-2. Open **Settings -> Publishing**.
-3. Select **Zernio hosted**.
-4. Enter the API key and save.
-5. Click **Save & identify channels**.
-6. Select a connected Instagram or YouTube account.
-7. Save the publishing settings.
+1. Create a Zernio API key and connect the intended Instagram/YouTube accounts in Zernio.
+2. Open **Settings** in StreamSnip AI.
+3. Under **Publishing provider**, enter the API key.
+4. Select **Save & identify channels**.
+5. Choose the connected Instagram and/or YouTube account.
+6. Set scheduling delay, YouTube visibility, and optional auto-post behavior.
 
-Auto-post is off by default. When enabled, each newly rendered clip is submitted to the selected Zernio accounts.
+Auto-post is disabled by default. Manual publishing is available for one clip, selected clips, or all clips. Zernio API access, account permissions, platform policies, quotas, and service limits apply.
 
-Manual publishing is available for selected clips or all clips. Zernio's API access, account permissions, platform rules, quotas, and service limits apply.
+## Data, credentials, and privacy
 
-Credentials are stored locally in `publishing.json` and `zernio.json`. These files are ignored by Git and must not be shared or committed.
+| Deployment | Default data location |
+|---|---|
+| Windows installer | The installed app's `source` folder, with user-selected recording/output folders supported |
+| Source checkout | The repository folder unless `STREAMSNIP_DATA_DIR` is set |
+| Docker Compose | `./data` on the host, mounted as `/data` in the container |
+
+Local runtime files include:
+
+- `settings.json` — clipping and rendering settings;
+- `ai_settings.json` — AI provider selection and saved hosted credentials;
+- `publishing.json` / `zernio.json` — publishing credentials and account selections;
+- `custom_words.txt` — custom hook words and weights;
+- `rec/` and `out/` — recordings and generated clips unless custom folders are selected.
+
+These paths are ignored by Git. Never commit, attach, or publicly share them. Rotate a credential immediately if it appears in logs, screenshots, exported sessions, or support diagnostics.
+
+Use **Clear saved key** / **Clear saved token** in the AI card to remove hosted AI credentials from the current installation before replacing or retiring them.
+
+Network behavior:
+
+- Twitch/YouTube URLs are accessed by Streamlink during live capture.
+- Speech models and packages are downloaded on first use/setup.
+- Gemini/Hugging Face receive transcript text only when selected.
+- Zernio receives selected video/caption data only when publishing is requested or auto-post is enabled.
+- GitHub and PyPI are contacted by explicit update checks.
+
+The web UI binds to loopback by default and uses a per-process token for state-changing requests. Docker Compose publishes port 8080 to `127.0.0.1` only.
+
+## Run from source
+
+### Requirements
+
+- Python 3.10 or newer (Python 3.12 is the recommended/tested Windows runtime)
+- FFmpeg available on `PATH`
+- Internet access for initial package and speech-model downloads
+- Optional: NVIDIA CUDA support for faster transcription/rendering
+- Optional: Ollama for local LLM-based highlight selection
+
+### PowerShell
+
+```powershell
+git clone https://github.com/sifat-jaman-13/stream-clip-ai.git
+cd stream-clip-ai
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python autoclip.py
+```
+
+The desktop-style web window opens automatically. Source mode chooses an available loopback port by default and prints the exact URL in the terminal. To request a fixed port:
+
+```powershell
+$env:STREAMSNIP_PORT = "8080"
+python autoclip.py
+```
+
+### Headless CLI
+
+```bash
+python autoclip.py live https://www.twitch.tv/your_channel
+python autoclip.py live https://www.youtube.com/@your_channel
+python autoclip.py file /path/to/recording.mp4
+```
+
+Installing the project with `pip install -e .` also provides the `autoclip` and `streamclip` commands. Install the `live` extra for Streamlink or `all` for Streamlink plus the Windows CUDA runtime:
+
+```bash
+python -m pip install -e ".[live]"
+```
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `STREAMSNIP_DATA_DIR` | Override the runtime settings/recording/output root |
+| `STREAMSNIP_BIND_HOST` | HTTP bind address; defaults to `127.0.0.1` |
+| `STREAMSNIP_PORT` | HTTP port; defaults to an available port in desktop/source mode |
+| `STREAMSNIP_OLLAMA_URL` | Ollama endpoint; local addresses only |
+| `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | Optional Hugging Face credential and authenticated model downloads |
+| `ZERNIO_API_KEY` | Optional Zernio API key |
+| `ZERNIO_INSTAGRAM_ACCOUNT_ID` | Optional default Instagram account ID |
+| `ZERNIO_YOUTUBE_ACCOUNT_ID` | Optional default YouTube account ID |
+| `ZERNIO_ENABLED` | Enable environment-configured automatic publishing |
+| `ZERNIO_SCHEDULE_MINUTES` | Default publishing delay |
+| `ZERNIO_YOUTUBE_VISIBILITY` | `public`, `unlisted`, or `private` |
 
 ## Docker
 
-Docker Compose binds the app to the local computer only:
+Docker Compose builds the app and exposes it only on the local machine:
 
 ```bash
 docker compose up --build
 ```
 
-Open `http://127.0.0.1:8080`. Settings, recordings, and clips are stored in `./data`.
+Open <http://127.0.0.1:8080>. Runtime data is stored in `./data`. The compose file routes Ollama requests to `host.docker.internal:11434`.
 
-## Installer build
+Because the service uses `restart: unless-stopped`, use the following command when you intend to stop the Docker deployment completely:
+
+```bash
+docker compose down
+```
+
+## Development and validation
+
+Run the regression suite and syntax checks before submitting a change:
+
+```bash
+python -m unittest discover -s tests -v
+python -m py_compile autoclip.py ai_highlights.py zernio_poster.py
+```
+
+GitHub Actions runs the regression suite on Windows and Linux with supported Python versions.
+
+### Build the Windows installer
 
 Windows packaging requires the .NET Framework C# compiler and Inno Setup 6:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_windows.ps1
 ```
 
-The build creates:
+Build output:
 
-- `dist\StreamSnipAI\StreamSnipAI.exe`;
-- `dist\installer\StreamSnipAI-Setup.exe`.
+- `dist\StreamSnipAI\StreamSnipAI.exe` — lightweight launcher;
+- `dist\installer\StreamSnipAI-Setup.exe` — Inno Setup installer.
 
-The installer intentionally does not require FFmpeg or Python packages to be embedded. It ships the app executable and source, then the setup terminal installs Python packages and FFmpeg on the target PC.
+`AutoClip.spec` is retained as a legacy full PyInstaller bundle configuration; the current release installer uses the lightweight launcher and target-PC runtime setup.
 
-## Repository files
+## Repository map
 
-| File | Role |
+| Path | Purpose |
 |---|---|
-| `autoclip.py` | Web UI, server, capture, clipping, transcription, settings, rendering, and publishing orchestration |
-| `ai_highlights.py` | Ollama, Gemini, and Hugging Face highlight analysis |
-| `zernio_poster.py` | Zernio publishing integration |
-| `requirements.txt` | Runtime Python dependencies |
-| `AutoClip.spec` | Legacy PyInstaller full-bundle configuration (not used by the thin installer) |
-| `build_windows.ps1` | Windows app and installer build |
-| `installer/AutoClip.iss` | Inno Setup installer definition |
-| `installer/setup_windows.ps1` | Target-PC dependency setup launched by the installer |
-| `docker-compose.yml`, `Dockerfile` | Docker deployment |
-| `tests/test_regressions.py` | Regression tests |
-| `assets/` | App icon and brand artwork |
+| `autoclip.py` | Local server/UI, settings, capture, transcription, scoring, rendering, gallery, and orchestration |
+| `ai_highlights.py` | Ollama, Gemini, and Hugging Face analysis and provider checks |
+| `zernio_poster.py` | Zernio account discovery, upload, scheduling, and publishing |
+| `assets/` | Application icon and brand artwork |
+| `installer/` | Windows launcher, setup bootstrap, and Inno Setup definition |
+| `build_windows.ps1` | Windows launcher/installer build script |
+| `Dockerfile`, `docker-compose.yml` | Local Docker deployment |
+| `tests/test_regressions.py` | Regression coverage for clipping, AI, rendering, security, publishing, and shutdown |
+| `.github/workflows/` | Tests and release-asset maintenance automation |
 
-## Privacy
+## Troubleshooting
 
-Speech transcription and clip rendering run locally. Hosted Gemini or Hugging Face analysis sends transcript text to the selected service. Zernio publishing sends the selected video and caption data to Zernio.
+- **Windows SmartScreen warning:** the installer is not code-signed. Verify its SHA-256 file and use only the official release.
+- **First launch takes time:** Python packages, FFmpeg, and the selected Whisper model may need downloading.
+- **Installer problem:** inspect `%LOCALAPPDATA%\StreamSnip AI\setup.log`.
+- **Buttons do not respond:** disable ad blocking for `127.0.0.1` / `localhost`.
+- **Gemini/Hugging Face failure:** use **Test connection** and verify the account has API access/quota or provider credits.
+- **Zernio DNS error:** check internet, VPN, firewall, and DNS settings; the app retries transient DNS failures automatically.
+- **App appears to remain active:** use **Quit**. Closing the desktop app window also stops its local server and child processes after a short reload grace period.
 
-API keys and settings are stored under the app data folder and are not exposed through the browser UI.
+## Project
+
+Created and maintained by **Sifat Jaman / ScarZero**.
+
+- [GitHub repository](https://github.com/sifat-jaman-13/stream-clip-ai)
+- [Latest release](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest)
+- [YouTube — Scar Clip Farm](https://youtube.com/@scarclipfarm)
+- [YouTube — Scarzero](https://www.youtube.com/@scarzeroyt)
+- [Instagram — @scarzero13](https://www.instagram.com/scarzero13/)
+- [Facebook — ScarZero13](https://www.facebook.com/ScarZero13)
+- [Twitch — scarzero13](https://www.twitch.tv/scarzero13)
+- [TikTok — @scarzero13](https://www.tiktok.com/@scarzero13)
+
+Development has included assistance from OpenAI, Anthropic, and Google AI tools. Project direction, release decisions, and repository ownership remain with Sifat Jaman.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change and [SECURITY.md](SECURITY.md) for private vulnerability reporting guidance.
 
 ## License
 
-StreamSnip AI is distributed under the MIT License. See [LICENSE](LICENSE).
+StreamSnip AI is available under the [MIT License](LICENSE).

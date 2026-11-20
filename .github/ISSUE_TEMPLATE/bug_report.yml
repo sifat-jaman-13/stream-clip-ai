@@ -1,0 +1,90 @@
+name: Bug report
+description: Report a reproducible StreamSnip AI problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Remove credentials, account IDs, private paths, transcripts, and video content before submitting.
+
+  - type: input
+    id: version
+    attributes:
+      label: StreamSnip AI version
+      description: Use the version shown in App settings or the release tag/commit.
+      placeholder: v1.2.6
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - Windows installer
+        - Source checkout
+        - Docker Compose
+        - Headless CLI
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and Python version
+      placeholder: Windows 11; installer runtime / Python 3.12
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Highlight engine
+      options:
+        - Hook words
+        - Ollama
+        - Gemini
+        - Hugging Face
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Explain the actual behavior and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized Activity/setup output
+      description: Paste only the relevant lines after removing secrets and private data.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I tested the latest release or current `master` branch.
+          required: true
+        - label: I removed API keys, tokens, account IDs, and private content.
+          required: true
+        - label: This is not a security vulnerability (those must use private reporting).
+          required: true

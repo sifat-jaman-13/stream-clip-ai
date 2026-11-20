@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.title="StreamClipAI" \
-      org.opencontainers.image.description="AI-powered stream auto-clipper: Twitch/YouTube → 9:16 Shorts/TikTok/Reels" \
+LABEL org.opencontainers.image.title="StreamSnip AI" \
+      org.opencontainers.image.description="Local-first Twitch, YouTube, and VOD clipper with Whisper transcription, optional AI highlights, captions, and FFmpeg rendering" \
       org.opencontainers.image.source="https://github.com/sifat-jaman-13/stream-clip-ai" \
       org.opencontainers.image.licenses="MIT"
 

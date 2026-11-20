@@ -1,23 +1,24 @@
-r"""
-AutoClip - free live-stream / VOD auto clipper.
-Twitch / YouTube live (or a video file)  ->  ready-to-post 9:16 clips with MrBeast-style captions.
+r"""StreamSnip AI — a local-first Twitch, YouTube, and VOD clipper.
 
-The default workflow runs locally and free: streamlink + ffmpeg + faster-whisper on your GPU.
-Optional Gemini and Hugging Face hosted AI providers analyze transcripts over the internet.
+The default workflow uses Streamlink, FFmpeg, faster-whisper, and hook-word
+scoring locally without requiring a cloud AI key. Ollama provides optional
+local AI analysis. Gemini and Hugging Face are optional hosted transcript
+analysis providers, and Zernio is the optional publishing integration.
 
-Setup (Windows 11, PowerShell):
+Windows/source setup:
     winget install Gyan.FFmpeg
-    py -3.14 -m venv venv ; .\venv\Scripts\Activate.ps1
-    python -m pip install -U pip
-    pip install --only-binary=:all: streamlink faster-whisper numpy nvidia-cublas-cu12
+    py -3.12 -m venv .venv ; .\.venv\Scripts\Activate.ps1
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt
 
 Run:
-    python autoclip.py                 -> opens the AutoClip app window (a local web UI, no extra installs)
-    python autoclip.py live URL        -> headless, no UI
-    python autoclip.py file video.mp4  -> headless, no UI
+    python autoclip.py                 -> opens the local StreamSnip AI window
+    python autoclip.py live URL        -> headless live-stream mode
+    python autoclip.py file video.mp4  -> headless local-file mode
 
-Output: the "out" folder. Each clip = .mp4 in the selected format (9:16 by default) + .txt (caption and hashtags to paste).
-Your own hype words: "Hype words" tab in the app (stored in custom_words.txt, re-read for every chunk).
+Each finished clip is written as an MP4 plus a matching TXT caption/hashtag
+file. Runtime paths, providers, captions, layouts, and custom hook words are
+configurable from the local UI.
 """
 import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64, uuid
 import math
@@ -28,7 +29,7 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.2.6"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -175,7 +176,7 @@ def check_updates():
         except importlib_metadata.PackageNotFoundError: current = ""
         latest = ""
         try:
-            req = urllib.request.Request(f"https://pypi.org/pypi/{package}/json", headers={"User-Agent": "AutoClip updater"})
+            req = urllib.request.Request(f"https://pypi.org/pypi/{package}/json", headers={"User-Agent": "StreamSnip AI updater"})
             with urllib.request.urlopen(req, timeout=8) as response:
                 latest = str(json.loads(response.read()).get("info", {}).get("version", ""))
         except Exception: pass
@@ -189,10 +190,10 @@ def check_updates():
     return {"checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "items": result}
 
 def check_app_update():
-    """Check the published AutoClip release without changing the local install."""
+    """Check the published StreamSnip AI release without changing the local install."""
     req = urllib.request.Request(
         "https://api.github.com/repos/sifat-jaman-13/stream-clip-ai/releases/latest",
-        headers={"User-Agent": "AutoClip version checker"},
+        headers={"User-Agent": "StreamSnip AI version checker"},
     )
     with urllib.request.urlopen(req, timeout=8) as response:
         data = json.loads(response.read())
@@ -201,7 +202,7 @@ def check_app_update():
     latest_key = tuple(int(part) for part in re.findall(r"\d+", latest))
     return {"current": APP_VERSION, "latest": latest, "update": latest_key > current_key,
             "url": data.get("html_url") or APP_RELEASES_URL,
-            "name": data.get("name") or ("AutoClip v" + latest)}
+            "name": data.get("name") or ("StreamSnip AI v" + latest)}
 
 def update_components():
     """Update Python runtime components and download the selected speech model.
@@ -335,7 +336,7 @@ def run(cmd, **kw):
     return result
 
 def acquire_instance_lock():
-    """Prevent accidentally launching two AutoClip servers in the same folder."""
+    """Prevent accidentally launching two StreamSnip AI servers in one data folder."""
     global _INSTANCE_LOCK_HANDLE
     h = open(INSTANCE_LOCK_FILE, "a+")
     try:
@@ -576,6 +577,7 @@ def public_ai_settings():
 
 def save_ai_settings(body):
     cfg = load_ai_settings()
+    previous_huggingface_token = str(cfg.get("huggingface_token", "")).strip()
     provider = str(body.get("provider", cfg["provider"]))
     if provider not in {"hooks", "ollama", "gemini", "huggingface"}:
         raise ValueError("Unknown AI highlight provider.")
@@ -586,7 +588,11 @@ def save_ai_settings(body):
     for key in ("gemini_api_key", "huggingface_token"):
         if body.get(key): cfg[key] = str(body[key]).strip()[:1000]
     if body.get("clear_gemini_key"): cfg["gemini_api_key"] = ""
-    if body.get("clear_huggingface_token"): cfg["huggingface_token"] = ""
+    if body.get("clear_huggingface_token"):
+        cfg["huggingface_token"] = ""
+        for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+            if previous_huggingface_token and os.environ.get(name, "").strip() == previous_huggingface_token:
+                os.environ.pop(name, None)
     atomic_json_write(AI_SETTINGS_FILE, cfg)
     apply_huggingface_token()
     return public_ai_settings()
@@ -881,9 +887,9 @@ def streamlink_cmd():
     exe = _find_streamlink_exe()
     if exe:
         return [exe]
-    # In a PyInstaller build, sys.executable is AutoClip.exe rather than
+    # In a PyInstaller build, sys.executable is StreamSnipAI.exe rather than
     # Python. Route the child process through an explicit worker mode so it
-    # runs Streamlink's CLI instead of starting a second AutoClip instance.
+    # runs Streamlink's CLI instead of starting a second StreamSnip AI instance.
     if getattr(sys, "frozen", False):
         return [sys.executable, "--streamlink"]
     # last resort: run streamlink's CLI with the SAME packages this script can import
@@ -1375,7 +1381,7 @@ class Engine:
                 return True
             if "No module named" in (r.stderr or ""):
                 raise RuntimeError("streamlink isn't installed in this Python environment. "
-                                   "Run:  pip install --only-binary=:all: streamlink   (then start AutoClip again)")
+                                   "Run:  pip install --only-binary=:all: streamlink   (then start StreamSnip AI again)")
             if first:
                 err = (r.stderr or "").strip().splitlines()
                 self.log("Not live yet" + (f" ({err[-1][:140]})" if err else "") + " - checking every 30 s.")
@@ -1411,7 +1417,7 @@ class Engine:
         self.log("Recording finished.")
 
     def record_session(self, url):
-        # The recording folder can disappear while AutoClip is running (for example,
+        # The recording folder can disappear while StreamSnip AI is running (for example,
         # after a manual cleanup or an antivirus/cleanup tool removes an empty dir).
         # Recreate it immediately before opening the stream log and segment files.
         ensure_runtime_dirs()
@@ -1688,7 +1694,7 @@ class Core:
             if self.running:
                 raise ValueError("Already running.")
             if ffmpeg_exe() == "ffmpeg" and not shutil.which("ffmpeg"):
-                raise ValueError("ffmpeg not found. Run  winget install Gyan.FFmpeg  then restart AutoClip.")
+                raise ValueError("ffmpeg not found. Run  winget install Gyan.FFmpeg  then restart StreamSnip AI.")
             t = normalize_stream_target(cfg["target"])
             if cfg["mode"] == "live":
                 if not re.match(r"https?://", t):
@@ -2529,7 +2535,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
   <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
   <button class="btn ghost" id="btn-about"><span data-ico="info"></span>About</button>
-  <button class="btn ghost" id="btn-quit" title="Stop everything and close AutoClip"><span data-ico="power"></span>Quit</button>
+  <button class="btn ghost" id="btn-quit" title="Stop everything and close StreamSnip AI"><span data-ico="power"></span>Quit</button>
 </header>
 <div class="local-note">If buttons do not respond, disable your ad blocker for <b>127.0.0.1</b> / <b>localhost</b>.</div>
 
@@ -2559,8 +2565,8 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <select id="ollama-model" class="text"><option value="">Click Detect models</option></select>
       <p class="hint">Install Ollama and at least one model first. Only models already installed and detected by Ollama are available.</p>
     </div>
-    <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><b id="gemini-key-state">Not saved</b></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><div class="row"><label>Preferred Gemini model</label></div><input id="gemini-model" class="text" value="gemini-3.8-flash" placeholder="gemini-3.8-flash"><p class="hint">The app checks this model first, tries the other available Gemini models if needed, then falls back to Ollama. Model IDs can change; use one enabled for your API key.</p></div>
-    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="deepseek-ai/DeepSeek-V4.1-Flash:fastest"><div class="row"><label>Hugging Face access token</label><b id="hf-token-state">Not saved</b></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads. Use a token with Inference Providers access and available provider credits.</p></div>
+    <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><div class="prow"><b id="gemini-key-state">Not saved</b><button type="button" class="btn ghost" id="gemini-key-clear">Clear saved key</button></div></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><div class="row"><label>Preferred Gemini model</label></div><input id="gemini-model" class="text" value="gemini-3.8-flash" placeholder="gemini-3.8-flash"><p class="hint">The app checks this model first, tries the other available Gemini models if needed, then falls back to Ollama. Model IDs can change; use one enabled for your API key.</p></div>
+    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="deepseek-ai/DeepSeek-V4.1-Flash:fastest"><div class="row"><label>Hugging Face access token</label><div class="prow"><b id="hf-token-state">Not saved</b><button type="button" class="btn ghost" id="hf-token-clear">Clear saved token</button></div></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads. Use a token with Inference Providers access and available provider credits.</p></div>
     <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><button class="btn ghost" id="ai-test-provider">Test connection</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
   </div>
 
@@ -2659,7 +2665,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.2.5. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.2.6. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -2734,12 +2740,13 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 </div>
 <div class="overlay" id="about-overlay" hidden>
  <div class="settings-dialog about-dialog">
-  <div class="settings-head"><div><h2>About StreamSnip AI</h2><p>Local clipping tools for creators, by ScarZero.</p></div><button class="btn ghost" id="btn-about-close">Close</button></div>
+  <div class="settings-head"><div><h2>About StreamSnip AI</h2><p>Local-first clipping tools for creators, by ScarZero.</p></div><button class="btn ghost" id="btn-about-close">Close</button></div>
   <div class="about-hero">
-   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="StreamSnip AI"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn live streams into polished, captioned clips ready for Shorts, Reels, and YouTube.</p></div></div>
-   <p class="about-copy">Built for creators who want fast local processing, flexible framing, automatic streamer credit, and direct publishing workflows. Follow the author for new releases, clips, and creator updates.</p>
-   <p class="about-copy"><strong>Created by Sifat Jaman / ScarZero.</strong> Development assistance credited to ChatGPT 5.6 Luna, Claude, and Antigravity.</p>
-   <div class="about-links"><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a><a class="btn ghost" href="https://www.facebook.com/ScarZero13" target="_blank" rel="noopener">Facebook · ScarZero13</a><a class="btn ghost" href="https://www.twitch.tv/scarzero13" target="_blank" rel="noopener">Twitch · scarzero13</a><a class="btn ghost" href="https://www.tiktok.com/@scarzero13" target="_blank" rel="noopener">TikTok · @scarzero13</a></div>
+   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="StreamSnip AI"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn Twitch, YouTube, and video files into captioned clips for Shorts, Reels, TikTok, and YouTube.</p></div></div>
+   <p class="about-copy">StreamSnip AI keeps capture, transcription, rendering, settings, and generated clips local by default. Hook words and Ollama work locally; Gemini, Hugging Face, and Zernio are optional hosted integrations.</p>
+   <p class="about-copy">Built for flexible framing, animated captions, creator credit, local clip review, and deliberate publishing workflows.</p>
+   <p class="about-copy"><strong>Created and maintained by Sifat Jaman / ScarZero.</strong> Development has included assistance from OpenAI, Anthropic, and Google AI tools.</p>
+   <div class="about-links"><a class="btn ghost" href="https://github.com/sifat-jaman-13/stream-clip-ai" target="_blank" rel="noopener">GitHub · Source</a><a class="btn ghost" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest" target="_blank" rel="noopener">Latest release</a><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a><a class="btn ghost" href="https://www.facebook.com/ScarZero13" target="_blank" rel="noopener">Facebook · ScarZero13</a><a class="btn ghost" href="https://www.twitch.tv/scarzero13" target="_blank" rel="noopener">Twitch · scarzero13</a><a class="btn ghost" href="https://www.tiktok.com/@scarzero13" target="_blank" rel="noopener">TikTok · @scarzero13</a></div>
   </div>
  </div>
 </div>
@@ -2793,11 +2800,15 @@ $("#hf-model").value=AI.huggingface_model||"deepseek-ai/DeepSeek-V4.1-Flash:fast
 $("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";
 $("#gemini-model").value=AI.gemini_model||"gemini-3.8-flash";
 $("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";
+$("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set;
 function showAIFields(updateMessage=false){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$("#ai-test-provider").hidden=p==="hooks";if(updateMessage){const names={ollama:"Ollama",gemini:"Gemini",huggingface:"Hugging Face"};$("#ai-settings-msg").textContent=p==="hooks"?"Built-in hook detection selected":"Ready to test or save "+names[p]+" settings"}$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
 $("#ai-provider").onchange=()=>showAIFields(true);$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields(true)});showAIFields(true);
 $("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
 function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest"};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;return payload}
-$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
+function refreshAISecretState(){$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set}
+$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";refreshAISecretState();$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
+async function clearAISecret(kind){const gemini=kind==="gemini";const label=gemini?"Gemini API key":"Hugging Face token";if(!(await confirmBox("Clear saved "+label+"?","The credential will be removed from this computer. Add and save a new one before using this hosted provider again.","Clear credential")))return;const button=$(gemini?"#gemini-key-clear":"#hf-token-clear");button.disabled=true;try{const payload=aiSettingsPayload();payload[gemini?"clear_gemini_key":"clear_huggingface_token"]=true;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$(gemini?"#gemini-key":"#hf-token").value="";refreshAISecretState();$("#ai-settings-msg").textContent=label+" cleared from this computer";toast(label+" cleared","ok")}catch(e){refreshAISecretState();$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}}
+$("#gemini-key-clear").onclick=()=>clearAISecret("gemini");$("#hf-token-clear").onclick=()=>clearAISecret("huggingface");
 $("#ai-test-provider").onclick=async()=>{const b=$("#ai-test-provider");b.disabled=true;$("#ai-settings-msg").textContent="Testing connection...";try{const r=await api("/api/ai/test",aiSettingsPayload());$("#ai-settings-msg").textContent=r.message;toast(r.message,"ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 function setSelectOptions(el,items,chosen){
   el.replaceChildren(h("option",{value:""},"Not selected"));
@@ -2844,7 +2855,7 @@ $("#compute-device").addEventListener("change",e=>{S.compute_device=e.target.val
 $("#capture-bitrate").addEventListener("change",e=>{S.capture_bitrate_kbps=Math.max(6000,Math.min(50000,+e.target.value||6000));e.target.value=S.capture_bitrate_kbps;scheduleSave()});
 $("#btn-settings-save").onclick=async()=>{const b=$("#btn-settings-save");b.disabled=true;try{await api("/api/settings",S);toast("Settings saved","ok")}catch(e){toast(e.message,"bad")}b.disabled=false};
 $("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?" — "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
-$("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new AutoClip version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
+$("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new StreamSnip AI version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
 $("#btn-update-components").onclick=async()=>{if(!(await confirmBox("Update components?","This updates Python packages and downloads the selected speech model. FFmpeg is bundled into the next installer build.","Update")))return;const b=$("#btn-update-components");b.disabled=true;$("#updates-msg").textContent="Updating...";try{const r=await api("/api/update_components");$("#updates-msg").textContent=r.message;toast("Components updated","ok")}catch(e){$("#updates-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 function confirmBox(title,msg,ok){return new Promise(res=>{
   const done=v=>{m.remove();res(v)};
@@ -2919,7 +2930,7 @@ function onMode(){
   $("#btn-cam").onclick=facecam?openCamEditor:openCropEditor;
   $("#target").placeholder=live?"https://www.twitch.tv/channel":"Path to a .mp4 / .mkv recording";
   $("#btn-browse").hidden=live;
-  $("#src-hint").textContent=live?"Works with Twitch and YouTube live links. If the stream is offline, AutoClip waits and starts when it goes live.":"Clips are cut from the whole file. Long VODs get more clips automatically.";
+  $("#src-hint").textContent=live?"Works with Twitch and YouTube live links. If the stream is offline, StreamSnip AI waits and starts when it goes live.":"Clips are cut from the whole file. Long VODs get more clips automatically.";
   $("#go-label").textContent=live?"Start recording & clipping":"Make clips from this file";
 }
 onMode();

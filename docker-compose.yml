@@ -1,8 +1,9 @@
 services:
-  streamclipai:
+  streamsnip-ai:
     build: .
-    image: stream-clip-ai:latest
-    container_name: streamclipai
+    image: streamsnip-ai:latest
+    container_name: streamsnip-ai
+    init: true
     ports:
       - "127.0.0.1:8080:8080"  # Keep the local app private to this computer.
     volumes:
@@ -12,6 +13,7 @@ services:
     environment:
       STREAMSNIP_OLLAMA_URL: http://host.docker.internal:11434
     restart: unless-stopped
+    stop_grace_period: 15s
     # Uncomment for headless live-stream mode (no web UI):
     # command: ["live", "https://www.twitch.tv/your_channel"]
 

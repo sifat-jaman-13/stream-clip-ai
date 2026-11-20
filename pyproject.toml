@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stream-clip-ai"
-version = "1.2.5"
-description = "Free AI-powered stream clipper — Twitch/YouTube live & VODs → 9:16 Shorts/TikTok/Reels with animated captions"
+version = "1.2.6"
+description = "Local-first Twitch, YouTube, and VOD clipper with Whisper transcription, optional AI highlights, captions, FFmpeg rendering, and Zernio publishing"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [
   { name = "Sifat Jaman" },
 ]
-keywords = ["twitch", "youtube", "clips", "shorts", "tiktok", "reels", "streaming", "auto-clip", "ai-clipper", "whisper", "captions", "stream-clipper", "highlight-detection", "vertical-video"]
+keywords = ["twitch", "youtube", "clips", "shorts", "tiktok", "reels", "streaming", "auto-clip", "ai-clipper", "whisper", "faster-whisper", "captions", "stream-clipper", "highlight-detection", "vertical-video", "ffmpeg", "ollama", "gemini", "local-ai", "zernio"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: End Users/Desktop",
@@ -26,19 +26,19 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.24",
-  "faster-whisper>=1.0.0",
+  "faster-whisper==1.2.1",
 ]
 
 [project.optional-dependencies]
 gpu = [
-  "nvidia-cublas-cu12",
+  "nvidia-cublas-cu12; platform_system == 'Windows'",
 ]
 live = [
   "streamlink",
 ]
 all = [
   "streamlink",
-  "nvidia-cublas-cu12",
+  "nvidia-cublas-cu12; platform_system == 'Windows'",
 ]
 
 [project.scripts]
@@ -49,6 +49,10 @@ streamclip = "autoclip:main"
 Homepage = "https://github.com/sifat-jaman-13/stream-clip-ai"
 Repository = "https://github.com/sifat-jaman-13/stream-clip-ai"
 Issues = "https://github.com/sifat-jaman-13/stream-clip-ai/issues"
+Documentation = "https://github.com/sifat-jaman-13/stream-clip-ai#readme"
+Changelog = "https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/CHANGELOG.md"
+Download = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
+Security = "https://github.com/sifat-jaman-13/stream-clip-ai/security/policy"
 
 [tool.setuptools]
 py-modules = ["autoclip", "ai_highlights", "zernio_poster"]

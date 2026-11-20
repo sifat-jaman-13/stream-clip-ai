@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Private security report
+    url: https://github.com/sifat-jaman-13/stream-clip-ai/security/advisories/new
+    about: Report vulnerabilities and credential/privacy issues privately.
+  - name: Latest release
+    url: https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest
+    about: Download and test the newest stable build before reporting a bug.

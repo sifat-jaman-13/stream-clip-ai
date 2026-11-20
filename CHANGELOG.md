@@ -1,0 +1,66 @@
+# Changelog
+
+Notable StreamSnip AI changes are documented here. Complete release notes and downloadable assets are available on the [GitHub Releases page](https://github.com/sifat-jaman-13/stream-clip-ai/releases).
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use semantic versioning.
+
+## [Unreleased]
+
+## [1.2.6] - 2026-11-21
+
+### Added
+
+- Added in-app controls to clear saved Gemini and Hugging Face credentials without editing local JSON files.
+- Added cross-platform regression-test automation, issue forms, contribution guidance, and a private-reporting security policy.
+
+### Changed
+
+- Reworked the README to match current installation, AI provider, privacy, Docker, publishing, shutdown, and development behavior.
+- Aligned the in-app About panel, package metadata, Docker branding, source documentation, and GitHub repository metadata with the StreamSnip AI project.
+- Restored the standard MIT license text so repository tooling can identify it correctly.
+
+### Security
+
+- Clearing a saved Hugging Face token now also removes matching process environment values.
+- Confirmed the previously exposed local Hugging Face token is rejected remotely, absent from reachable Git history, and removed from known local settings/environment locations.
+
+## [1.2.5] - 2026-11-20
+
+### Fixed
+
+- Prioritized `gemini-3.8-flash` and migrated the retired `gemini-2.5-flash` setting.
+- Added full Gemini text-model discovery and three attempts per model before Ollama fallback on retryable failures.
+- Made the provider test exercise real text generation and report the successful model.
+- Made Quit/app-window close stop the local server, recording/rendering work, and tracked child-process trees.
+- Preserved safe page reloads with a reconnect grace period.
+
+### Validation
+
+- Added regression coverage for Gemini rotation, provider checks, process-tree shutdown, and app-window lifecycle.
+
+## [1.2.4] - 2026-11-20
+
+### Added
+
+- New StreamSnip AI app icon and brand artwork.
+- In-app Gemini/Hugging Face connection testing.
+
+### Fixed
+
+- Added clearer Zernio DNS diagnostics and retries.
+- Updated the default Hugging Face hosted model and migrated the retired default.
+- Applied the app icon consistently to the launcher and installer.
+
+## [1.2.3] - 2026-11-20
+
+### Fixed
+
+- Corrected Windows Python detection when the `py` launcher exists without Python 3.12.
+- Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
+- Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
+
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.6...HEAD
+[1.2.6]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.5...v1.2.6
+[1.2.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.4...v1.2.5
+[1.2.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.3...v1.2.4
+[1.2.3]: https://github.com/sifat-jaman-13/stream-clip-ai/releases/tag/v1.2.3

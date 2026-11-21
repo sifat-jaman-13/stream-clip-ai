@@ -590,6 +590,34 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(picks, [])
         self.assertTrue(engine.ai_strict_no_clip)
 
+    def test_process_logs_transcribed_words(self):
+        engine = object.__new__(autoclip.Engine)
+        engine.cfg = {"min_score": 70, "pre": 20, "post": 15, "delete_rec": False}
+        engine.log = MagicMock()
+        engine.status = MagicMock()
+        engine.check = MagicMock()
+        engine.transcribe = lambda _path: [(0.0, 0.5, "Hello"), (0.6, 1.0, "world!")]
+        engine.find_peaks = lambda _path, _words: ([], 10)
+        engine.emit = MagicMock()
+        engine.process("clip.ts")
+        engine.log.assert_any_call("Transcript words (2): HELLO WORLD!")
+
+    def test_rejected_recording_chunk_is_deleted_immediately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            recording = Path(directory) / "segment.ts"
+            recording.touch()
+            engine = object.__new__(autoclip.Engine)
+            engine.cfg = {"min_score": 70, "pre": 20, "post": 15, "delete_rec": False}
+            engine.log = MagicMock()
+            engine.status = MagicMock()
+            engine.check = MagicMock()
+            engine.transcribe = lambda _path: []
+            engine.find_peaks = lambda _path, _words: ([], 10)
+            engine.emit = MagicMock()
+            with patch.object(autoclip, "REC", Path(directory)):
+                engine.process(recording)
+            self.assertFalse(recording.exists())
+
     def test_ai_moment_without_explicit_score_is_rejected(self):
         self.assertEqual(ai_highlights._parse_moments(
             {"moments": [{"time": 10, "reason": "ordinary chat"}]}, 60), [])

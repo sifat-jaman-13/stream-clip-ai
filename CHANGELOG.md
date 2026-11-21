@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-21
+
+### Added
+
+- Activity logs now include the transcribed words for every processed chunk, capped to keep the UI responsive.
+- Any processed recording chunk that produces zero clips is deleted immediately after processing.
+
+### Changed
+
+- Promoted the strict AI-only clipping workflow to the 2.0 release line.
+
 ## [1.2.14] - 2026-11-21
 
 ### Changed
@@ -110,7 +121,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.14...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.14...v2.0.0
 [1.2.14]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.13...v1.2.14
 [1.2.13]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.12...v1.2.13
 [1.2.12]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.11...v1.2.12

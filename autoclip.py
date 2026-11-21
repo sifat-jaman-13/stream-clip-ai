@@ -29,7 +29,7 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "1.2.14"
+APP_VERSION = "2.0.0"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -1391,6 +1391,13 @@ class Engine:
         self.log(f"Processing {pth.name}")
         words = self.transcribe(path)
         self.check()
+        if words:
+            transcript = " ".join(clean_word(word) for _start, _end, word in words).strip()
+            if len(transcript) > 6000:
+                transcript = transcript[:5997].rstrip() + "..."
+            self.log(f"Transcript words ({len(words)}): {transcript}")
+        else:
+            self.log("Transcript words (0): no speech words detected.")
         self.status("Finding the hype moments...", "transcribing", 100)
         peaks, dur = self.find_peaks(path, words)
         self.log(f"Heard {len(words)} words in {dur}s of video. Best moment score {getattr(self, 'best_score', 0):.1f} "
@@ -1399,10 +1406,10 @@ class Engine:
             self.log("WARNING: no speech was transcribed - check the speech model / GPU messages above.")
         if not peaks:
             self.log("Chunk too short or silent - nothing to clip.")
-            if getattr(self, "ai_strict_no_clip", False) and pth.parent == REC:
+            if pth.parent == REC:
                 try:
                     pth.unlink()
-                    self.log(f"Deleted {pth.name}: the selected AI provider found no qualifying viral moment.")
+                    self.log(f"Deleted {pth.name}: processing produced no clips.")
                 except OSError as exc:
                     self.log(f"Could not delete {pth.name}: {exc}")
         stamp = time.strftime("%H%M%S")
@@ -2728,7 +2735,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.2.14. Check the published release before updating.</p>
+    <p class="hint">Current app version: v2.0.0. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>

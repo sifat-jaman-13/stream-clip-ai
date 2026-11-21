@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.14] - 2026-11-21
+
+### Changed
+
+- AI highlight providers are now strict: an empty, invalid, failed, or below-threshold AI result creates no clips and does not fall back to hook/audio peaks.
+- In live mode, a chunk with no qualifying AI moment is deleted after processing to prevent ordinary footage from accumulating.
+
 ## [1.2.13] - 2026-11-21
 
 ### Fixed
@@ -103,7 +110,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.13...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.14...HEAD
+[1.2.14]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.13...v1.2.14
 [1.2.13]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.12...v1.2.13
 [1.2.12]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.11...v1.2.12
 [1.2.11]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.10...v1.2.11

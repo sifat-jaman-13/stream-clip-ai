@@ -575,6 +575,21 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(duration, 120)
         self.assertEqual(picks, [(35, 80.0)])
 
+    def test_ai_provider_empty_result_does_not_fallback_to_local_peaks(self):
+        engine = object.__new__(autoclip.Engine)
+        engine.cfg = {"min_score": 70, "clips_per_chunk": 0, "chunk_min": 3}
+        engine.ai_cancel = __import__("threading").Event()
+        engine.log = MagicMock()
+        engine.status = MagicMock()
+        engine.rms_per_second = lambda _path: autoclip.np.ones(120)
+        with patch.object(autoclip, "load_custom", return_value=[]), \
+             patch.object(autoclip, "load_ai_settings", return_value={"provider": "gemini"}), \
+             patch.object(autoclip, "select_moments", return_value=[]):
+            picks, duration = engine.find_peaks("clip.mp4", [])
+        self.assertEqual(duration, 120)
+        self.assertEqual(picks, [])
+        self.assertTrue(engine.ai_strict_no_clip)
+
     def test_ai_moment_without_explicit_score_is_rejected(self):
         self.assertEqual(ai_highlights._parse_moments(
             {"moments": [{"time": 10, "reason": "ordinary chat"}]}, 60), [])

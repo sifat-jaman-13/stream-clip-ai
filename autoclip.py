@@ -29,7 +29,7 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "1.2.13"
+APP_VERSION = "1.2.14"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -1230,6 +1230,7 @@ class Engine:
 
     def find_peaks(self, path, words):
         self.best_score = 0.0
+        self.ai_strict_no_clip = False
         rms = self.rms_per_second(path)
         n = len(rms)
         if n < 10:
@@ -1260,6 +1261,11 @@ class Engine:
         if provider == "hooks":
             self.log("Highlight scoring: built-in/custom hook words + audio energy and speech rate (local, offline; no AI model).")
         if provider != "hooks":
+            # An AI provider is an explicit editorial choice: never replace an
+            # empty/failed AI decision with unrelated audio or hook-word peaks.
+            # This prevents ordinary moments from becoming clips when Gemini or
+            # Ollama says the transcript has no viral payoff.
+            self.ai_strict_no_clip = True
             mode = {"ollama": "Ollama local model", "gemini": "Gemini cloud model", "huggingface": "Hugging Face hosted model"}.get(provider, provider.title())
             self.log(f"Highlight analysis starting with {mode}; analyzing timestamped transcript windows.")
             self.status(f"Finding viral moments with {mode}...", "transcribing", 100)
@@ -1273,13 +1279,16 @@ class Engine:
                     score = ai_score
                     self.log(f"AI highlight analysis returned {len(ai_picks)} transcript highlights; scores were calibrated against nearby transcript engagement before applying the viral-score floor.")
                 else:
-                    self.log("AI highlight analysis returned no moments; using hook-word and audio scoring.")
+                    self.log("AI highlight analysis returned no qualifying moments; this segment will produce no clips.")
+                    return [], n
             except AIAnalysisCancelled:
                 raise Stopped()
             except AIProviderError as exc:
-                self.log(f"AI highlight analysis failed: {exc}. Using hook-word and audio scoring.")
+                self.log(f"AI highlight analysis failed: {exc}. This segment will produce no clips.")
+                return [], n
             except Exception as exc:
-                self.log(f"AI highlight analysis returned an invalid response: {exc}. Using hook-word and audio scoring.")
+                self.log(f"AI highlight analysis returned an invalid response: {exc}. This segment will produce no clips.")
+                return [], n
         self.best_score = float(score.max())
         requested = int(self.cfg["clips_per_chunk"])
         # Zero means unlimited: keep selecting non-overlapping moments while they
@@ -1390,6 +1399,12 @@ class Engine:
             self.log("WARNING: no speech was transcribed - check the speech model / GPU messages above.")
         if not peaks:
             self.log("Chunk too short or silent - nothing to clip.")
+            if getattr(self, "ai_strict_no_clip", False) and pth.parent == REC:
+                try:
+                    pth.unlink()
+                    self.log(f"Deleted {pth.name}: the selected AI provider found no qualifying viral moment.")
+                except OSError as exc:
+                    self.log(f"Could not delete {pth.name}: {exc}")
         stamp = time.strftime("%H%M%S")
         for i, (p, sc) in enumerate(peaks, 1):
             self.check()
@@ -2713,7 +2728,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.2.13. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.2.14. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>

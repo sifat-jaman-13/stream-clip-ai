@@ -288,6 +288,7 @@ class RegressionTests(unittest.TestCase):
         try:
             engine = autoclip.Engine(autoclip.clean_cfg({}), lambda *_: None)
             with patch.object(autoclip, "preferred_speech_device", return_value="cuda"), \
+                 patch.object(autoclip, "download_whisper_model", return_value="C:/models/distil-large-v3"), \
                  patch.dict(sys.modules, {"faster_whisper": types.SimpleNamespace(WhisperModel=fake_model)}):
                 with self.assertRaisesRegex(RuntimeError, "CPU fallback is disabled"):
                     engine.get_model("distil-large-v3")
@@ -680,6 +681,15 @@ class RegressionTests(unittest.TestCase):
         model = next(item for item in result["items"] if item["name"] == "Speech model: large-v3-turbo")
         self.assertEqual(model["current"], "Cached")
         self.assertFalse(model["update"])
+
+    def test_verified_app_owned_whisper_model_is_reused_without_hub_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model_file = Path(directory) / "distil-large-v3" / "model.bin"
+            model_file.parent.mkdir(parents=True)
+            model_file.touch()
+            with patch.object(autoclip, "WHISPER_MODELS", Path(directory)):
+                self.assertEqual(autoclip.download_whisper_model("distil-large-v3"),
+                                 str(model_file.parent))
 
     def test_nonfinite_settings_use_defaults(self):
         cfg = autoclip.clean_cfg({"min_score": float("inf"), "cam_x": float("nan")})

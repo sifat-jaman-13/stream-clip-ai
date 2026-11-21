@@ -7,7 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$RuntimeSchema = "2"
+$RuntimeSchema = "3"
 $transcriptStarted = $false
 $exitCode = 0
 
@@ -161,6 +161,34 @@ function Ensure-FFmpeg {
     return $ffmpeg
 }
 
+function Ensure-SpeechModels($RuntimePython, [string]$ModelRoot) {
+    $models = @("distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base")
+    $bootstrap = @'
+from pathlib import Path
+import shutil
+import sys
+from faster_whisper import download_model
+
+root = Path(sys.argv[1])
+for name in sys.argv[2:]:
+    destination = root / name
+    model_file = destination / "model.bin"
+    if model_file.is_file():
+        print(f"Speech model already ready: {name}")
+        continue
+    if destination.exists():
+        shutil.rmtree(destination, ignore_errors=True)
+    destination.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading speech model: {name}", flush=True)
+    downloaded = Path(download_model(name, output_dir=str(destination), local_files_only=False))
+    if not model_file.is_file() and not (downloaded / "model.bin").is_file():
+        raise RuntimeError(f"{name} downloaded without model.bin")
+    print(f"Speech model ready: {name}", flush=True)
+'@
+    & $RuntimePython -c $bootstrap $ModelRoot @models
+    if ($LASTEXITCODE -ne 0) { throw "Could not download and verify all StreamSnip AI speech models." }
+}
+
 try {
     $AppDir = [IO.Path]::GetFullPath($AppDir)
     $source = Join-Path $AppDir "source"
@@ -227,6 +255,10 @@ try {
         } else {
             Write-Host "StreamSnip AI dependencies are already installed." -ForegroundColor Green
         }
+
+        $speechModelRoot = Join-Path $source "models"
+        Write-Host "Downloading and verifying StreamSnip AI speech models. This can take a while and needs an internet connection..." -ForegroundColor Cyan
+        Ensure-SpeechModels $runtimePython $speechModelRoot
 
         if (-not $SkipLaunch) {
             Write-Host "Launching StreamSnip AI..." -ForegroundColor Cyan

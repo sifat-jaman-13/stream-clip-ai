@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.9] - 2026-11-21
+
+### Fixed
+
+- Replaced shared Hugging Face snapshot loading with verified, app-owned Whisper model folders so a missing `model.bin` cannot repeatedly reopen a stale cache snapshot.
+- The Windows installer now downloads and verifies every speech model from the app's model list before its first launch.
+
 ## [1.2.8] - 2026-11-21
 
 ### Fixed
@@ -72,7 +79,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.8...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.9...HEAD
+[1.2.9]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.5...v1.2.6

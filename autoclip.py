@@ -29,7 +29,7 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "1.2.8"
+APP_VERSION = "1.2.9"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -105,11 +105,13 @@ _data_root = (pathlib.Path(_data_override).expanduser() if _data_override else
               if _in_site_packages else HERE)
 OUT = _data_root / "out"
 REC = _data_root / "rec"
+WHISPER_MODELS = _data_root / "models"
 
 def ensure_runtime_dirs():
     """Recreate runtime folders if the user, cleanup software, or an installer removed them."""
     OUT.mkdir(parents=True, exist_ok=True)
     REC.mkdir(parents=True, exist_ok=True)
+    WHISPER_MODELS.mkdir(parents=True, exist_ok=True)
 
 ensure_runtime_dirs()
 
@@ -143,15 +145,35 @@ def whisper_model_cache_dir(name):
     target = (root / ("models--" + repo_id.replace("/", "--"))).resolve()
     return target if target.parent == root else None
 
-def repair_incomplete_whisper_cache(name, error):
-    """Discard only a broken cache for this known model so HF Hub can download it again."""
-    if "model.bin" not in str(error).lower():
-        return False
-    cache_dir = whisper_model_cache_dir(name)
-    if not cache_dir or not cache_dir.is_dir():
-        return False
-    shutil.rmtree(cache_dir)
-    return True
+def whisper_model_dir(name):
+    """Return the app-owned local directory for a downloaded Whisper model."""
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(name)).strip(".-")
+    return WHISPER_MODELS / safe_name if safe_name else None
+
+
+def download_whisper_model(name, force=False):
+    """Download a complete model into app storage and return its local path."""
+    destination = whisper_model_dir(name)
+    if destination is None:
+        raise RuntimeError("Invalid Whisper model name.")
+    model_file = destination / "model.bin"
+    if model_file.is_file() and not force:
+        return str(destination)
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    try:
+        from faster_whisper import download_model
+        downloaded = pathlib.Path(download_model(name, output_dir=str(destination), local_files_only=False))
+    except Exception:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
+    if not model_file.is_file() and (downloaded / "model.bin").is_file():
+        return str(downloaded)
+    if not model_file.is_file():
+        shutil.rmtree(destination, ignore_errors=True)
+        raise RuntimeError(f"Download for speech model '{name}' finished without model.bin.")
+    return str(destination)
 
 def apply_huggingface_token():
     """Expose the saved HF credential to huggingface_hub/faster-whisper downloads."""
@@ -1125,31 +1147,36 @@ class Engine:
             from faster_whisper import WhisperModel
         except ImportError:
             raise RuntimeError("faster-whisper isn't installed. Run:  pip install --only-binary=:all: faster-whisper")
-        self.status(f"Loading speech model '{name}' (first run downloads it)...", "transcribing")
+        self.status(f"Preparing speech model '{name}'...", "transcribing")
+        try:
+            model_path = download_whisper_model(name)
+        except Exception as exc:
+            raise RuntimeError(f"Could not download or verify speech model '{name}': {exc}") from exc
         def load_selected_device():
             if device == "cuda":
                 failures = []
                 for compute_type in ("float16", "int8_float16"):
                     try:
-                        return WhisperModel(name, device="cuda", compute_type=compute_type), compute_type
+                        return WhisperModel(model_path, device="cuda", compute_type=compute_type), compute_type
                     except Exception as exc:
                         failures.append(exc)
                         self.log(f"GPU load failed ({compute_type}): {exc}")
                 raise failures[-1]
-            return WhisperModel(name, device="cpu", compute_type="int8"), "INT8 CPU"
+            return WhisperModel(model_path, device="cpu", compute_type="int8"), "INT8 CPU"
         try:
             _model, compute_type = load_selected_device()
         except Exception as first_error:
             try:
-                repaired = repair_incomplete_whisper_cache(name, first_error)
+                repaired = "model.bin" in str(first_error).lower()
             except OSError as repair_error:
                 raise RuntimeError(f"The cached Whisper model is incomplete and could not be cleared: {repair_error}") from first_error
             if not repaired:
                 if device == "cuda":
                     raise RuntimeError("A CUDA GPU is available but the speech model could not start on it. Check the NVIDIA driver/CUDA setup. CPU fallback is disabled while a GPU is available. " + str(first_error)[-700:]) from first_error
                 raise
-            self.log(f"The cached '{name}' model is incomplete (model.bin is missing). Clearing only its cache and downloading a fresh copy now.")
+            self.log(f"The local '{name}' model is incomplete (model.bin is missing). Downloading a verified fresh copy now.")
             try:
+                model_path = download_whisper_model(name, force=True)
                 _model, compute_type = load_selected_device()
             except Exception as retry_error:
                 raise RuntimeError(f"Fresh download of speech model '{name}' failed: {retry_error}") from retry_error
@@ -2686,7 +2713,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v1.2.8. Check the published release before updating.</p>
+    <p class="hint">Current app version: v1.2.9. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>

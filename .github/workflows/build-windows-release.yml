@@ -56,14 +56,16 @@ jobs:
           $pyproject = Get-Content -Raw pyproject.toml
           $appSource = Get-Content -Raw autoclip.py
           $installer = Get-Content -Raw installer/AutoClip.iss
-          $escapedVersion = [regex]::Escape($version)
-          if ($pyproject -notmatch ('(?m)^version\s*=\s*"' + $escapedVersion + '"\s*
+          $expectedPyprojectVersion = 'version = "' + $version + '"'
+          $expectedAppVersion = 'APP_VERSION = "' + $version + '"'
+          $expectedInstallerVersion = '#define MyAppVersion "' + $version + '"'
+          if (-not $pyproject.Contains($expectedPyprojectVersion)) {
             throw "pyproject.toml version does not match $version."
           }
-          if ($appSource -notmatch ('APP_VERSION\s*=\s*"' + $escapedVersion + '"')) {
+          if (-not $appSource.Contains($expectedAppVersion)) {
             throw "autoclip.py APP_VERSION does not match $version."
           }
-          if ($installer -notmatch ('#define MyAppVersion "' + $escapedVersion + '"')) {
+          if (-not $installer.Contains($expectedInstallerVersion)) {
             throw "installer/AutoClip.iss MyAppVersion does not match $version."
           }
 

@@ -2,73 +2,105 @@
 
 This policy describes how official Windows installer releases for StreamSnip AI are built, reviewed, signed, and published.
 
-## Scope
+## Scope and official downloads
 
-This policy applies only to the official `StreamSnipAI-Setup.exe` installer published in this repository's GitHub Releases. It does not cover third-party Python packages, FFmpeg, Whisper models, or binaries obtained separately by the app during first-time setup.
+This policy applies to the official StreamSnipAI-Setup.exe installer published in this repository's GitHub Releases. It does not claim that separately downloaded Python packages, FFmpeg, Whisper models, or other third-party components are signed by StreamSnip AI.
 
-The source of truth is:
-
-- Repository: https://github.com/sifat-jaman-13/stream-clip-ai
-- Release source branch: `master`
+- Repository and project home: https://github.com/sifat-jaman-13/stream-clip-ai
+- Official downloads: https://github.com/sifat-jaman-13/stream-clip-ai/releases
+- Release source branch: master
 - Build workflow: [Build and publish Windows release](.github/workflows/build-windows-release.yml)
 
-## Ownership and responsibilities
+## Project roles and release authority
 
-**Sifat Jaman** is the repository owner, project maintainer, and release authority.
+StreamSnip AI is maintained by a single-person project team.
 
-The maintainer is responsible for the application source, installer definition, build scripts, GitHub Actions workflow, release metadata, and the decision to publish a release. Changes to application code, dependencies, installer scripts, and CI/build configuration are reviewed by the maintainer before a release is authorized.
+- **Author / committer:** [Sifat Jaman](https://github.com/sifat-jaman-13) — project owner, source-code maintainer, and author of changes made directly to the trusted master branch.
+- **Reviewer:** Sifat Jaman — reviews and decides whether external contributor pull requests may be merged. The project does not currently have additional committer/reviewer members.
+- **Release approver:** Sifat Jaman — reviews the proposed release commit, authorizes the release workflow, and is responsible for deciding whether the installer may be published and signed.
 
-SignPath Foundation, if the project is accepted into its Open Source Code Signing program, supplies and controls the signing certificate and protects its private key. The project does not receive or export that private key.
+Contributors who do not have committer rights cannot directly modify the trusted release branch. Their proposed changes must be reviewed by the maintainer before merge. The maintainer is the only person authorized to dispatch the release workflow.
 
-## Release and build procedure
+## Privacy and network behavior
 
-1. Prepare a release-ready commit on the protected/default `master` branch.
-2. Review the changes since the previous release, including application source, dependencies, installer files, and all build/CI scripts.
-3. Confirm that the version in `pyproject.toml`, `autoclip.py`, and `installer/AutoClip.iss` is identical.
-4. Dispatch the Windows release workflow from `master`. The workflow rejects dispatches from other refs.
-5. The GitHub-hosted Windows runner runs the regression tests and Python syntax checks, installs the pinned Inno Setup 6.7.4 build tool, and invokes the repository's `build_windows.ps1`.
-6. The workflow uploads the unsigned installer to GitHub Actions artifact storage before it requests signing. The build and signing request run on GitHub-hosted infrastructure.
-7. When SignPath is configured, the workflow submits that exact workflow artifact to the project's SignPath release-signing policy. It downloads the returned artifact and verifies that Windows reports a valid Authenticode signature. A signing error or invalid signature stops publication; the workflow does not silently publish an unsigned fallback after a signing request fails.
-8. The workflow creates or updates the matching GitHub Release and publishes the installer together with a SHA-256 checksum.
+**This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.**
 
-The release workflow derives the release tag from the version committed to source control. If that tag already exists, it must point to the exact commit being built; otherwise publication stops.
+The app is local-first. Stream capture accesses the Twitch or YouTube URL selected by the user. Optional Gemini and Hugging Face providers receive transcript text only when the user selects and configures those services. Selected clips and captions are transferred to Zernio only when the user configures and uses publishing or enables auto-post. Package, FFmpeg, and speech-model downloads occur during explicit installation or first use. GitHub/PyPI update checks are user-initiated as documented in the README.
 
-## SignPath configuration and origin verification
+Relevant third-party services have their own privacy terms:
 
-For Open Source Code Signing, the SignPath project must be configured to use the predefined GitHub.com trusted build system, linked to this repository, and configured for origin verification. The release-signing policy should accept the `master` source branch only. The default artifact configuration must accept a single Windows PE executable, because the workflow uploads the installer without wrapping it in an additional ZIP archive.
+- [Google Privacy Policy](https://policies.google.com/privacy) — Gemini, when enabled by the user.
+- [Hugging Face Privacy Policy](https://huggingface.co/privacy) — hosted inference, when enabled by the user.
+- [Zernio Privacy Policy](https://zernio.com/privacy) — publishing, when configured and used.
+- [Twitch Privacy Notice](https://www.twitch.tv/p/legal/privacy-notice/) — when the user selects a Twitch stream.
+- [Google Privacy Policy](https://policies.google.com/privacy) — YouTube access and Google-hosted services.
 
-The GitHub Actions integration uses these repository settings:
+The project does not include advertising, telemetry, or background collection of user media. Locally stored credentials, settings, recordings, and clips remain on the user's machine unless a corresponding external feature is deliberately used. See the README's [Data, credentials, and privacy](README.md#data-credentials-and-privacy) section.
 
-- Actions variable `SIGNPATH_ORGANIZATION_ID`
-- Actions variable `SIGNPATH_PROJECT_SLUG`
-- Actions variable `SIGNPATH_SIGNING_POLICY_SLUG`
-- Actions secret `SIGNPATH_API_TOKEN`
+## Build and signing procedure
 
-All four settings must be present to enable signing. A partial configuration fails the workflow instead of producing a misleading unsigned release.
+1. Prepare a release-ready commit on the trusted/default master branch.
+2. Review all changes since the previous release, including application source, dependencies, installer scripts, GitHub Actions workflows, and other build configuration. Build scripts and CI configuration are part of the source-code review.
+3. Confirm that the version in pyproject.toml, autoclip.py, and installer/AutoClip.iss is identical.
+4. Dispatch the Windows release workflow from master. The workflow rejects any other source ref and refuses to reuse an existing version tag.
+5. The workflow runs on a GitHub-hosted Windows runner, executes the regression tests and Python syntax checks, installs a pinned Inno Setup compiler, and invokes the checked-in build_windows.ps1 script.
+6. The resulting unsigned StreamSnipAI-Setup.exe is uploaded as a single-file GitHub Actions workflow artifact before the signing request is submitted.
+7. SignPath verifies repository origin metadata (repository URL, master branch, commit ID, and GitHub workflow URL) using its predefined GitHub.com Trusted Build System. The SignPath project is configured for origin verification and a release policy that permits only the reviewed master branch.
+8. The signed artifact is downloaded from SignPath. The workflow rejects the result unless Windows reports a valid Authenticode signature and the product name/version metadata still match the source release.
+9. The workflow calculates SHA-256 from the signed installer and publishes the installer, checksum, and signer/build metadata in a GitHub Release. A failed signing request or invalid signature stops publication; there is no unsigned fallback.
 
-Until the project is accepted by SignPath and these settings have been configured, the workflow can publish an explicitly unsigned installer with its checksum. The existing unsigned releases remain unsigned; adding this policy does not retroactively sign them.
+The workflow derives the release tag from the version in source control. Existing version tags are never overwritten. Existing unsigned releases are not retroactively signed.
 
-## Artifact integrity and authenticity
+## SignPath project configuration
 
-Each published installer has a companion `StreamSnipAI-Setup.exe.sha256` file. A SHA-256 match detects accidental or malicious file changes relative to the checksum, but it does not establish the publisher's identity.
+Before enabling the release workflow, the maintainer must:
 
-When SignPath signing is active, the release workflow checks the Authenticode signature status before publishing. Users can inspect a downloaded installer in PowerShell:
+1. Apply for the SignPath Foundation Open Source Code Signing program and obtain project approval.
+2. Add the predefined **GitHub.com** Trusted Build System to the SignPath organization and link it to the StreamSnip AI SignPath project.
+3. Install the SignPath GitHub App and grant it access to this repository, as required for source/build policies and origin verification.
+4. Configure the project repository URL as https://github.com/sifat-jaman-13/stream-clip-ai.
+5. Enable Trusted Build System verification and **Verify origin** for the release signing policy; restrict allowed branch names to master.
+6. Configure the artifact configuration to accept a single Windows PE executable and enforce the product name StreamSnip AI and the release product version.
+7. Create a signing-policy slug and an API token with submitter permission for that policy.
+8. Enable repository GitHub Actions access to the settings below.
+
+Required repository Actions settings:
+
+| Type | Name | Value |
+|---|---|---|
+| Variable | SIGNPATH_ENABLED | true |
+| Variable | SIGNPATH_ORGANIZATION_ID | SignPath organization ID |
+| Variable | SIGNPATH_PROJECT_SLUG | SignPath project slug |
+| Variable | SIGNPATH_SIGNING_POLICY_SLUG | SignPath release signing-policy slug |
+| Secret | SIGNPATH_API_TOKEN | SignPath API token |
+
+The release workflow deliberately fails before building/publishing when these settings are absent or incomplete. It does not create an unsigned release while signing is unavailable.
+
+## Artifact identity and integrity
+
+The Inno Setup installer embeds the following version-resource metadata, which is checked by the release workflow and must be enforced in the SignPath artifact configuration:
+
+- Product name: StreamSnip AI
+- Product version: the same semantic version recorded in all project version files
+- File description: StreamSnip AI Setup
+
+Each release contains:
+
+- StreamSnipAI-Setup.exe — the signed installer.
+- StreamSnipAI-Setup.exe.sha256 — SHA-256 checksum of the signed installer.
+- SIGNATURE.txt — Authenticode status, signer subject, product/version, and source commit.
+
+A SHA-256 match detects file changes relative to the published checksum; it does not prove publisher identity. Users can inspect the Authenticode signature in PowerShell:
 
 ```powershell
 Get-AuthenticodeSignature .\StreamSnipAI-Setup.exe |
     Format-List Status, StatusMessage, SignerCertificate
 ```
 
-A valid SignPath Foundation signature identifies **SignPath Foundation** as the verified publisher. It does not identify Sifat Jaman as the certificate holder.
+When accepted into the SignPath Foundation program, the verified publisher is **SignPath Foundation**, not Sifat Jaman. The installer may separately display Sifat Jaman as its application publisher metadata; this does not change the certificate identity.
 
-## Source and third-party components
+## Required attribution
 
-The installer is built from this repository's own launcher, application source, assets, and installer scripts. The Windows setup process obtains runtime dependencies separately at installation time; the official installer does not claim ownership of those upstream projects. Optional hosted AI and publishing integrations are external services and are not part of the signed installer binary.
-
-Only the project's own installer artifact is submitted for signing. The project will not submit unrelated third-party executables or binaries from another project as if they were its own.
-
-## Attribution
-
-When using a certificate provided by SignPath Foundation, the project will include the attribution requested by the Foundation:
+For releases signed using the SignPath Foundation certificate:
 
 > Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).

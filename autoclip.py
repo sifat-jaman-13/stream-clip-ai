@@ -29,7 +29,7 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -526,6 +526,86 @@ def streamer_credit(cfg):
     if m:
         return "@" + re.sub(r"[\r\n{}\\]", "", m.group(1))
     return ""
+
+CLIP_HASHTAGS = "#shorts #fyp #streamer #funny #clips #viral"
+_CLIP_MANIFEST_LOCK = threading.Lock()
+
+
+def _clip_timestamp(seconds):
+    """Format source-video timestamps as HH:MM:SS."""
+    total = max(0, int(float(seconds)))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def build_clip_metadata_text(clip_filename, source_filename, start, end, transcript,
+                             creator_credit=""):
+    """Return a scheduler-compatible TXT: title on line one, description below."""
+    transcript = re.sub(r"\s+", " ", str(transcript or "")).strip()
+    source_name = pathlib.Path(str(source_filename)).name
+    clip_name = pathlib.Path(str(clip_filename)).name
+
+    if transcript:
+        title = re.split(r"(?<=[.!?])\s+", transcript, maxsplit=1)[0].strip() or transcript
+    else:
+        source_title = pathlib.Path(source_name).stem.replace("_", " ").strip()
+        title = f"Highlight from {source_title or 'video'}"
+
+    if len(title) > 100:
+        shortened = title[:97].rsplit(" ", 1)[0].rstrip(" .,:;!?-")
+        title = (shortened or title[:97].rstrip()) + "..."
+
+    description = transcript or "A highlight from this video. No speech transcript was detected."
+    if creator_credit:
+        description += f"\n\nClip from {creator_credit}"
+    description += f"\n\n{CLIP_HASHTAGS}"
+    description += (
+        f"\n\nClip: {clip_name}"
+        f"\nSource: {source_name}"
+        f"\nTimestamp: {_clip_timestamp(start)} - {_clip_timestamp(end)}"
+    )
+    return f"{title}\n\n{description}\n"
+
+
+def _atomic_text_write(path, content):
+    """Write UTF-8 text via a temporary sibling file to avoid partial metadata."""
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def write_clip_metadata_files(output_dir, clip_filename, source_filename, start, end,
+                              transcript, creator_credit="", on_warning=None):
+    """Create a matching per-clip TXT and append the same entry to a clips index."""
+    output_dir = pathlib.Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    clip_name = pathlib.Path(str(clip_filename)).name
+    sidecar = output_dir / f"{pathlib.Path(clip_name).stem}.txt"
+    metadata = build_clip_metadata_text(
+        clip_name, source_filename, start, end, transcript, creator_credit
+    )
+    _atomic_text_write(sidecar, metadata)
+
+    manifest = output_dir / "clips_metadata.txt"
+    try:
+        with _CLIP_MANIFEST_LOCK:
+            existing = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
+            combined = existing.rstrip() + ("\n\n" if existing.strip() else "") + metadata
+            _atomic_text_write(manifest, combined)
+        return sidecar, manifest
+    except OSError as exc:
+        if on_warning:
+            on_warning(
+                f"The matching clip TXT was saved, but clips_metadata.txt could not be updated: {exc}"
+            )
+        return sidecar, None
+
 
 def normalize_stream_target(value):
     """Accept common pasted Twitch/YouTube links without a scheme."""
@@ -1385,14 +1465,23 @@ class Engine:
             else:
                 self.log("Soft CTA voice unavailable; the on-screen CTA was kept.")
             voice.unlink(missing_ok=True)
-        text = " ".join(clean_word(w).lower() for s, e, w in words if start <= s <= end).strip()
-        hook = (text[:110].rstrip() + ("..." if len(text) > 110 else "")) or "Clip"
+        transcript = " ".join(
+            str(word).strip() for word_start, _word_end, word in words
+            if start <= word_start <= end
+        )
+        transcript = re.sub(r"\s+", " ", transcript).strip()
         tag = streamer_credit(self.cfg)
-        credit = f"Clip from {tag}\n\n" if tag else ""
-        (OUT / f"{name}.txt").write_text(
-            f"{hook}\n\n{credit}#shorts #fyp #streamer #funny #clips #viral\n", encoding="utf-8")
-        self.replace_output(OUT / tmp, OUT / f"{name}.mp4")
-        self.emit("clip", f"{name}.mp4")
+        final_video = OUT / f"{name}.mp4"
+        self.replace_output(OUT / tmp, final_video)
+        try:
+            write_clip_metadata_files(
+                OUT, final_video.name, pathlib.Path(src).name, start, end,
+                transcript, tag, on_warning=self.log
+            )
+        except Exception:
+            final_video.unlink(missing_ok=True)
+            raise
+        self.emit("clip", final_video.name)
 
     def process(self, path):
         pth = pathlib.Path(path)

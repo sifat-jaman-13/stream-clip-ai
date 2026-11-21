@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.12] - 2026-11-21
+
+### Changed
+
+- Made the Hugging Face token prompt prominent and explicit before speech-model downloads; token entry remains hidden and optional.
+
 ## [1.2.11] - 2026-11-21
 
 ### Added
@@ -91,7 +97,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.11...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.12...HEAD
+[1.2.12]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.11...v1.2.12
 [1.2.11]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.10...v1.2.11
 [1.2.10]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.8...v1.2.9

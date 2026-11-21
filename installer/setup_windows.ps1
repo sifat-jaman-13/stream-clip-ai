@@ -198,7 +198,10 @@ for name in sys.argv[2:]:
 function Request-HuggingFaceToken {
     if ($env:HF_TOKEN -or $env:HUGGING_FACE_HUB_TOKEN) { return }
     try {
-        $secure = Read-Host "Paste your Hugging Face token (optional; input is hidden)" -AsSecureString
+        Write-Host ""
+        Write-Host "Hugging Face authentication" -ForegroundColor Cyan
+        Write-Host "Paste your hf_... token at the prompt below. Your typing is hidden; press Enter to skip." -ForegroundColor Yellow
+        $secure = Read-Host -Prompt "HF token" -AsSecureString
         if ($secure.Length -eq 0) { return }
         $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
         try {
@@ -206,7 +209,7 @@ function Request-HuggingFaceToken {
             if ($token) {
                 $env:HF_TOKEN = $token
                 $env:HUGGING_FACE_HUB_TOKEN = $token
-                Write-Host "Hugging Face token received. It will not be written to the setup log." -ForegroundColor Green
+                Write-Host "Hugging Face token received. Authenticated model downloads enabled." -ForegroundColor Green
             }
         } finally {
             [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)

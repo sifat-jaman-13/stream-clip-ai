@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Generated clips now receive matching TXT sidecars with a transcript-derived title on the first line and a full description below it, plus creator credit, hashtags, filenames, and source timestamps. A cumulative `clips_metadata.txt` index is also maintained.
+
 ## [2.0.5] - 2026-11-21
 
 ### Changed

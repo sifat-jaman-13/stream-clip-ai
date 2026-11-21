@@ -195,6 +195,27 @@ for name in sys.argv[2:]:
     }
 }
 
+function Request-HuggingFaceToken {
+    if ($env:HF_TOKEN -or $env:HUGGING_FACE_HUB_TOKEN) { return }
+    try {
+        $secure = Read-Host "Paste your Hugging Face token (optional; input is hidden)" -AsSecureString
+        if ($secure.Length -eq 0) { return }
+        $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        try {
+            $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+            if ($token) {
+                $env:HF_TOKEN = $token
+                $env:HUGGING_FACE_HUB_TOKEN = $token
+                Write-Host "Hugging Face token received. It will not be written to the setup log." -ForegroundColor Green
+            }
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+        }
+    } catch {
+        Write-Host "No Hugging Face token supplied; continuing with the public download route." -ForegroundColor Yellow
+    }
+}
+
 try {
     $AppDir = [IO.Path]::GetFullPath($AppDir)
     $source = Join-Path $AppDir "source"
@@ -264,6 +285,7 @@ try {
 
         $speechModelRoot = Join-Path $source "models"
         Write-Host "Downloading and verifying StreamSnip AI speech models. This can take a while and needs an internet connection..." -ForegroundColor Cyan
+        Request-HuggingFaceToken
         Ensure-SpeechModels $runtimePython $speechModelRoot
 
         if (-not $SkipLaunch) {

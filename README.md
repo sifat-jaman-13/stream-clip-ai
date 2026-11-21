@@ -6,6 +6,8 @@
 
 <p align="center"><a href="https://sifat-jaman-13.github.io/stream-clip-ai/"><strong>🌐 Visit the StreamSnip AI website</strong></a></p>
 
+> First-time website setup: open **Settings → Pages** and set **Build and deployment → Source** to **GitHub Actions**. The workflow in `.github/workflows/deploy-site.yml` will then publish the site.
+
 <p align="center">
   A local-first stream clipper for turning Twitch, YouTube, and video files into captioned clips for Shorts, Reels, TikTok, and YouTube.
 </p>

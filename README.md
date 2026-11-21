@@ -12,7 +12,8 @@
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sifat-jaman-13/stream-clip-ai?display_name=tag&sort=semver"></a>
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe"><img alt="Windows installer" src="https://img.shields.io/badge/download-Windows%20installer-7c3aed?logo=windows"></a>
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-22c55e"></a>\n  <a href="CODE_SIGNING.md">Code signing policy</a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-22c55e"></a>
+  <a href="CODE_SIGNING.md">Code signing policy</a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white">
 </p>
 

@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.7] - 2026-11-22
+
+### Added
+
+- Added transcript-grounded AI post-copy generation using the selected Gemini, Ollama, or Hugging Face provider, with a single bounded request per completed clip.
+- Added a UI toggle to enable/disable AI-written titles and descriptions for ScarClipScheduler.
+- Added strict title/description/hashtag validation, a transcript-based fallback, and a conservative sentence-case/proper-name check to reject unsupported locations or game titles.
+- Per-clip TXT sidecars now contain clean post-ready copy; source filenames and timestamps remain in the internal `clips_metadata.txt` index.
+- Added provider, format, validation, and renderer regression coverage for AI post metadata.
+
+### Changed
+
+- Bumped StreamSnip AI to 2.0.7 and included the new metadata module in source packaging, installer, and PyInstaller configuration.
+
+## [2.0.6] - 2026-11-21
+
 ### Added
 
 - Generated clips now receive matching TXT sidecars with a transcript-derived title on the first line and a full description below it, plus creator credit, hashtags, filenames, and source timestamps. A cumulative `clips_metadata.txt` index is also maintained.
@@ -158,7 +174,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.5...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.7...HEAD
+[2.0.7]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.6...v2.0.7
+[2.0.6]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.4...v2.0.5
 [2.0.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.2...v2.0.3

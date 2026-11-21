@@ -29,7 +29,15 @@ class RegressionTests(unittest.TestCase):
                  patch.object(autoclip, "make_ass"), \
                  patch.object(autoclip, "run", side_effect=fake_run), \
                  patch.object(autoclip, "has_nvenc", return_value=False), \
-                 patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"):
+                 patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"), \
+                 patch.object(autoclip, "load_ai_settings", return_value={
+                     "provider": "gemini", "metadata_copy_enabled": "true"
+                 }), \
+                 patch.object(autoclip, "generate_social_copy", return_value={
+                     "title": "The chat could not believe what happened",
+                     "description": "A sudden turn leaves the streamer stunned and the chat reacting.",
+                     "hashtags": ["#Shorts", "#Gaming"],
+                 }):
                 engine.render(
                     "source_recording.mp4", 10, 18,
                     [(10.1, 10.5, "That"), (10.5, 11.0, "was"),
@@ -40,12 +48,54 @@ class RegressionTests(unittest.TestCase):
             self.assertTrue((output / "rendered_clip.mp4").is_file())
             sidecar = (output / "rendered_clip.txt").read_text(encoding="utf-8")
             manifest = (output / "clips_metadata.txt").read_text(encoding="utf-8")
+            self.assertEqual(sidecar.splitlines()[0], "The chat could not believe what happened")
+            self.assertIn("A sudden turn leaves the streamer stunned", sidecar)
+            self.assertIn("#Shorts #Gaming", sidecar)
+            self.assertNotIn("Source: source_recording.mp4", sidecar)
+            self.assertNotIn("Timestamp:", sidecar)
+            self.assertIn("Clip: rendered_clip.mp4", manifest)
+            self.assertIn("Source: source_recording.mp4", manifest)
+            self.assertIn("Timestamp: 00:00:10 - 00:00:18", manifest)
+
+    def test_renderer_keeps_clip_and_uses_transcript_fallback_when_ai_copy_fails(self):
+        cfg = autoclip.clean_cfg({
+            "compute_device": "cpu",
+            "cta_enabled": False,
+            "cta_voice_enabled": False,
+        })
+        logs = []
+        engine = autoclip.Engine(cfg, lambda kind, value: logs.append((kind, value)))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+
+            def fake_run(command, cwd, **_kwargs):
+                (Path(cwd) / command[-1]).write_bytes(b"test video")
+                return types.SimpleNamespace(returncode=0, stderr="")
+
+            with patch.object(autoclip, "OUT", output), \
+                 patch.object(autoclip, "make_ass"), \
+                 patch.object(autoclip, "run", side_effect=fake_run), \
+                 patch.object(autoclip, "has_nvenc", return_value=False), \
+                 patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"), \
+                 patch.object(autoclip, "load_ai_settings", return_value={
+                     "provider": "gemini", "metadata_copy_enabled": "true"
+                 }), \
+                 patch.object(autoclip, "generate_social_copy",
+                              side_effect=RuntimeError("Gemini timeout")) as copy:
+                engine.render(
+                    "source_recording.mp4", 10, 18,
+                    [(10.1, 10.5, "That"), (10.5, 11.0, "was"),
+                     (11.0, 11.5, "unbelievable!")],
+                    "fallback_clip"
+                )
+
+            self.assertTrue((output / "fallback_clip.mp4").is_file())
+            sidecar = (output / "fallback_clip.txt").read_text(encoding="utf-8")
             self.assertEqual(sidecar.splitlines()[0], "That was unbelievable!")
             self.assertIn("That was unbelievable!", sidecar)
-            self.assertIn("Clip: rendered_clip.mp4", sidecar)
-            self.assertIn("Source: source_recording.mp4", sidecar)
-            self.assertIn("Timestamp: 00:00:10 - 00:00:18", sidecar)
-            self.assertIn("Clip: rendered_clip.mp4", manifest)
+            self.assertEqual(copy.call_count, 1)
+            self.assertTrue(any("using transcript fallback" in str(value).lower()
+                                for _kind, value in logs))
 
     def test_clip_metadata_sidecar_and_combined_index(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -61,10 +111,14 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(metadata.splitlines()[0], "That was unbelievable!")
             self.assertIn("\n\nThat was unbelievable! The whole chat went crazy.", metadata)
             self.assertIn("Clip from @streamer", metadata)
-            self.assertIn("Clip: stream_clip1.mp4", metadata)
-            self.assertIn("Source: stream_recording.mp4", metadata)
-            self.assertIn("Timestamp: 00:00:12 - 00:00:47", metadata)
             self.assertIn("#shorts", metadata)
+            self.assertNotIn("Clip: stream_clip1.mp4", metadata)
+            self.assertNotIn("Source: stream_recording.mp4", metadata)
+            self.assertNotIn("Timestamp:", metadata)
+            index_before = manifest.read_text(encoding="utf-8")
+            self.assertIn("Clip: stream_clip1.mp4", index_before)
+            self.assertIn("Source: stream_recording.mp4", index_before)
+            self.assertIn("Timestamp: 00:00:12 - 00:00:47", index_before)
             autoclip.write_clip_metadata_files(
                 output, "stream_clip2.mp4", "stream_recording.mp4", 65, 91,
                 "Another great moment.", "@streamer"
@@ -776,8 +830,15 @@ class RegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ai_settings.json"
             with patch.object(autoclip, "AI_SETTINGS_FILE", path):
-                saved = autoclip.save_ai_settings({"provider": "gemini", "gemini_api_key": "secret"})
+                saved = autoclip.save_ai_settings({
+                    "provider": "gemini", "gemini_api_key": "secret",
+                    "metadata_copy_enabled": False,
+                })
                 stored = path.read_text(encoding="utf-8")
+                self.assertFalse(saved["metadata_copy_enabled"])
+                self.assertEqual(autoclip.load_ai_settings()["metadata_copy_enabled"], "false")
+                enabled = autoclip.save_ai_settings({"metadata_copy_enabled": True})
+                self.assertTrue(enabled["metadata_copy_enabled"])
             self.assertTrue(saved["gemini_key_set"])
             self.assertNotIn("secret", str(saved))
             self.assertIn("secret", stored)

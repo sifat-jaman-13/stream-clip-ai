@@ -1,5 +1,5 @@
 #define MyAppName "StreamSnip AI"
-#define MyAppVersion "2.0.5"
+#define MyAppVersion "2.0.7"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 
@@ -26,6 +26,7 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\autoclip.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\ai_highlights.py"; DestDir: "{app}\source"; Flags: ignoreversion
+Source: "..\post_metadata.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\zernio_poster.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\installer\setup_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion

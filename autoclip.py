@@ -29,7 +29,8 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "2.0.6"
+from post_metadata import generate_social_copy
+APP_VERSION = "2.0.7"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -540,13 +541,16 @@ def _clip_timestamp(seconds):
 
 
 def build_clip_metadata_text(clip_filename, source_filename, start, end, transcript,
-                             creator_credit=""):
-    """Return a scheduler-compatible TXT: title on line one, description below."""
+                             creator_credit="", post_title=None, post_description=None,
+                             post_hashtags=None, include_provenance=False):
+    """Return Scheduler-compatible post copy; provenance stays in the local manifest only."""
     transcript = re.sub(r"\s+", " ", str(transcript or "")).strip()
     source_name = pathlib.Path(str(source_filename)).name
     clip_name = pathlib.Path(str(clip_filename)).name
 
-    if transcript:
+    if post_title:
+        title = str(post_title).strip()
+    elif transcript:
         title = re.split(r"(?<=[.!?])\s+", transcript, maxsplit=1)[0].strip() or transcript
     else:
         source_title = pathlib.Path(source_name).stem.replace("_", " ").strip()
@@ -555,16 +559,24 @@ def build_clip_metadata_text(clip_filename, source_filename, start, end, transcr
     if len(title) > 100:
         shortened = title[:97].rsplit(" ", 1)[0].rstrip(" .,:;!?-")
         title = (shortened or title[:97].rstrip()) + "..."
+    title = title[0].upper() + title[1:] if title else "Highlight"
 
-    description = transcript or "A highlight from this video. No speech transcript was detected."
-    if creator_credit:
+    description = str(post_description or "").strip()
+    if not description:
+        description = transcript or "A highlight from this video. No speech transcript was detected."
+    if creator_credit and creator_credit.lower() not in description.lower():
         description += f"\n\nClip from {creator_credit}"
-    description += f"\n\n{CLIP_HASHTAGS}"
-    description += (
-        f"\n\nClip: {clip_name}"
-        f"\nSource: {source_name}"
-        f"\nTimestamp: {_clip_timestamp(start)} - {_clip_timestamp(end)}"
-    )
+    tags = post_hashtags if isinstance(post_hashtags, list) else []
+    tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+    if not tags:
+        tags = CLIP_HASHTAGS.split()
+    description += f"\n\n{' '.join(tags)}"
+    if include_provenance:
+        description += (
+            f"\n\nClip: {clip_name}"
+            f"\nSource: {source_name}"
+            f"\nTimestamp: {_clip_timestamp(start)} - {_clip_timestamp(end)}"
+        )
     return f"{title}\n\n{description}\n"
 
 
@@ -581,22 +593,28 @@ def _atomic_text_write(path, content):
 
 
 def write_clip_metadata_files(output_dir, clip_filename, source_filename, start, end,
-                              transcript, creator_credit="", on_warning=None):
-    """Create a matching per-clip TXT and append the same entry to a clips index."""
+                              transcript, creator_credit="", on_warning=None,
+                              post_title=None, post_description=None, post_hashtags=None):
+    """Create clean post-ready TXT plus an internal provenance-rich clips index."""
     output_dir = pathlib.Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     clip_name = pathlib.Path(str(clip_filename)).name
     sidecar = output_dir / f"{pathlib.Path(clip_name).stem}.txt"
-    metadata = build_clip_metadata_text(
-        clip_name, source_filename, start, end, transcript, creator_credit
+    sidecar_text = build_clip_metadata_text(
+        clip_name, source_filename, start, end, transcript, creator_credit,
+        post_title, post_description, post_hashtags, include_provenance=False
     )
-    _atomic_text_write(sidecar, metadata)
+    _atomic_text_write(sidecar, sidecar_text)
 
     manifest = output_dir / "clips_metadata.txt"
     try:
+        manifest_text = build_clip_metadata_text(
+            clip_name, source_filename, start, end, transcript, creator_credit,
+            post_title, post_description, post_hashtags, include_provenance=True
+        )
         with _CLIP_MANIFEST_LOCK:
             existing = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
-            combined = existing.rstrip() + ("\n\n" if existing.strip() else "") + metadata
+            combined = existing.rstrip() + ("\n\n" if existing.strip() else "") + manifest_text
             _atomic_text_write(manifest, combined)
         return sidecar, manifest
     except OSError as exc:
@@ -684,7 +702,8 @@ def save_publishing_settings(cfg):
 def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
                 "gemini_model": DEFAULT_GEMINI_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
-                "gemini_api_key": "", "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", ""))}
+                "gemini_api_key": "", "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", "")),
+                "metadata_copy_enabled": "true"}
     try:
         data = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
         if isinstance(data, dict): defaults.update({k: str(v) for k, v in data.items() if k in defaults and v is not None})
@@ -704,7 +723,8 @@ def public_ai_settings():
             "ollama_model": cfg["ollama_model"], "gemini_model": cfg["gemini_model"],
             "huggingface_model": cfg["huggingface_model"],
             "gemini_key_set": bool(cfg["gemini_api_key"]),
-            "huggingface_token_set": bool(cfg["huggingface_token"])}
+            "huggingface_token_set": bool(cfg["huggingface_token"]),
+            "metadata_copy_enabled": str(cfg.get("metadata_copy_enabled", "true")).strip().lower() not in {"0", "false", "no", "off"}}
 
 def save_ai_settings(body):
     cfg = load_ai_settings()
@@ -713,6 +733,8 @@ def save_ai_settings(body):
     if provider not in {"hooks", "ollama", "gemini", "huggingface"}:
         raise ValueError("Unknown AI highlight provider.")
     cfg["provider"] = provider
+    if "metadata_copy_enabled" in body:
+        cfg["metadata_copy_enabled"] = "true" if bool(body["metadata_copy_enabled"]) else "false"
     for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model"):
         if key in body:
             cfg[key] = str(body[key]).strip()[:500]
@@ -1471,12 +1493,32 @@ class Engine:
         )
         transcript = re.sub(r"\s+", " ", transcript).strip()
         tag = streamer_credit(self.cfg)
+        post_copy = None
+        ai_cfg = {}
+        try:
+            ai_cfg = load_ai_settings()
+            copy_enabled = str(ai_cfg.get("metadata_copy_enabled", "true")).strip().lower() not in {
+                "0", "false", "no", "off"
+            }
+            if copy_enabled and transcript and ai_cfg.get("provider") != "hooks":
+                post_copy = generate_social_copy(transcript, tag, ai_cfg, log=self.log)
+            elif copy_enabled and ai_cfg.get("provider") == "hooks":
+                self.log("AI post copy is enabled but Hook words is selected. Choose Gemini, Ollama, or Hugging Face in AI settings; transcript fallback will be used for this clip.")
+        except Exception as exc:
+            provider = str(ai_cfg.get("provider", "unknown")).lower()
+            self.log(
+                f"{provider.title()} post copy unavailable or failed validation; "
+                f"using transcript fallback: {str(exc)[:220]}"
+            )
         final_video = OUT / f"{name}.mp4"
         self.replace_output(OUT / tmp, final_video)
         try:
             write_clip_metadata_files(
                 OUT, final_video.name, pathlib.Path(src).name, start, end,
-                transcript, tag, on_warning=self.log
+                transcript, tag, on_warning=self.log,
+                post_title=post_copy.get("title") if post_copy else None,
+                post_description=post_copy.get("description") if post_copy else None,
+                post_hashtags=post_copy.get("hashtags") if post_copy else None,
             )
         except Exception:
             final_video.unlink(missing_ok=True)
@@ -2750,6 +2792,8 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     </div>
     <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><div class="prow"><b id="gemini-key-state">Not saved</b><button type="button" class="btn ghost" id="gemini-key-clear">Clear saved key</button></div></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><div class="row"><label>Preferred Gemini model</label></div><input id="gemini-model" class="text" value="gemini-3.8-flash" placeholder="gemini-3.8-flash"><p class="hint">The app checks this model first, tries the other available Gemini models if needed, then falls back to Ollama. Model IDs can change; use one enabled for your API key.</p></div>
     <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="deepseek-ai/DeepSeek-V4.1-Flash:fastest"><div class="row"><label>Hugging Face access token</label><div class="prow"><b id="hf-token-state">Not saved</b><button type="button" class="btn ghost" id="hf-token-clear">Clear saved token</button></div></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads. Use a token with Inference Providers access and available provider credits.</p></div>
+    <label class="toggle" style="margin-top:12px"><span>AI-write post titles &amp; descriptions for ScarClipScheduler</span><input type="checkbox" id="metadata-copy-enabled"><i class="sl"></i></label>
+    <p class="hint">Uses the selected Gemini, Ollama, or Hugging Face provider once per finished clip. If AI is unavailable or its response is unusable, StreamSnip keeps the transcript-based fallback. Gemini/Hugging Face requests may use quota or credits.</p>
     <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><button class="btn ghost" id="ai-test-provider">Test connection</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
   </div>
 
@@ -2976,6 +3020,7 @@ function stopWindowLease(){windowLeaseActive=false;if(windowLeaseController)wind
 markWindowOpen();startWindowLease();window.addEventListener("pageshow",()=>{markWindowOpen();startWindowLease()});
 window.addEventListener("pagehide",()=>{stopWindowLease();if(appClosing)return;fetch("/api/window/closing",{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:"{}",keepalive:true}).catch(()=>{})});
 const AI=BOOT.ai||{provider:"hooks",ollama_url:"http://127.0.0.1:11434",ollama_model:""};
+$("#metadata-copy-enabled").checked=AI.metadata_copy_enabled!==false;
 $("#ai-provider").value=AI.provider||"hooks";
 $("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
 $("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.ollama_model||"Click Detect models"));
@@ -2987,7 +3032,7 @@ $("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled
 function showAIFields(updateMessage=false){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$("#ai-test-provider").hidden=p==="hooks";if(updateMessage){const names={ollama:"Ollama",gemini:"Gemini",huggingface:"Hugging Face"};$("#ai-settings-msg").textContent=p==="hooks"?"Built-in hook detection selected":"Ready to test or save "+names[p]+" settings"}$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
 $("#ai-provider").onchange=()=>showAIFields(true);$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields(true)});showAIFields(true);
 $("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
-function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest"};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;return payload}
+function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest",metadata_copy_enabled:$("#metadata-copy-enabled").checked};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;return payload}
 function refreshAISecretState(){$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set}
 $("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";refreshAISecretState();$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 async function clearAISecret(kind){const gemini=kind==="gemini";const label=gemini?"Gemini API key":"Hugging Face token";if(!(await confirmBox("Clear saved "+label+"?","The credential will be removed from this computer. Add and save a new one before using this hosted provider again.","Clear credential")))return;const button=$(gemini?"#gemini-key-clear":"#hf-token-clear");button.disabled=true;try{const payload=aiSettingsPayload();payload[gemini?"clear_gemini_key":"clear_huggingface_token"]=true;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$(gemini?"#gemini-key":"#hf-token").value="";refreshAISecretState();$("#ai-settings-msg").textContent=label+" cleared from this computer";toast(label+" cleared","ok")}catch(e){refreshAISecretState();$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}}

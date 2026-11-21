@@ -110,8 +110,10 @@ Gemini currently prefers `gemini-3.8-flash`. On retryable model/API failures, St
 - Customization: highlight color, font, words per line, font size, vertical position, text/stroke colors, and alignment.
 - Branding: automatic streamer credit, optional custom credit, end-card CTA, and optional Windows voice CTA.
 - Output: each `.mp4` clip has a matching `.txt` file. The **first non-empty line is the title** and everything below it is the description, so the files work directly with ScarClipScheduler's title/description scanner.
-- The matching TXT includes the clip transcript, creator credit (when available), hashtags, MP4 filename, source filename, and original-video timestamp range.
-- A cumulative `clips_metadata.txt` index in the output folder lists metadata for every generated clip.
+- **AI post copy:** enable **AI-write post titles & descriptions for ScarClipScheduler** in the AI card. Each finished clip gets one concise request to the selected Gemini, Ollama, or Hugging Face provider. Titles are cleaned and capped at 100 characters; descriptions are short, transcript-grounded, and include a small set of relevant hashtags. The prompt requires sentence case and forbids invented context and generic clickbait. A conservative sentence-case check rejects title-case/proper-name wording that could introduce an unsupported game, character, location, or brand.
+- If AI post copy is disabled, Hook words is selected, or the provider returns an error/unusable response, the app continues with the transcript-based fallback. Gemini/Hugging Face copy generation can use provider quota/credits; this is one additional request per generated clip.
+- The per-clip TXT contains post-ready title, description, creator credit (when available), and hashtags. Filenames and source timestamps stay in the cumulative `clips_metadata.txt` index instead of being accidentally included in the public post description.
+- A cumulative `clips_metadata.txt` index in the output folder lists metadata and source timestamps for every generated clip.
 
 ## Zernio publishing
 

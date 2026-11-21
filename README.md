@@ -4,6 +4,8 @@
 
 <h1 align="center">StreamSnip AI</h1>
 
+<p align="center"><a href="https://sifat-jaman-13.github.io/stream-clip-ai/"><strong>🌐 Visit the StreamSnip AI website</strong></a></p>
+
 <p align="center">
   A local-first stream clipper for turning Twitch, YouTube, and video files into captioned clips for Shorts, Reels, TikTok, and YouTube.
 </p>

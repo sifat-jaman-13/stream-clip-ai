@@ -11,6 +11,42 @@ from zernio_poster import ZernioPublisher
 
 
 class RegressionTests(unittest.TestCase):
+    def test_render_creates_matching_title_description_txt_and_combined_index(self):
+        cfg = autoclip.clean_cfg({
+            "compute_device": "cpu",
+            "cta_enabled": False,
+            "cta_voice_enabled": False,
+        })
+        engine = autoclip.Engine(cfg, lambda *_: None)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+
+            def fake_run(command, cwd, **_kwargs):
+                (Path(cwd) / command[-1]).write_bytes(b"test video")
+                return types.SimpleNamespace(returncode=0, stderr="")
+
+            with patch.object(autoclip, "OUT", output), \
+                 patch.object(autoclip, "make_ass"), \
+                 patch.object(autoclip, "run", side_effect=fake_run), \
+                 patch.object(autoclip, "has_nvenc", return_value=False), \
+                 patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"):
+                engine.render(
+                    "source_recording.mp4", 10, 18,
+                    [(10.1, 10.5, "That"), (10.5, 11.0, "was"),
+                     (11.0, 11.5, "unbelievable!")],
+                    "rendered_clip"
+                )
+
+            self.assertTrue((output / "rendered_clip.mp4").is_file())
+            sidecar = (output / "rendered_clip.txt").read_text(encoding="utf-8")
+            manifest = (output / "clips_metadata.txt").read_text(encoding="utf-8")
+            self.assertEqual(sidecar.splitlines()[0], "That was unbelievable!")
+            self.assertIn("That was unbelievable!", sidecar)
+            self.assertIn("Clip: rendered_clip.mp4", sidecar)
+            self.assertIn("Source: source_recording.mp4", sidecar)
+            self.assertIn("Timestamp: 00:00:10 - 00:00:18", sidecar)
+            self.assertIn("Clip: rendered_clip.mp4", manifest)
+
     def test_clip_metadata_sidecar_and_combined_index(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)

@@ -13,6 +13,7 @@
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe"><img alt="Windows installer" src="https://img.shields.io/badge/download-Windows%20installer-7c3aed?logo=windows"></a>
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-22c55e"></a>
+  <a href="CODE_SIGNING.md">Code signing policy</a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white">
 </p>
 
@@ -56,7 +57,7 @@ Get-FileHash .\StreamSnipAI-Setup.exe -Algorithm SHA256
 Get-Content .\StreamSnipAI-Setup.exe.sha256
 ```
 
-The installer is currently unsigned, so Windows SmartScreen may display a warning. Download installers only from this repository's official Releases page.
+The installer in existing releases is currently unsigned, so Windows SmartScreen may display a warning. Download installers only from this repository's official Releases page. See the [Code signing policy](CODE_SIGNING.md) for the build, signing, and verification process planned for future releases.
 
 ### What first-time setup does
 
@@ -70,6 +71,10 @@ The lightweight installer:
 6. launches the local app and writes setup diagnostics to `%LOCALAPPDATA%\StreamSnip AI\setup.log`.
 
 Later launches reuse the isolated runtime. Reinstalling a newer version over the existing installation preserves local settings and updates the packaged source files.
+
+## Code signing policy
+
+The [Code signing policy](CODE_SIGNING.md) documents the maintainer roles, privacy behavior, source-controlled Windows release build, and Authenticode verification process. Existing releases remain unsigned. If the project is accepted into the SignPath Foundation program, future signed releases will include the required attribution: “Free code signing provided by SignPath.io, certificate by SignPath Foundation.”
 
 ## Quick start
 

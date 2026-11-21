@@ -1,6 +1,6 @@
 #define MyAppName "StreamSnip AI"
 #define MyAppVersion "1.2.7"
-#define MyAppPublisher "ScarZero"
+#define MyAppPublisher "Sifat Jaman"
 #define MyAppExeName "StreamSnipAI.exe"
 
 [Setup]
@@ -19,6 +19,14 @@ PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=..\assets\app-icon.ico
 UninstallDisplayIcon={app}\StreamSnipAI.exe
+VersionInfoCompany=Sifat Jaman
+VersionInfoDescription=StreamSnip AI Setup
+VersionInfoProductName=StreamSnip AI
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductTextVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
+VersionInfoTextVersion={#MyAppVersion}
+VersionInfoOriginalFileName=StreamSnipAI-Setup.exe
 
 [Files]
 Source: "..\dist\StreamSnipAI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

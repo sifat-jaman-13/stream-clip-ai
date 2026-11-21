@@ -1,0 +1,236 @@
+name: Build and publish Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the v prefix, e.g. 1.2.8"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: streamsnip-windows-release
+  cancel-in-progress: false
+
+jobs:
+  build-sign-publish:
+    name: Build, sign, and publish StreamSnip AI
+    if: github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out reviewed master commit
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: "x64"
+
+      - name: Validate version, tag, and SignPath settings
+        id: release
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SIGNPATH_ENABLED: ${{ vars.SIGNPATH_ENABLED }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:RELEASE_VERSION.Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Version must be MAJOR.MINOR.PATCH without a v prefix."
+          }
+
+          $pyproject = Get-Content -Raw pyproject.toml
+          $appSource = Get-Content -Raw autoclip.py
+          $installer = Get-Content -Raw installer/AutoClip.iss
+          $expectedPyprojectVersion = 'version = "' + $version + '"'
+          $expectedAppVersion = 'APP_VERSION = "' + $version + '"'
+          $expectedInstallerVersion = '#define MyAppVersion "' + $version + '"'
+          if (-not $pyproject.Contains($expectedPyprojectVersion)) {
+            throw "pyproject.toml version does not match $version."
+          }
+          if (-not $appSource.Contains($expectedAppVersion)) {
+            throw "autoclip.py APP_VERSION does not match $version."
+          }
+          if (-not $installer.Contains($expectedInstallerVersion)) {
+            throw "installer/AutoClip.iss MyAppVersion does not match $version."
+          }
+
+          $tag = "v$version"
+          git fetch --tags origin
+          $existingTag = git ls-remote --tags origin "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw "Could not check remote tags." }
+          if ($existingTag) { throw "Tag $tag already exists. This workflow publishes new versions only." }
+
+          if ($env:SIGNPATH_ENABLED -ne "true") {
+            throw "SignPath is not enabled. Configure the required SignPath Actions variables and secret before publishing."
+          }
+          foreach ($name in @("SIGNPATH_ORGANIZATION_ID", "SIGNPATH_PROJECT_SLUG", "SIGNPATH_SIGNING_POLICY_SLUG", "SIGNPATH_ARTIFACT_CONFIGURATION_SLUG", "SIGNPATH_API_TOKEN")) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing required GitHub Actions setting: $name"
+            }
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Install test dependency
+        run: python -m pip install --disable-pip-version-check "numpy>=1.24"
+
+      - name: Run Python syntax checks
+        run: python -m py_compile autoclip.py ai_highlights.py zernio_poster.py
+
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Download and verify pinned Inno Setup 6.7.4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Join-Path $env:RUNNER_TEMP "innosetup-6.7.4.exe"
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $signature = Get-AuthenticodeSignature -FilePath $installer
+          if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Pyrsys B\.V\.") {
+            throw "Downloaded Inno Setup installer does not have the expected valid Pyrsys B.V. signature."
+          }
+          $process = Start-Process -FilePath $installer -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/ALLUSERS") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Inno Setup installation failed with exit code $($process.ExitCode)." }
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            throw "Inno Setup 6.7.4 compiler was not found after installation."
+          }
+
+      - name: Build the Windows installer from source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          & .\build_windows.ps1
+          if ($LASTEXITCODE -ne 0) { throw "build_windows.ps1 failed." }
+
+      - name: Validate unsigned installer metadata
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $setup = "dist/installer/StreamSnipAI-Setup.exe"
+          if (-not (Test-Path $setup)) { throw "Expected installer was not produced: $setup" }
+
+          $signature = Get-AuthenticodeSignature -FilePath $setup
+          if ($signature.Status -ne "NotSigned") {
+            throw "Build output must be unsigned before it is submitted to SignPath. Status: $($signature.Status)"
+          }
+
+          $versionInfo = (Get-Item $setup).VersionInfo
+          if ($versionInfo.ProductName -ne "StreamSnip AI") {
+            throw "Installer ProductName must be StreamSnip AI; got '$($versionInfo.ProductName)'."
+          }
+          if ($versionInfo.ProductVersion -ne $env:RELEASE_VERSION) {
+            throw "Installer ProductVersion must be '$env:RELEASE_VERSION'; got '$($versionInfo.ProductVersion)'."
+          }
+          if ($versionInfo.FileDescription -ne "StreamSnip AI Setup") {
+            throw "Installer FileDescription must be StreamSnip AI Setup."
+          }
+
+      - name: Upload the single unsigned PE file to GitHub Actions
+        id: upload-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/installer/StreamSnipAI-Setup.exe
+          archive: false
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Submit the GitHub-hosted build to SignPath
+        id: sign
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: signed-artifact
+          skip-decompress: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify signed installer and prepare release assets
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $matches = @(Get-ChildItem -Path "signed-artifact" -Filter "StreamSnipAI-Setup.exe" -File -Recurse)
+          if ($matches.Count -ne 1) {
+            throw "Expected exactly one signed StreamSnipAI-Setup.exe from SignPath; found $($matches.Count)."
+          }
+
+          $signedPath = $matches[0].FullName
+          $signature = Get-AuthenticodeSignature -FilePath $signedPath
+          if ($signature.Status -ne "Valid") {
+            throw "SignPath returned an installer without a valid Authenticode signature. Status: $($signature.Status)"
+          }
+
+          $versionInfo = (Get-Item $signedPath).VersionInfo
+          if ($versionInfo.ProductName -ne "StreamSnip AI" -or $versionInfo.ProductVersion -ne $env:RELEASE_VERSION) {
+            throw "Signed installer metadata does not match the release version."
+          }
+
+          New-Item -ItemType Directory -Force -Path "release-assets" | Out-Null
+          Copy-Item -LiteralPath $signedPath -Destination "release-assets/StreamSnipAI-Setup.exe"
+          $hash = (Get-FileHash "release-assets/StreamSnipAI-Setup.exe" -Algorithm SHA256).Hash
+          Set-Content -NoNewline -Path "release-assets/StreamSnipAI-Setup.exe.sha256" -Value $hash
+
+          "SIGNATURE STATUS: $($signature.Status)" | Set-Content "release-assets/SIGNATURE.txt"
+          "SIGNER: $($signature.SignerCertificate.Subject)" | Add-Content "release-assets/SIGNATURE.txt"
+          "PRODUCT: $($versionInfo.ProductName)" | Add-Content "release-assets/SIGNATURE.txt"
+          "VERSION: $($versionInfo.ProductVersion)" | Add-Content "release-assets/SIGNATURE.txt"
+          "SOURCE COMMIT: $env:GITHUB_SHA" | Add-Content "release-assets/SIGNATURE.txt"
+
+      - name: Upload verified signed release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: StreamSnipAI-signed-release-assets
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the signed GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $notes = @"
+          ## StreamSnip AI $env:RELEASE_VERSION
+
+          Windows installer built from the reviewed master commit $env:GITHUB_SHA and signed through SignPath Foundation.
+
+          - Code signing policy: https://github.com/$env:GITHUB_REPOSITORY/blob/master/CODE_SIGNING.md
+          - Verify the installer with the accompanying SHA-256 checksum.
+          - Check SIGNATURE.txt for the Authenticode signer and build commit.
+          - Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+          "@
+          $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+          Set-Content -Path $notesPath -Value $notes
+          gh release create $env:RELEASE_TAG "release-assets/StreamSnipAI-Setup.exe" "release-assets/StreamSnipAI-Setup.exe.sha256" "release-assets/SIGNATURE.txt" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "StreamSnip AI $env:RELEASE_VERSION" --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) { throw "GitHub Release publication failed." }

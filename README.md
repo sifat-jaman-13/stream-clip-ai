@@ -44,7 +44,7 @@ StreamSnip AI records supported live streams or reads local video files, transcr
 2. **Transcribe locally** with faster-whisper.
 3. **Score moments** with hook words or a selected AI provider.
 4. **Select bounded clips** around the strongest non-overlapping moments.
-5. **Render locally** with captions, layout, creator credit, and an optional CTA.
+5. **Render locally** with captions, layout, creator credit.
 6. **Review and publish** from the local gallery or send selected clips to Zernio.
 
 Recordings, settings, transcription, rendering, and generated clips remain on the machine unless a hosted AI or publishing feature is explicitly used.
@@ -81,7 +81,7 @@ Later launches reuse the isolated runtime. Reinstalling a newer version over the
 2. Choose **Live stream** or **Video file / VOD**.
 3. Paste a supported URL or browse to a local video.
 4. Choose a highlight engine. **Hook words** is the offline default.
-5. Configure clip score, duration, captions, format, layout, credit, and CTA.
+5. Configure clip score, duration, captions, format, layout, credit.
 6. Select **Start clipping**.
 7. Review finished clips in the gallery, copy captions, download files, reveal them in Explorer, or publish selected clips.
 
@@ -108,10 +108,10 @@ Gemini currently prefers `gemini-3.8-flash`. On retryable model/API failures, St
 - Portrait layouts: facecam + gameplay, blurred background, center fill, or a selected crop.
 - Captions: karaoke or classic timing with Classic, Hormozi, Neon, MrBeast, Minimal, and Fire presets.
 - Customization: highlight color, font, words per line, font size, vertical position, text/stroke colors, and alignment.
-- Branding: automatic streamer credit, optional custom credit, end-card CTA, and optional Windows voice CTA.
-- Output: each `.mp4` clip has a matching `.txt` file. The **first non-empty line is the title** and everything below it is the description, so the files work directly with ScarClipScheduler's title/description scanner.
-- **AI post copy:** enable **AI-write post titles & descriptions for ScarClipScheduler** in the AI card. Each finished clip gets one request to the selected Gemini, local Ollama, or Hugging Face provider. All three providers receive the same creator-style writing instructions: catchy Title Case titles with fitting emojis, a short exact quote when the transcript contains a memorable line, a natural follow-up explaining the moment, and a concise topic hashtag. The TXT writer automatically adds creator attribution when available plus the standard tags #shorts #fyp #streamer #clips #viral and one context-specific tag such as #funny. Titles are capped at 100 characters. Copy must stay grounded in the transcript and cannot invent dialogue, people, games, locations, visuals, or outcomes.
-- Quote-only or otherwise unusable AI descriptions are rejected instead of being marked post-ready. If AI post copy is disabled, Hook words is selected, or the provider returns an error/unusable response, the clip still renders and receives the transcript-based fallback. Gemini/Hugging Face use hosted quota/credits; local Ollama uses your locally installed model and its available hardware.
+- Branding: automatic streamer credit and optional custom credit.
+- Output: each MP4 clip has a matching TXT file. The **first non-empty line is the title** and everything below it is the description.
+- **Automatic AI titles and descriptions:** every finished clip is written with a title and description automatically. When Gemini, local Ollama, or Hugging Face is selected for highlight detection, that same provider generates the post copy (there is no separate copy-provider setting). All three providers receive the same creator-style instructions: catchy Title Case titles with fitting emojis, a short exact quote when the transcript contains a memorable line, a natural follow-up explaining the moment, and a concise topic hashtag. The TXT writer adds creator attribution when available plus the standard tags #shorts #fyp #streamer #clips #viral and one context-specific tag such as #funny. Titles are capped at 100 characters. Copy must stay grounded in the transcript and cannot invent dialogue, people, games, locations, visuals, or outcomes.
+- Quote-only or otherwise unusable AI descriptions are rejected. If Hook words is selected, or the selected provider returns an error/unusable response, the clip still renders and receives transcript-based fallback copy. Gemini/Hugging Face use hosted quota/credits; local Ollama uses your locally installed model and its available hardware.
 - The per-clip TXT contains post-ready title, description, creator credit (when available), and hashtags. Filenames and source timestamps stay in the cumulative `clips_metadata.txt` index instead of being accidentally included in the public post description.
 - A cumulative `clips_metadata.txt` index in the output folder lists metadata and source timestamps for every generated clip.
 

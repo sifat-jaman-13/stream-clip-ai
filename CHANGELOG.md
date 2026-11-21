@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-22
+
+### Changed
+
+- Simplified AI settings copy to describe automatic clip-title and description generation without third-party tool references.
+- AI titles and descriptions are now generated automatically for every clip; the old on/off setting is ignored.
+- Post-copy generation follows the same provider selected for highlight detection, with transcript-based copy retained for Hook words mode and provider failures.
+- Removed the separate AI-copy toggle from the settings interface.
+- Removed the end-card text overlay and synthetic CTA voice generation from settings and clip rendering.
+
+### Tests
+
+- Added regression coverage proving legacy opt-out settings cannot disable automatic copy generation and copy uses the selected highlight provider.
+
 ## [2.0.9] - 2026-11-22
 
 ### Changed
@@ -41,7 +55,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Added transcript-grounded AI post-copy generation using the selected Gemini, Ollama, or Hugging Face provider, with a single bounded request per completed clip.
-- Added a UI toggle to enable/disable AI-written titles and descriptions for ScarClipScheduler.
+- Added automatic AI-written titles and descriptions for completed clips.
 - Added strict title/description/hashtag validation, a transcript-based fallback, and a conservative sentence-case/proper-name check to reject unsupported locations or game titles.
 - Per-clip TXT sidecars now contain clean post-ready copy; source filenames and timestamps remain in the internal `clips_metadata.txt` index.
 - Added provider, format, validation, and renderer regression coverage for AI post metadata.

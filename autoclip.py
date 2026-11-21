@@ -30,7 +30,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
 from post_metadata import generate_social_copy
-APP_VERSION = "2.0.9"
+APP_VERSION = "2.1.0"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -414,7 +414,6 @@ DEFAULTS = {
     "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "streamer_tag": "", "show_tag_video": True,
-    "cta_enabled": True, "cta_text": "Subscribe for more clips", "cta_voice_enabled": True,
     "capture_bitrate_kbps": 6000,
     "layout": "Facecam + game (Twitch)", "output_format": "9:16", "crop_x": 34.2, "crop_y": 0.0,
     "crop_w": 31.6, "crop_h": 100.0, "delete_rec": False,
@@ -471,10 +470,6 @@ def clean_cfg(raw):
     tag = re.sub(r"[\r\n{}\\]", "", str(raw.get("streamer_tag", c["streamer_tag"]))).strip()[:80]
     c["streamer_tag"] = tag
     c["show_tag_video"] = bool(raw.get("show_tag_video", c["show_tag_video"]))
-    c["cta_enabled"] = bool(raw.get("cta_enabled", c["cta_enabled"]))
-    c["cta_voice_enabled"] = bool(raw.get("cta_voice_enabled", c["cta_voice_enabled"]))
-    cta = re.sub(r"[\r\n{}\\]", "", str(raw.get("cta_text", c["cta_text"]))).strip()[:100]
-    c["cta_text"] = cta or DEFAULTS["cta_text"]
     f = str(raw.get("font", c["font"])).strip()
     if re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", f): c["font"] = f
     c["delete_rec"] = bool(raw.get("delete_rec", False))
@@ -543,7 +538,7 @@ def _clip_timestamp(seconds):
 def build_clip_metadata_text(clip_filename, source_filename, start, end, transcript,
                              creator_credit="", post_title=None, post_description=None,
                              post_hashtags=None, include_provenance=False):
-    """Return Scheduler-compatible post copy; provenance stays in the local manifest only."""
+    """Return clean post copy; provenance stays in the local manifest only."""
     transcript = re.sub(r"\s+", " ", str(transcript or "")).strip()
     source_name = pathlib.Path(str(source_filename)).name
     clip_name = pathlib.Path(str(clip_filename)).name
@@ -709,6 +704,8 @@ def load_ai_settings():
         if isinstance(data, dict): defaults.update({k: str(v) for k, v in data.items() if k in defaults and v is not None})
     except Exception:
         pass
+    # AI-written titles and descriptions are always enabled; ignore legacy opt-out values.
+    defaults["metadata_copy_enabled"] = "true"
     if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
         defaults["provider"] = "hooks"
     if defaults["gemini_model"] in RETIRED_GEMINI_MODELS:
@@ -733,8 +730,8 @@ def save_ai_settings(body):
     if provider not in {"hooks", "ollama", "gemini", "huggingface"}:
         raise ValueError("Unknown AI highlight provider.")
     cfg["provider"] = provider
-    if "metadata_copy_enabled" in body:
-        cfg["metadata_copy_enabled"] = "true" if bool(body["metadata_copy_enabled"]) else "false"
+    # Retain a true value for compatibility with older settings files and clients.
+    cfg["metadata_copy_enabled"] = "true"
     for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model"):
         if key in body:
             cfg[key] = str(body[key]).strip()[:500]
@@ -910,47 +907,6 @@ def _ass_color(value, fallback):
 def output_size(cfg):
     return OUTPUT_FORMATS.get(cfg.get("output_format", "9:16"), OUTPUT_FORMATS["9:16"])
 
-def make_cta_voice(path, text):
-    """Create a soft, slower female CTA with Windows' built-in SAPI voice when available."""
-    if os.name != "nt":
-        return False
-    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
-    if not powershell:
-        return False
-    enc = lambda s: base64.b64encode(str(s).encode("utf-8")).decode("ascii")
-    script = (
-        "Add-Type -AssemblyName System.Speech; "
-        "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + enc(path) + "')); "
-        "$t=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + enc(text) + "')); "
-        "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-        "$v=$s.GetInstalledVoices() | Where-Object {$_.VoiceInfo.Gender.ToString() -eq 'Female'} | Select-Object -First 1; "
-        "if($v){$s.SelectVoice($v.VoiceInfo.Name)}; $s.Rate=-3; $s.Volume=72; "
-        "$s.SetOutputToWaveFile($p); $s.Speak($t); $s.Dispose()"
-    )
-    try:
-        r = run([powershell, "-NoProfile", "-NonInteractive", "-EncodedCommand",
-                 base64.b64encode(script.encode("utf-16le")).decode("ascii")],
-                capture_output=True, text=True, timeout=30)
-        return r.returncode == 0 and pathlib.Path(path).is_file() and pathlib.Path(path).stat().st_size > 1000
-    except Exception:
-        return False
-
-def has_audio_stream(path):
-    ffmpeg = pathlib.Path(ffmpeg_exe())
-    candidates = [ffmpeg.with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")]
-    found = shutil.which("ffprobe")
-    if found: candidates.append(pathlib.Path(found))
-    probe = next((str(p) for p in candidates if p.is_file()), None)
-    if not probe:
-        return None
-    try:
-        r = run([probe, "-v", "error", "-select_streams", "a:0",
-                 "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
-                capture_output=True, text=True, timeout=15)
-        return bool((r.stdout or "").strip()) if r.returncode == 0 else None
-    except Exception:
-        return None
-
 def make_ass(words, start, end, path, cfg):
     ws = []
     for s, e, w in words:
@@ -1005,11 +961,6 @@ def make_ass(words, start, end, path, cfg):
         tag_margin = round(70 * out_w / 1080)
         lines.append(f"Dialogue: 0,{ts(0)},{ts(max(0.08, end - start))},Default,,0,0,0,,"
                      f"{{\\an7\\fs{tag_size}\\bord3\\1c&H00FFFFFF&\\3c&H000000&\\pos({tag_margin},{tag_margin})}}Clip from {tag}")
-    if cfg.get("cta_enabled", True) and cfg.get("cta_text"):
-        cta_start = max(0, end - start - 2.8)
-        cta_size = round(48 * out_w / 1080)
-        lines.append(f"Dialogue: 0,{ts(cta_start)},{ts(max(cta_start + 0.08, end - start))},Default,,0,0,0,,"
-                     f"{{\\an8\\fs{cta_size}\\bord4\\1c&H00FFFFFF&\\3c&H000000&}}{cfg['cta_text']}")
     pathlib.Path(path).write_text(header + "\n".join(lines) + "\n", encoding="utf-8")
 
 # ------------------------------------------------------------------ engine
@@ -1220,6 +1171,8 @@ class Engine:
         self.cfg, self.emit = cfg, emit
         self.stop_flag = self.abort = False
         self.ai_cancel = threading.Event()
+        # Captured on the first highlight-analysis pass and reused for this clip batch.
+        self.ai_cfg_for_render = None
         self.procs = []
         self.seg_seconds = int(cfg["chunk_min"]) * 60
 
@@ -1368,7 +1321,10 @@ class Engine:
         raw_score = z(np.convolve(rms, kern, "same")) + 0.5 * z(np.convolve(wps, kern, "same")) \
                 + 0.8 * z(np.convolve(hype, kern, "same"))
         score = np.clip(50 + 20 * raw_score, 0, 100)
-        ai_cfg = load_ai_settings()
+        ai_cfg = getattr(self, "ai_cfg_for_render", None)
+        if not isinstance(ai_cfg, dict):
+            ai_cfg = dict(load_ai_settings())
+            self.ai_cfg_for_render = ai_cfg
         provider = ai_cfg["provider"]
         if provider == "hooks":
             self.log("Highlight scoring: built-in/custom hook words + audio energy and speech rate (local, offline; no AI model).")
@@ -1461,32 +1417,6 @@ class Engine:
         if r.returncode != 0:
             (OUT / tmp).unlink(missing_ok=True)
             raise RuntimeError((r.stderr or "ffmpeg failed").strip()[-400:])
-        if cfg.get("cta_enabled", True) and cfg.get("cta_voice_enabled", True) and os.name == "nt":
-            voice = OUT / f"{name}.cta.wav"
-            if make_cta_voice(voice, cfg.get("cta_text", "Subscribe for more clips")):
-                mixed = OUT / f"{name}.audio.tmp.mp4"
-                delay_ms = max(0, int((end - start - 2.8) * 1000))
-                audio_present = has_audio_stream(OUT / tmp)
-                if audio_present is None:
-                    self.log("FFprobe unavailable; keeping the original clip audio unchanged.")
-                    voice.unlink(missing_ok=True)
-                elif audio_present:
-                    af = f"[1:a]adelay={delay_ms}:all=1[cta];[0:a][cta]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]"
-                else:
-                    af = f"[1:a]adelay={delay_ms}:all=1[a]"
-                if audio_present is not None:
-                    mix_cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", str(OUT / tmp), "-i", str(voice),
-                               "-filter_complex", af, "-map", "0:v:0", "-map", "[a]",
-                               "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", mixed]
-                    mr = run(mix_cmd, cwd=OUT, capture_output=True, text=True)
-                    if mr.returncode == 0 and mixed.is_file():
-                        self.replace_output(mixed, OUT / tmp)
-                    else:
-                        self.log("CTA voice unavailable for this clip; keeping the original audio.")
-                        mixed.unlink(missing_ok=True)
-            else:
-                self.log("Soft CTA voice unavailable; the on-screen CTA was kept.")
-            voice.unlink(missing_ok=True)
         transcript = " ".join(
             str(word).strip() for word_start, _word_end, word in words
             if start <= word_start <= end
@@ -1496,14 +1426,15 @@ class Engine:
         post_copy = None
         ai_cfg = {}
         try:
-            ai_cfg = load_ai_settings()
-            copy_enabled = str(ai_cfg.get("metadata_copy_enabled", "true")).strip().lower() not in {
-                "0", "false", "no", "off"
-            }
-            if copy_enabled and transcript and ai_cfg.get("provider") != "hooks":
+            ai_cfg = getattr(self, "ai_cfg_for_render", None)
+            if not isinstance(ai_cfg, dict):
+                ai_cfg = load_ai_settings()
+            # Reuse the exact provider selected for highlight detection; there is no separate copy provider.
+            provider = str(ai_cfg.get("provider", "hooks")).strip().lower()
+            if transcript and provider in {"ollama", "gemini", "huggingface"}:
                 post_copy = generate_social_copy(transcript, tag, ai_cfg, log=self.log)
-            elif copy_enabled and ai_cfg.get("provider") == "hooks":
-                self.log("AI post copy is enabled but Hook words is selected. Choose Gemini, Ollama, or Hugging Face in AI settings; transcript fallback will be used for this clip.")
+            elif transcript and provider == "hooks":
+                self.log("Hook words is selected. This engine does not generate text, so transcript-based title and description will be used for this clip.")
         except Exception as exc:
             provider = str(ai_cfg.get("provider", "unknown")).lower()
             self.log(
@@ -2792,8 +2723,8 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     </div>
     <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><div class="prow"><b id="gemini-key-state">Not saved</b><button type="button" class="btn ghost" id="gemini-key-clear">Clear saved key</button></div></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><div class="row"><label>Preferred Gemini model</label></div><input id="gemini-model" class="text" value="gemini-3.8-flash" placeholder="gemini-3.8-flash"><p class="hint">The app checks this model first, tries the other available Gemini models if needed, then falls back to Ollama. Model IDs can change; use one enabled for your API key.</p></div>
     <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="deepseek-ai/DeepSeek-V4.1-Flash:fastest"><div class="row"><label>Hugging Face access token</label><div class="prow"><b id="hf-token-state">Not saved</b><button type="button" class="btn ghost" id="hf-token-clear">Clear saved token</button></div></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads. Use a token with Inference Providers access and available provider credits.</p></div>
-    <label class="toggle" style="margin-top:12px"><span>AI-write post titles &amp; descriptions for ScarClipScheduler</span><input type="checkbox" id="metadata-copy-enabled"><i class="sl"></i></label>
-    <p class="hint">Gemini, local Ollama, and Hugging Face all use the same creator-style writing instructions: catchy Title Case titles, fitting emojis, a quote-led caption with context, creator credit, and ready-to-post hashtags. One copy request is made per finished clip. Invalid/short responses use the safe transcript fallback.</p>
+
+    <p class="hint" style="margin-top:12px">Titles and descriptions are generated automatically for each clip using the same provider selected above for highlight detection. Hook words mode uses transcript-based copy because it does not include a text-generating model. Gemini, local Ollama, and Hugging Face follow the same creator-style format: catchy Title Case titles, fitting emojis, a quote-led caption with context, creator credit, and ready-to-post hashtags. Invalid or incomplete AI responses use the transcript fallback.</p>
     <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><button class="btn ghost" id="ai-test-provider">Test connection</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
   </div>
 
@@ -2868,9 +2799,6 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Speech model</label></div>
     <select id="model" class="text"></select>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
-    <div class="row"><label>End-card CTA</label></div>
-    <input id="cta-text" class="text" type="text" maxlength="100" placeholder="Subscribe for more clips">
-    <label class="toggle"><span>Speak CTA with a soft female voice</span><input type="checkbox" id="cta-voice"><i class="sl"></i></label>
     <div class="row"><label>Tag / credit</label></div>
     <input id="streamer-tag" class="text" type="text" maxlength="80" placeholder="Auto-detect from stream URL">
     <p class="hint">Leave blank to tag the Twitch or YouTube handle from the source URL. Enter a value to override it.</p>
@@ -3020,7 +2948,6 @@ function stopWindowLease(){windowLeaseActive=false;if(windowLeaseController)wind
 markWindowOpen();startWindowLease();window.addEventListener("pageshow",()=>{markWindowOpen();startWindowLease()});
 window.addEventListener("pagehide",()=>{stopWindowLease();if(appClosing)return;fetch("/api/window/closing",{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:"{}",keepalive:true}).catch(()=>{})});
 const AI=BOOT.ai||{provider:"hooks",ollama_url:"http://127.0.0.1:11434",ollama_model:""};
-$("#metadata-copy-enabled").checked=AI.metadata_copy_enabled!==false;
 $("#ai-provider").value=AI.provider||"hooks";
 $("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
 $("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.ollama_model||"Click Detect models"));
@@ -3032,7 +2959,7 @@ $("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled
 function showAIFields(updateMessage=false){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$("#ai-test-provider").hidden=p==="hooks";if(updateMessage){const names={ollama:"Ollama",gemini:"Gemini",huggingface:"Hugging Face"};$("#ai-settings-msg").textContent=p==="hooks"?"Built-in hook detection selected":"Ready to test or save "+names[p]+" settings"}$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
 $("#ai-provider").onchange=()=>showAIFields(true);$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields(true)});showAIFields(true);
 $("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
-function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest",metadata_copy_enabled:$("#metadata-copy-enabled").checked};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;return payload}
+function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest"};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;return payload}
 function refreshAISecretState(){$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set}
 $("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";refreshAISecretState();$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 async function clearAISecret(kind){const gemini=kind==="gemini";const label=gemini?"Gemini API key":"Hugging Face token";if(!(await confirmBox("Clear saved "+label+"?","The credential will be removed from this computer. Add and save a new one before using this hosted provider again.","Clear credential")))return;const button=$(gemini?"#gemini-key-clear":"#hf-token-clear");button.disabled=true;try{const payload=aiSettingsPayload();payload[gemini?"clear_gemini_key":"clear_huggingface_token"]=true;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$(gemini?"#gemini-key":"#hf-token").value="";refreshAISecretState();$("#ai-settings-msg").textContent=label+" cleared from this computer";toast(label+" cleared","ok")}catch(e){refreshAISecretState();$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}}
@@ -3115,10 +3042,6 @@ $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.ta
 $("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}function resetCropForFormat(){const r=({"9:16":9/16,"16:9":16/9,"1:1":1,"4:5":4/5}[S.output_format]||9/16),w=Math.min(100,100*r/(16/9));S.crop_w=+w.toFixed(1);S.crop_h=100;S.crop_x=+( (100-w)/2 ).toFixed(1);S.crop_y=0}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;resetCropForFormat();updateFormatUI();preview();scheduleSave()});updateFormatUI();
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
 $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
-$("#cta-text").value=S.cta_text||"Subscribe for more clips";
-$("#cta-text").addEventListener("input",e=>{S.cta_text=e.target.value.replace(/[\r\n{}\\]/g,"").slice(0,100)||"Subscribe for more clips";scheduleSave()});
-$("#cta-voice").checked=S.cta_voice_enabled!==false;
-$("#cta-voice").addEventListener("change",e=>{S.cta_voice_enabled=e.target.checked;scheduleSave()});
 $("#show-tag-video").checked=!!S.show_tag_video;
 $("#show-tag-video").addEventListener("change",e=>{S.show_tag_video=e.target.checked;scheduleSave()});
 $("#t-sub-custom").checked=!!S.subtitle_custom;

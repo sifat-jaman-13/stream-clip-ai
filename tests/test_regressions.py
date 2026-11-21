@@ -14,10 +14,9 @@ class RegressionTests(unittest.TestCase):
     def test_render_creates_matching_title_description_txt_and_combined_index(self):
         cfg = autoclip.clean_cfg({
             "compute_device": "cpu",
-            "cta_enabled": False,
-            "cta_voice_enabled": False,
         })
         engine = autoclip.Engine(cfg, lambda *_: None)
+        engine.ai_cfg_for_render = {"provider": "gemini", "metadata_copy_enabled": "false"}
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
 
@@ -27,17 +26,17 @@ class RegressionTests(unittest.TestCase):
 
             with patch.object(autoclip, "OUT", output), \
                  patch.object(autoclip, "make_ass"), \
-                 patch.object(autoclip, "run", side_effect=fake_run), \
+                 patch.object(autoclip, "run", side_effect=fake_run) as render_run, \
                  patch.object(autoclip, "has_nvenc", return_value=False), \
                  patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"), \
                  patch.object(autoclip, "load_ai_settings", return_value={
-                     "provider": "gemini", "metadata_copy_enabled": "true"
+                     "provider": "gemini", "metadata_copy_enabled": "false"
                  }), \
                  patch.object(autoclip, "generate_social_copy", return_value={
                      "title": "The chat could not believe what happened",
                      "description": "A sudden turn leaves the streamer stunned and the chat reacting.",
                      "hashtags": ["#Shorts", "#Gaming"],
-                 }):
+                 }) as copy:
                 engine.render(
                     "source_recording.mp4", 10, 18,
                     [(10.1, 10.5, "That"), (10.5, 11.0, "was"),
@@ -46,6 +45,9 @@ class RegressionTests(unittest.TestCase):
                 )
 
             self.assertTrue((output / "rendered_clip.mp4").is_file())
+            self.assertEqual(render_run.call_count, 1, "Rendering must not run a separate CTA audio-mix pass.")
+            self.assertFalse((output / "rendered_clip.cta.wav").exists())
+            self.assertEqual(copy.call_args.args[2]["provider"], "gemini")
             sidecar = (output / "rendered_clip.txt").read_text(encoding="utf-8")
             manifest = (output / "clips_metadata.txt").read_text(encoding="utf-8")
             self.assertEqual(sidecar.splitlines()[0], "The chat could not believe what happened")
@@ -57,14 +59,30 @@ class RegressionTests(unittest.TestCase):
             self.assertIn("Source: source_recording.mp4", manifest)
             self.assertIn("Timestamp: 00:00:10 - 00:00:18", manifest)
 
+    def test_find_peaks_snapshots_the_selected_highlight_provider_for_clip_copy(self):
+        cfg = autoclip.clean_cfg({"compute_device": "cpu", "clips_per_chunk": 1})
+        selected = {"provider": "gemini", "gemini_api_key": "test-key"}
+        engine = autoclip.Engine(cfg, lambda *_: None)
+        with patch.object(engine, "rms_per_second", return_value=autoclip.np.ones(12)), \
+             patch.object(autoclip, "load_ai_settings", return_value=selected), \
+             patch.object(autoclip, "select_moments", return_value=[]):
+            picks, duration = engine.find_peaks("source.mp4", [])
+        self.assertEqual((picks, duration), ([], 12))
+        self.assertEqual(engine.ai_cfg_for_render["provider"], "gemini")
+        self.assertEqual(engine.ai_cfg_for_render["gemini_api_key"], "test-key")
+        with patch.object(engine, "rms_per_second", return_value=autoclip.np.ones(12)), \
+             patch.object(autoclip, "load_ai_settings", return_value={"provider": "ollama"}) as reload_settings, \
+             patch.object(autoclip, "select_moments", return_value=[]):
+            engine.find_peaks("second-source.mp4", [])
+        reload_settings.assert_not_called()
+
     def test_renderer_keeps_clip_and_uses_transcript_fallback_when_ai_copy_fails(self):
         cfg = autoclip.clean_cfg({
             "compute_device": "cpu",
-            "cta_enabled": False,
-            "cta_voice_enabled": False,
         })
         logs = []
         engine = autoclip.Engine(cfg, lambda kind, value: logs.append((kind, value)))
+        engine.ai_cfg_for_render = {"provider": "gemini"}
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
 
@@ -96,6 +114,21 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(copy.call_count, 1)
             self.assertTrue(any("using transcript fallback" in str(value).lower()
                                 for _kind, value in logs))
+
+    def test_legacy_cta_settings_are_ignored_and_no_cta_overlay_is_written(self):
+        cfg = autoclip.clean_cfg({
+            "cta_enabled": True,
+            "cta_text": "Subscribe for more clips",
+            "cta_voice_enabled": True,
+        })
+        self.assertNotIn("cta_enabled", cfg)
+        self.assertNotIn("cta_text", cfg)
+        self.assertNotIn("cta_voice_enabled", cfg)
+        with tempfile.TemporaryDirectory() as directory:
+            ass_file = Path(directory) / "no-cta.ass"
+            autoclip.make_ass([(0.0, 1.0, "Keep the original clip clean")], 0, 2,
+                              ass_file, cfg)
+            self.assertNotIn("Subscribe for more clips", ass_file.read_text(encoding="utf-8"))
 
     def test_clip_metadata_sidecar_and_combined_index(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -641,7 +674,7 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(created.returncode, 0, created.stderr)
             cfg = autoclip.clean_cfg({"layout": "Fill (crop center)", "output_format": "16:9",
                                      "compute_device": "cpu", "caption_size": 150,
-                                     "cta_enabled": False, "cta_voice_enabled": False})
+                                     })
             engine = autoclip.Engine(cfg, lambda *_: None)
             with patch.object(autoclip, "OUT", output), patch.dict(autoclip.OUTPUT_FORMATS, {"16:9": (320, 240)}):
                 engine.render(source, 5, 8, [(5.1, 6.8, "CAPTION VISIBLE")], "caption-test")
@@ -835,10 +868,11 @@ class RegressionTests(unittest.TestCase):
                     "metadata_copy_enabled": False,
                 })
                 stored = path.read_text(encoding="utf-8")
-                self.assertFalse(saved["metadata_copy_enabled"])
-                self.assertEqual(autoclip.load_ai_settings()["metadata_copy_enabled"], "false")
-                enabled = autoclip.save_ai_settings({"metadata_copy_enabled": True})
-                self.assertTrue(enabled["metadata_copy_enabled"])
+                self.assertTrue(saved["metadata_copy_enabled"])
+                self.assertEqual(autoclip.load_ai_settings()["metadata_copy_enabled"], "true")
+                disabled = autoclip.save_ai_settings({"metadata_copy_enabled": False})
+                self.assertTrue(disabled["metadata_copy_enabled"])
+                self.assertEqual(autoclip.load_ai_settings()["metadata_copy_enabled"], "true")
             self.assertTrue(saved["gemini_key_set"])
             self.assertNotIn("secret", str(saved))
             self.assertIn("secret", stored)
@@ -904,15 +938,6 @@ class RegressionTests(unittest.TestCase):
         cfg = autoclip.clean_cfg({"min_score": float("inf"), "cam_x": float("nan")})
         self.assertEqual(cfg["min_score"], autoclip.DEFAULTS["min_score"])
         self.assertEqual(cfg["cam_x"], autoclip.DEFAULTS["cam_x"])
-
-    def test_missing_ffprobe_does_not_claim_audio_is_absent(self):
-        with tempfile.TemporaryDirectory() as directory:
-            ffmpeg = Path(directory) / "ffmpeg.exe"
-            ffmpeg.touch()
-            with patch.object(autoclip, "ffmpeg_exe", return_value=str(ffmpeg)), patch.object(
-                autoclip.shutil, "which", return_value=None
-            ):
-                self.assertIsNone(autoclip.has_audio_stream(ffmpeg))
 
     def test_frozen_app_finds_ffmpeg_next_to_its_executable(self):
         with tempfile.TemporaryDirectory() as directory:

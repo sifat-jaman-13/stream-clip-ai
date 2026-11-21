@@ -513,7 +513,7 @@ class RegressionTests(unittest.TestCase):
         with patch.object(ai_highlights, "_gemini", side_effect=ai_highlights.AIProviderError("quota", quota=True)), \
              patch.object(ai_highlights, "_ollama", return_value={"moments": [{"time": 24, "score": 92}]}):
             moments = ai_highlights.select_moments("gemini", [(24, 25, "wow")], 60, {}, logs.append)
-        self.assertEqual(moments, [(24, 92.0)])
+        self.assertEqual(moments, [(24, 76.5)])
         self.assertTrue(any("quota/rate limit" in line for line in logs))
 
     def test_gemini_completes_full_retry_rotation_before_ollama(self):
@@ -538,7 +538,7 @@ class RegressionTests(unittest.TestCase):
                 {"gemini_api_key": "test-key", "gemini_model": "gemini-3.8-flash"},
                 logs.append,
             )
-        self.assertEqual(moments, [(24, 92.0)])
+        self.assertEqual(moments, [(24, 76.5)])
         self.assertEqual(len(generation_urls), 6)
         self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 3)
         self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 3)
@@ -562,7 +562,7 @@ class RegressionTests(unittest.TestCase):
         words = [(time, time + 1, "highlight") for time in (10, 305, 610)]
         with patch.object(ai_highlights, "_ollama", side_effect=fake_ollama):
             moments = ai_highlights.select_moments("ollama", words, 611, {})
-        self.assertEqual(moments, [(10, 80.0), (310, 80.0), (610, 80.0)])
+        self.assertEqual(moments, [(10, 65.8), (310, 65.8), (610, 65.8)])
         self.assertEqual(len(prompts), 3)
 
     def test_zero_score_threshold_does_not_turn_empty_ai_seconds_into_clips(self):
@@ -573,6 +573,19 @@ class RegressionTests(unittest.TestCase):
             picks, duration = engine.find_peaks("clip.mp4", [])
         self.assertEqual(duration, 120)
         self.assertEqual(picks, [(35, 80.0)])
+
+    def test_ai_moment_without_explicit_score_is_rejected(self):
+        self.assertEqual(ai_highlights._parse_moments(
+            {"moments": [{"time": 10, "reason": "ordinary chat"}]}, 60), [])
+
+    def test_generic_ai_suggestion_is_calibrated_below_a_seventy_floor(self):
+        # A model's uncorroborated 80 should not bypass the user's 70 setting.
+        with patch.object(ai_highlights, "_ollama",
+                          return_value={"moments": [{"time": 10, "score": 80}]}):
+            moments = ai_highlights.select_moments(
+                "ollama", [(10, 11, "just walking to the next room")], 60, {})
+        self.assertEqual(moments, [(10, 67.3)])
+        self.assertLess(moments[0][1], 70)
 
     def test_malformed_moments_string_becomes_provider_error(self):
         with self.assertRaisesRegex(ai_highlights.AIProviderError, "invalid moments JSON"):

@@ -70,10 +70,17 @@ def _transcript(words, duration):
 
 
 def _prompt(words, duration):
-    return ("Find up to 12 short-form video highlights in this timestamped transcript window. "
-            "Favor surprising, funny, emotional, high-energy, or self-contained moments. "
+    return ("Act as a strict short-form viral-moment editor. Find at most 6 genuinely strong "
+            "highlights in this timestamped transcript window; returning no moments is correct when "
+            "nothing is compelling. Do NOT select ordinary gameplay, setup, greetings, routine "
+            "conversation, or a random sentence just to fill the list. "
+            "Score only the likelihood that the exact moment will hold a cold short-form viewer: "
+            "70 = clearly clip-worthy payoff/reaction, 80 = unusually funny, surprising, emotional, "
+            "or high-stakes, 90 = exceptional share-worthy payoff. Scores below 70 must be omitted. "
             "Return ONLY JSON: {\"moments\":[{\"time\":seconds,\"score\":0-100,\"reason\":short string}]}. "
-            "The time must point inside the moment, not at its start. Do not invent dialogue.\n"
+            "Every reason must name the concrete payoff or reaction heard in the transcript. The time "
+            "must point inside that payoff, not at its start. Do not invent dialogue or infer events "
+            "that are not spoken.\n"
             f"Duration: {int(duration)} seconds\nTranscript:\n{_transcript(words, duration)}")
 
 
@@ -96,12 +103,51 @@ def _parse_moments(value, duration):
             continue
         try:
             time_sec = float(item.get("time", item.get("timestamp")))
-            score = float(item.get("score", 75))
+            # A missing score used to silently become 75, which let arbitrary model
+            # suggestions clear a user's 70-point floor. A provider must now make
+            # an explicit, auditable confidence claim for every proposed moment.
+            if "score" not in item:
+                continue
+            score = float(item["score"])
         except (TypeError, ValueError):
             continue
         if 0 <= time_sec < duration:
             result.append((int(time_sec), max(0.0, min(100.0, score))))
     return result
+
+
+def _transcript_engagement(words, second):
+    """Return a conservative 0-100 engagement signal around an AI-proposed time.
+
+    LLM scores are not calibrated probabilities. This intentionally modest signal
+    prevents a generic sentence that a model labels 70-80 from passing the same
+    floor as a moment with an audible reaction, punchline, or rapid exchange.
+    """
+    nearby = [str(text).strip() for start, _end, text in words
+              if abs(float(start) - float(second)) <= 12 and str(text).strip()]
+    if not nearby:
+        return 0.0
+    text = " ".join(nearby)
+    tokens = re.findall(r"[a-z0-9']+", text.lower())
+    # Normal spoken commentary stays near the floor; the signal rises only with
+    # an actual reaction, payoff language, expressive punctuation, or rapid talk.
+    density = min(24.0, len(tokens) * 1.2)
+    reaction_terms = {
+        "wow", "whoa", "no", "way", "insane", "crazy", "unbelievable", "clutch",
+        "lets", "go", "holy", "god", "damn", "what", "happened", "killed", "win",
+        "won", "lost", "impossible", "perfect", "fail", "funny", "laugh", "cry",
+    }
+    reactions = sum(token in reaction_terms for token in tokens)
+    reaction = min(42.0, reactions * 7.0)
+    expressive = min(14.0, text.count("!") * 7.0 + text.count("?") * 3.0)
+    variety = min(10.0, len(set(tokens)) / max(1, len(tokens)) * 10.0)
+    return min(100.0, 12.0 + density + reaction + expressive + variety)
+
+
+def _calibrate_score(model_score, words, second):
+    """Blend an LLM's subjective score with transcript evidence conservatively."""
+    evidence = _transcript_engagement(words, second)
+    return round(max(0.0, min(100.0, 0.75 * float(model_score) + 0.25 * evidence)), 1)
 
 
 def _extract_json(text):
@@ -492,7 +538,8 @@ def select_moments(provider, words, duration, config, log=lambda _message: None,
                 continue
         for second, score in parsed_window:
             absolute_second = int(window_start + second)
-            picks[absolute_second] = max(picks.get(absolute_second, 0.0), score)
+            calibrated_score = _calibrate_score(score, local_words, second)
+            picks[absolute_second] = max(picks.get(absolute_second, 0.0), calibrated_score)
         window_start += window_size
     if fell_back:
         log(f"Remaining transcript windows were analyzed with Ollama after Gemini {fallback_reason}.")

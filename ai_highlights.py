@@ -71,17 +71,22 @@ def _transcript(words, duration):
 
 
 def _prompt(words, duration):
-    return ("Act as a strict short-form viral-moment editor. Find at most 6 genuinely strong "
-            "highlights in this timestamped transcript window; returning no moments is correct when "
-            "nothing is compelling. Do NOT select ordinary gameplay, setup, greetings, routine "
-            "conversation, or a random sentence just to fill the list. "
-            "Score only the likelihood that the exact moment will hold a cold short-form viewer: "
-            "70 = clearly clip-worthy payoff/reaction, 80 = unusually funny, surprising, emotional, "
-            "or high-stakes, 90 = exceptional share-worthy payoff. Scores below 70 must be omitted. "
-            "Return ONLY JSON: {\"moments\":[{\"time\":seconds,\"score\":0-100,\"reason\":short string}]}. "
-            "Every reason must name the concrete payoff or reaction heard in the transcript. The time "
-            "must point inside that payoff, not at its start. Do not invent dialogue or infer events "
-            "that are not spoken.\n"
+    return ("Act as a human short-form viral editor, not a literal keyword filter. Find up to 8 "
+            "plausible highlights in this timestamped transcript window and score each one honestly. "
+            "Consider emotional intensity, shock, absurdity, dark humor, irony, escalating stakes, "
+            "conflict, risky decisions, a strong question, a surprising reveal, a memorable quote, "
+            "or a big reaction. Streamer/gameplay moments can be viral even when the transcript does "
+            "not contain the final visual payoff. Profanity counts only when it communicates real "
+            "emotion or makes the situation funnier; do not reward profanity by itself. "
+            "Use this human-style 0-100 scale: 50 = ordinary context, 60 = mildly interesting, "
+            "70 = clear emotional/absurd/story beat, 80 = strong clip candidate likely to hold a "
+            "cold viewer, 90 = exceptional shareable moment, 100 = undeniable standout. "
+            "Return strong candidates even when they score below 80; the app applies the user's final "
+            "viral-score threshold. Returning no moments is appropriate only when the window is truly "
+            "flat or unintelligible. Return ONLY JSON: {\"moments\":[{\"time\":seconds,\"score\":0-100,\"reason\":short string}]}. "
+            "The reason must explain the emotion, absurdity, stakes, irony, escalation, or quote that "
+            "makes the moment interesting. The time must point inside the beat, not at its start. "
+            "Do not invent dialogue or claim an event that is not supported by the transcript.\n"
             f"Duration: {int(duration)} seconds\nTranscript:\n{_transcript(words, duration)}")
 
 
@@ -148,7 +153,10 @@ def _transcript_engagement(words, second):
 def _calibrate_score(model_score, words, second):
     """Blend an LLM's subjective score with transcript evidence conservatively."""
     evidence = _transcript_engagement(words, second)
-    return round(max(0.0, min(100.0, 0.75 * float(model_score) + 0.25 * evidence)), 1)
+    # The model's contextual judgment is primary; transcript evidence is a
+    # light calibration signal so expressive moments are not crushed merely
+    # because ASR missed the visual payoff or reaction.
+    return round(max(0.0, min(100.0, 0.9 * float(model_score) + 0.1 * evidence)), 1)
 
 
 def _extract_json(text):

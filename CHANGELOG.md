@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.5] - 2026-11-21
+
+### Changed
+
+- Relaxed Gemini's viral rubric to reward emotion, absurdity, irony, escalation, risky decisions, strong reactions, and memorable quotes—not only explicit payoffs.
+- Returned sub-80 candidates for transparent scoring while keeping the user's configured threshold as the final clip gate.
+- Reduced score dampening so Gemini's contextual judgment remains primary when speech recognition misses visual context.
+
 ## [2.0.4] - 2026-11-21
 
 ### Fixed
@@ -146,7 +154,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.4...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.5...HEAD
+[2.0.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.4...v2.0.5
 [2.0.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.1...v2.0.2

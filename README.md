@@ -75,6 +75,8 @@ The lightweight installer:
 
 Later launches reuse the isolated runtime. Reinstalling a newer version over the existing installation preserves local settings and updates the packaged source files.
 
+Hugging Face authentication is optional and requested only once during setup. Paste a token to enable authenticated model downloads, or press **Enter** to skip; unauthenticated public downloads may be slower. The choice is remembered, and a token can be added later in **AI settings > Hugging Face**.
+
 ## Quick start
 
 1. Open StreamSnip AI.

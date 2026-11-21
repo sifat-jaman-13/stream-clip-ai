@@ -877,6 +877,27 @@ class RegressionTests(unittest.TestCase):
             self.assertNotIn("secret", str(saved))
             self.assertIn("secret", stored)
 
+    def test_ai_settings_preserve_one_time_huggingface_setup_choice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            path.write_text(__import__("json").dumps({
+                "provider": "hooks",
+                "huggingface_setup_completed": True,
+            }), encoding="utf-8")
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                loaded = autoclip.load_ai_settings()
+                self.assertEqual(loaded["huggingface_setup_completed"], "True")
+                autoclip.save_ai_settings({"provider": "gemini"})
+                stored = __import__("json").loads(path.read_text(encoding="utf-8"))
+                self.assertTrue(stored["huggingface_setup_completed"])
+                self.assertNotIn("huggingface_setup_completed", autoclip.public_ai_settings())
+
+    def test_ai_settings_default_huggingface_setup_choice_is_incomplete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                self.assertEqual(autoclip.load_ai_settings()["huggingface_setup_completed"], "false")
+
     def test_ai_settings_can_clear_saved_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ai_settings.json"

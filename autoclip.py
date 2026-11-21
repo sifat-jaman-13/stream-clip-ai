@@ -30,7 +30,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
 from post_metadata import generate_social_copy
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -698,7 +698,7 @@ def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
                 "gemini_model": DEFAULT_GEMINI_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
                 "gemini_api_key": "", "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", "")),
-                "metadata_copy_enabled": "true"}
+                "metadata_copy_enabled": "true", "huggingface_setup_completed": "false"}
     try:
         data = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
         if isinstance(data, dict): defaults.update({k: str(v) for k, v in data.items() if k in defaults and v is not None})

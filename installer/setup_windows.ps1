@@ -195,21 +195,78 @@ for name in sys.argv[2:]:
     }
 }
 
+function Save-HuggingFaceSetupSettings($Settings, [string]$SettingsPath) {
+    $directory = Split-Path -Parent $SettingsPath
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    $temporaryPath = "$SettingsPath.$PID.tmp"
+    $json = $Settings | ConvertTo-Json -Depth 10
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($temporaryPath, $json, $utf8NoBom)
+    Move-Item -LiteralPath $temporaryPath -Destination $SettingsPath -Force
+}
+
 function Request-HuggingFaceToken {
-    if ($env:HF_TOKEN -or $env:HUGGING_FACE_HUB_TOKEN) { return }
-    try {
-        Write-Host ""
-        Write-Host "Hugging Face authentication" -ForegroundColor Cyan
-        Write-Host "Paste your hf_... token now. Press Enter to use unauthenticated downloads." -ForegroundColor Yellow
-        $token = Read-Host -Prompt "HF token"
-        if ($token) {
-            $env:HF_TOKEN = $token.Trim()
-            $env:HUGGING_FACE_HUB_TOKEN = $env:HF_TOKEN
-            Write-Host "Hugging Face token received. Authenticated model downloads enabled." -ForegroundColor Green
-        }
-    } catch {
-        Write-Host "No Hugging Face token supplied; continuing with the public download route." -ForegroundColor Yellow
+    $settingsPath = Join-Path $source "ai_settings.json"
+    $settings = $null
+    if (Test-Path $settingsPath) {
+        try { $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json } catch {}
     }
+    if ($null -eq $settings) { $settings = [pscustomobject]@{} }
+
+    $savedToken = [string]$settings.huggingface_token
+    $environmentToken = if ($env:HF_TOKEN) { $env:HF_TOKEN } else { $env:HUGGING_FACE_HUB_TOKEN }
+
+    if ($savedToken) {
+        $env:HF_TOKEN = $savedToken.Trim()
+        $env:HUGGING_FACE_HUB_TOKEN = $env:HF_TOKEN
+    } elseif ($environmentToken) {
+        $env:HF_TOKEN = $environmentToken.Trim()
+        $env:HUGGING_FACE_HUB_TOKEN = $env:HF_TOKEN
+    }
+
+    $choiceValue = [string]$settings.huggingface_setup_completed
+    $setupCompleted = $choiceValue.Trim().ToLowerInvariant() -in @("true", "1", "yes", "completed")
+
+    if ($savedToken -or $environmentToken) {
+        if (-not $setupCompleted) {
+            if ($settings.PSObject.Properties["huggingface_setup_completed"]) {
+                $settings.huggingface_setup_completed = $true
+            } else {
+                $settings | Add-Member -NotePropertyName "huggingface_setup_completed" -NotePropertyValue $true
+            }
+            Save-HuggingFaceSetupSettings $settings $settingsPath
+        }
+        return
+    }
+
+    if ($setupCompleted) { return }
+
+    Write-Host ""
+    Write-Host "Hugging Face authentication (optional, one-time setup)" -ForegroundColor Cyan
+    Write-Host "You can paste an hf_... token for authenticated model downloads." -ForegroundColor Yellow
+    Write-Host "You can ignore this step and press Enter to continue without a token." -ForegroundColor Yellow
+    Write-Host "Without a token, public model downloads may be slower." -ForegroundColor Yellow
+    Write-Host "Your choice is saved, so this question will not appear again." -ForegroundColor Green
+    $secureToken = Read-Host -AsSecureString -Prompt "HF token (optional; input is hidden)"
+
+    if ($secureToken -and $secureToken.Length -gt 0) {
+        $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+        try {
+            $savedToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer)
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
+        }
+        $savedToken = $savedToken.Trim()
+        $settings | Add-Member -NotePropertyName "huggingface_token" -NotePropertyValue $savedToken -Force
+        $env:HF_TOKEN = $savedToken
+        $env:HUGGING_FACE_HUB_TOKEN = $savedToken
+        Write-Host "Hugging Face token saved. Authenticated model downloads enabled." -ForegroundColor Green
+    } else {
+        Write-Host "No token saved. Continuing with public downloads; they may be slower." -ForegroundColor Yellow
+    }
+
+    $settings | Add-Member -NotePropertyName "huggingface_setup_completed" -NotePropertyValue $true -Force
+    Save-HuggingFaceSetupSettings $settings $settingsPath
 }
 
 try {

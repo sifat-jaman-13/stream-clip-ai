@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-22
+
+### Changed
+
+- Clarified that Hugging Face authentication is optional and unauthenticated model downloads may be slower.
+- Remember the first-run Hugging Face setup choice, including skipping it, so the launcher does not ask on every start.
+- Save a supplied Hugging Face token in the existing local AI settings; users can add a token later from AI settings.
+- Mask token entry so the credential is not echoed in the setup console.
+
+### Tests
+
+- Added coverage for preserving the one-time Hugging Face setup marker in AI settings.
+
 ## [2.1.0] - 2026-11-22
 
 ### Changed

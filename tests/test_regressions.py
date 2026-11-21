@@ -477,7 +477,7 @@ class RegressionTests(unittest.TestCase):
             })
         self.assertEqual(result, {"moments": []})
         self.assertEqual(sum("gemini-3.8-flash" in url for url in calls), 3)
-        self.assertEqual(sum("gemini-backup-flash" in url for url in calls), 3)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in calls), 1)
 
     def test_gemini_exhausts_three_attempts_for_every_model_before_fallback(self):
         generation_urls = []

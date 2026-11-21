@@ -46,8 +46,9 @@ Locally stored credentials, settings, recordings, and clips remain on the user's
 5. The workflow runs on a GitHub-hosted Windows runner, executes the regression tests and Python syntax checks, installs a pinned Inno Setup compiler, and invokes the checked-in build_windows.ps1 script.
 6. The resulting unsigned StreamSnipAI-Setup.exe is uploaded as a single-file GitHub Actions workflow artifact before the signing request is submitted.
 7. SignPath verifies repository origin metadata (repository URL, master branch, commit ID, and GitHub workflow URL) using its predefined GitHub.com Trusted Build System. The SignPath project is configured for origin verification and a release policy that permits only the reviewed master branch.
-8. The signed artifact is downloaded from SignPath. The workflow rejects the result unless Windows reports a valid Authenticode signature and the product name/version metadata still match the source release.
-9. The workflow calculates SHA-256 from the signed installer and publishes the installer, checksum, and signer/build metadata in a GitHub Release. A failed signing request or invalid signature stops publication; there is no unsigned fallback.
+8. SignPath requires manual approval for every release signing request. Sifat Jaman reviews the signing request, its verified origin metadata, and the requested artifact in SignPath, then explicitly approves or rejects it. The workflow waits for that decision; a timeout, denial, or signing failure stops publication.
+9. The signed artifact is downloaded from SignPath. The workflow rejects the result unless Windows reports a valid Authenticode signature and the product name/version metadata still match the source release.
+10. The workflow calculates SHA-256 from the signed installer and publishes the installer, checksum, and signer/build metadata in a GitHub Release. A failed signing request or invalid signature stops publication; there is no unsigned fallback.
 
 The workflow derives the release tag from the version in source control. Existing version tags are never overwritten. Existing unsigned releases are not retroactively signed.
 
@@ -62,7 +63,8 @@ Before enabling the release workflow, the maintainer must:
 5. Enable Trusted Build System verification and **Verify origin** for the release signing policy; restrict allowed branch names to master.
 6. Configure the artifact configuration to accept a single Windows PE executable and enforce the product name StreamSnip AI and the release product version.
 7. Create a signing-policy slug and an API token with submitter permission for that policy.
-8. Configure the signing policy to require manual approval for every release request, with Sifat Jaman as the authorized approver.\n9. Enable repository GitHub Actions access to the settings below.
+8. Configure the signing policy to require manual approval for every release request, with Sifat Jaman as the authorized approver.
+9. Enable repository GitHub Actions access to the settings below.
 
 Required repository Actions settings:
 
@@ -71,7 +73,8 @@ Required repository Actions settings:
 | Variable | SIGNPATH_ENABLED | true |
 | Variable | SIGNPATH_ORGANIZATION_ID | SignPath organization ID |
 | Variable | SIGNPATH_PROJECT_SLUG | SignPath project slug |
-| Variable | SIGNPATH_SIGNING_POLICY_SLUG | SignPath release signing-policy slug |\n| Variable | SIGNPATH_ARTIFACT_CONFIGURATION_SLUG | SignPath artifact configuration slug |
+| Variable | SIGNPATH_SIGNING_POLICY_SLUG | SignPath release signing-policy slug |
+| Variable | SIGNPATH_ARTIFACT_CONFIGURATION_SLUG | SignPath artifact configuration slug |
 | Secret | SIGNPATH_API_TOKEN | SignPath API token |
 
 The release workflow deliberately fails before building/publishing when these settings are absent or incomplete. It does not create an unsigned release while signing is unavailable.

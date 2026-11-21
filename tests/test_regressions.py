@@ -476,8 +476,8 @@ class RegressionTests(unittest.TestCase):
                 "gemini_api_key": "test-key", "gemini_model": "gemini-3.8-flash",
             })
         self.assertEqual(result, {"moments": []})
-        self.assertEqual(sum("gemini-3.8-flash" in url for url in calls), 1)
-        self.assertEqual(sum("gemini-backup-flash" in url for url in calls), 1)
+        self.assertEqual(sum("gemini-3.8-flash" in url for url in calls), 3)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in calls), 3)
 
     def test_gemini_exhausts_three_attempts_for_every_model_before_fallback(self):
         generation_urls = []
@@ -493,13 +493,13 @@ class RegressionTests(unittest.TestCase):
 
         with patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
              patch.object(ai_highlights.time, "sleep"):
-            with self.assertRaisesRegex(ai_highlights.AIProviderError, "6 attempts across 2 model"):
+            with self.assertRaisesRegex(ai_highlights.AIProviderError, "12 attempts across 2 model"):
                 ai_highlights._gemini("transcript", {
                     "gemini_api_key": "test-key", "gemini_model": "gemini-3.8-flash",
                 })
-        self.assertEqual(len(generation_urls), 6)
-        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 3)
-        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 3)
+        self.assertEqual(len(generation_urls), 12)
+        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 6)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 6)
 
     @unittest.skipUnless(autoclip.shutil.which("ffmpeg") or autoclip.ffmpeg_exe() != "ffmpeg", "FFmpeg is not installed")
     def test_render_burns_relative_captions_after_input_seek(self):
@@ -561,9 +561,9 @@ class RegressionTests(unittest.TestCase):
                 logs.append,
             )
         self.assertEqual(moments, [(24, 76.5)])
-        self.assertEqual(len(generation_urls), 6)
-        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 3)
-        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 3)
+        self.assertEqual(len(generation_urls), 12)
+        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 6)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 6)
         ollama.assert_called_once()
         self.assertTrue(any("Switching remaining transcript windows to local Ollama" in line for line in logs))
 

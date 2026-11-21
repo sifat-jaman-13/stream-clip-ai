@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-11-21
+
+### Changed
+
+- Gemini now performs two complete model-rotation rounds before Ollama fallback, staying on each model until all three attempts are exhausted.
+
 ## [2.0.2] - 2026-11-21
 
 ### Fixed
@@ -134,7 +140,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.2...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.3...HEAD
+[2.0.3]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.14...v2.0.0

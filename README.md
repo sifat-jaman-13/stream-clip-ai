@@ -72,7 +72,11 @@ The lightweight installer:
 
 Later launches reuse the isolated runtime. Reinstalling a newer version over the existing installation preserves local settings and updates the packaged source files.
 
-## Code signing policy\n\nThe [Code signing policy](CODE_SIGNING.md) documents the maintainer roles, privacy behavior, source-controlled Windows release build, and Authenticode verification process. Existing releases remain unsigned. If the project is accepted into the SignPath Foundation program, future signed releases will include the required attribution: “Free code signing provided by SignPath.io, certificate by SignPath Foundation.”\n\n## Quick start
+## Code signing policy
+
+The [Code signing policy](CODE_SIGNING.md) documents the maintainer roles, privacy behavior, source-controlled Windows release build, and Authenticode verification process. Existing releases remain unsigned. If the project is accepted into the SignPath Foundation program, future signed releases will include the required attribution: “Free code signing provided by SignPath.io, certificate by SignPath Foundation.”
+
+## Quick start
 
 1. Open StreamSnip AI.
 2. Choose **Live stream** or **Video file / VOD**.

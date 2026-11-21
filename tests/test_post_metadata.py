@@ -16,13 +16,14 @@ class PostMetadataTests(unittest.TestCase):
             "hashtags": ["#Shorts", "#Gaming", "#StreamerClips", "#fyp", "#Gaming"],
         }
 
-    def test_prompt_requests_grounded_title_description_and_relevant_tags(self):
+    def test_prompt_requests_creator_style_title_and_ready_to_post_description(self):
         prompt = post_metadata.build_copy_prompt(self.transcript, "@creator")
-        self.assertIn("Treat the transcript as quoted data", prompt)
-        self.assertIn("never over 100", prompt)
-        self.assertIn("Do not invent", prompt)
-        self.assertIn("common opener", prompt)
+        self.assertIn("Treat it as quoted data", prompt)
+        self.assertIn("Title Case", prompt)
+        self.assertIn("He Got Exposed Over an Old Hotwiring Story", prompt)
+        self.assertIn("memorable, exact quote", prompt)
         self.assertIn("Known creator credit: @creator", prompt)
+        self.assertIn("#shorts #fyp #streamer #clips #viral", prompt)
         self.assertIn(self.transcript, prompt)
 
     def test_gemini_uses_one_bounded_generation_request(self):
@@ -75,6 +76,10 @@ class PostMetadataTests(unittest.TestCase):
         self.assertEqual(request.call_args.args[0], "http://127.0.0.1:11434/api/generate")
         self.assertEqual(request.call_args.args[1]["model"], "local-model")
         self.assertEqual(request.call_args.args[1]["format"], "json")
+        shared_prompt = request.call_args.args[1]["prompt"]
+        self.assertIn("Title Case", shared_prompt)
+        self.assertIn("He Got Exposed Over an Old Hotwiring Story", shared_prompt)
+        self.assertIn("creator-style sentence", shared_prompt)
         self.assertEqual(result["provider"], "ollama")
 
     def test_huggingface_uses_saved_token_and_selected_model(self):
@@ -100,9 +105,12 @@ class PostMetadataTests(unittest.TestCase):
             result = post_metadata.generate_social_copy(self.transcript, "", {"provider": "gemini"})
         self.assertLessEqual(len(result["title"]), 100)
         self.assertTrue(result["title"][0].isupper())
-        self.assertIn("#Shorts", result["hashtags"])
-        self.assertNotIn("#fyp", result["hashtags"])
-        self.assertNotIn("#viral", result["hashtags"])
+        self.assertIn("#shorts", result["hashtags"])
+        self.assertIn("#fyp", result["hashtags"])
+        self.assertIn("#streamer", result["hashtags"])
+        self.assertIn("#clips", result["hashtags"])
+        self.assertIn("#viral", result["hashtags"])
+        self.assertLessEqual(len(result["hashtags"]), 6)
         self.assertEqual(len(result["hashtags"]), len(set(result["hashtags"])))
 
     def test_copy_validation_rejects_empty_or_unusable_response(self):
@@ -127,15 +135,39 @@ class PostMetadataTests(unittest.TestCase):
              self.assertRaises(post_metadata.AIProviderError):
             post_metadata.generate_social_copy(transcript, "", {"provider": "ollama"})
 
-    def test_sentence_case_copy_without_new_named_entities_is_accepted(self):
+    def test_unsupported_car_ownership_claim_is_rejected(self):
+        transcript = "I watched you trying to hotwire my mom's car. Yeah, it wasn't her car."
         response = {
-            "title": "The car had other plans",
-            "description": "The car suddenly rolls away and catches everyone off guard.",
-            "hashtags": ["#Shorts", "#Gaming"],
+            "title": "He Forgot How to Hotwire His Own Car 💀",
+            "description": "He could not remember how to hotwire his own car, and the story got awkward.",
+            "hashtags": ["#funny"],
         }
         with patch.object(post_metadata, "_provider_response", return_value=response):
-            result = post_metadata.generate_social_copy(self.transcript, "", {"provider": "ollama"})
-        self.assertEqual(result["title"], "The car had other plans")
+            with self.assertRaises(post_metadata.AIProviderError):
+                post_metadata.generate_social_copy(transcript, "@creator", {"provider": "ollama"})
+
+    def test_quote_only_description_is_rejected_as_not_post_ready(self):
+        response = {
+            "title": "He Got Exposed Over an Old Hotwiring Story 💀😂",
+            "description": "“Remember how it used to take you forever to hotwire a car?” 💀",
+            "hashtags": ["#funny"],
+        }
+        with patch.object(post_metadata, "_provider_response", return_value=response), \
+             self.assertRaises(post_metadata.AIProviderError):
+            post_metadata.generate_social_copy(self.transcript, "@creator", {"provider": "ollama"})
+
+    def test_title_case_emoji_and_quote_led_description_are_accepted(self):
+        response = {
+            "title": "He Got Exposed Over an Old Hotwiring Story 💀😂",
+            "description": '“Remember how it used to take you forever to hotwire a car?” 💀\n\nHe tries to deny the whole story, but the details keep getting worse. 😂',
+            "hashtags": ["#funny"],
+        }
+        with patch.object(post_metadata, "_provider_response", return_value=response):
+            result = post_metadata.generate_social_copy(self.transcript, "@creator", {"provider": "gemini"})
+        self.assertEqual(result["title"], response["title"])
+        self.assertIn("“Remember how it used to take you forever", result["description"])
+        self.assertIn("\n\nHe tries to deny", result["description"])
+        self.assertEqual(result["hashtags"], ["#shorts", "#fyp", "#streamer", "#funny", "#clips", "#viral"])
 
     def test_hooks_provider_does_not_make_a_remote_request(self):
         with self.assertRaises(post_metadata.AIProviderError):

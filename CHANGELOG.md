@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.9] - 2026-11-22
+
+### Changed
+
+- Reworked the shared AI post-copy prompt for Gemini, Ollama, and Hugging Face to use the same creator-style format: catchy Title Case titles, relevant emojis, quote-led captions with explanatory context, creator credit, and ready-to-post hashtags.
+- Added a style example based on the requested streamer-clip caption format and explicit safeguards against assigning one speaker's actions to another.
+- Added validation to reject quote-only descriptions that omit the explanatory caption.
+- Updated the AI settings hint and documentation to explain that the same writing instructions are provider-independent.
+
+### Tests
+
+- Added regression coverage for creator-style formatting, quote-only rejection, and ready-to-post hashtag output.
+- Exercised live copy generation with the saved Gemini key and the installed local Ollama model llama3.2:3b; Ollama outputs that fail the copy checks use the safe transcript fallback.
+
+### Changed
+
+- Bumped StreamSnip AI to 2.0.9.
+
 ## [2.0.8] - 2026-11-22
 
 ### Fixed
@@ -186,7 +204,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.7...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.9...HEAD
+[2.0.9]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.8...v2.0.9
 [2.0.7]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.4...v2.0.5

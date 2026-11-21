@@ -1,6 +1,6 @@
 #define MyAppName "StreamSnip AI"
 #define MyAppVersion "1.2.7"
-#define MyAppPublisher "ScarZero"
+#define MyAppPublisher "Sifat Jaman"
 #define MyAppExeName "StreamSnipAI.exe"
 
 [Setup]

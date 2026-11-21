@@ -4,6 +4,18 @@ Notable StreamSnip AI changes are documented here. Complete release notes and do
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use semantic versioning.
 
+## [2.1.2] - 2026-11-22
+
+### Changed
+
+- Uninstall now removes the app-local Python virtual environment, pip dependencies, and downloaded Whisper speech models.
+- Setup records whether it installed Python 3.12 or FFmpeg through WinGet; uninstall removes only those globally installed dependencies and leaves pre-existing tools alone.
+- Existing clips, recordings, and local settings are retained.
+
+### Tests
+
+- Added verification for app-local dependency cleanup and dependency ownership tracking.
+
 ## [Unreleased]
 
 ## [2.1.1] - 2026-11-22

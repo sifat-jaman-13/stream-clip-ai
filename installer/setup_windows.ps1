@@ -11,6 +11,30 @@ $RuntimeSchema = "3"
 $transcriptStarted = $false
 $exitCode = 0
 
+$script:DependencyStatePath = $null
+$script:DependencyOwnership = @{
+    python_installed_by_streamsnip = $false
+    ffmpeg_installed_by_streamsnip = $false
+}
+
+function Save-DependencyOwnership {
+    if (-not $script:DependencyStatePath) { return }
+    $directory = Split-Path -Parent $script:DependencyStatePath
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    $temporaryPath = "$($script:DependencyStatePath).$PID.tmp"
+    $json = $script:DependencyOwnership | ConvertTo-Json -Depth 5
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($temporaryPath, $json, $utf8NoBom)
+    Move-Item -LiteralPath $temporaryPath -Destination $script:DependencyStatePath -Force
+}
+
+function Mark-DependencyInstalled([string]$Name) {
+    if ($Name -notin @("python", "ffmpeg")) { throw "Unknown dependency ownership key: $Name" }
+    $key = $Name + "_installed_by_streamsnip"
+    $script:DependencyOwnership[$key] = $true
+    Save-DependencyOwnership
+}
+
 function Refresh-ProcessPath {
     $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
     $user = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -98,6 +122,7 @@ function Install-Python312 {
         & $winget.Source @installArgs | ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { throw "Python 3.12 installation failed." }
     }
+    Mark-DependencyInstalled "python"
     Refresh-ProcessPath
     $python = Find-SupportedPython
     if (-not $python) {
@@ -151,6 +176,7 @@ function Ensure-FFmpeg {
         & $winget.Source install --id Gyan.FFmpeg --exact --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity |
             ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { throw "FFmpeg installation failed." }
+        Mark-DependencyInstalled "ffmpeg"
         $ffmpeg = Find-FFmpeg
     }
     if (-not $ffmpeg) {
@@ -280,8 +306,18 @@ try {
     $logBase = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $AppDir }
     $logRoot = Join-Path $logBase "StreamSnip AI"
     $logPath = Join-Path $logRoot "setup.log"
+    $script:DependencyStatePath = Join-Path $logRoot "installer-dependencies.json"
 
     New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
+    if (Test-Path $script:DependencyStatePath) {
+        try {
+            $savedOwnership = Get-Content -LiteralPath $script:DependencyStatePath -Raw | ConvertFrom-Json
+            $script:DependencyOwnership.python_installed_by_streamsnip = [bool]$savedOwnership.python_installed_by_streamsnip
+            $script:DependencyOwnership.ffmpeg_installed_by_streamsnip = [bool]$savedOwnership.ffmpeg_installed_by_streamsnip
+        } catch {
+            Write-Host "Previous dependency ownership could not be read; existing global tools will be kept during uninstall." -ForegroundColor Yellow
+        }
+    }
     try {
         Start-Transcript -Path $logPath -Append | Out-Null
         $transcriptStarted = $true

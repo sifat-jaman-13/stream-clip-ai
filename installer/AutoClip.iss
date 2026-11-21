@@ -1,5 +1,5 @@
 #define MyAppName "StreamSnip AI"
-#define MyAppVersion "2.1.1"
+#define MyAppVersion "2.1.2"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 
@@ -30,6 +30,7 @@ Source: "..\post_metadata.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\zernio_poster.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\installer\setup_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\installer\uninstall_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\StreamSnip AI"; Filename: "{app}\StreamSnipAI.exe"
@@ -40,3 +41,6 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_windows.ps1"" -AppDir ""{app}"""; WorkingDir: "{app}"; Description: "Install dependencies and launch StreamSnip AI"; StatusMsg: "Preparing StreamSnip AI..."; Flags: waituntilterminated skipifsilent
+
+[UninstallRun]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall_windows.ps1"" -AppDir ""{app}"""; WorkingDir: "{app}"; RunOnceId: "StreamSnipAIDependencyCleanup"; Flags: runhidden waituntilterminated

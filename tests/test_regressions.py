@@ -877,6 +877,21 @@ class RegressionTests(unittest.TestCase):
             self.assertNotIn("secret", str(saved))
             self.assertIn("secret", stored)
 
+    def test_installer_tracks_and_removes_only_its_owned_global_dependencies(self):
+        root = Path(__file__).resolve().parents[1]
+        setup_script = (root / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
+        uninstall_script = (root / "installer" / "uninstall_windows.ps1").read_text(encoding="utf-8")
+        installer_script = (root / "installer" / "AutoClip.iss").read_text(encoding="utf-8")
+        self.assertIn('Mark-DependencyInstalled "python"', setup_script)
+        self.assertIn('Mark-DependencyInstalled "ffmpeg"', setup_script)
+        self.assertIn('python_installed_by_streamsnip', uninstall_script)
+        self.assertIn('ffmpeg_installed_by_streamsnip', uninstall_script)
+        self.assertIn('Python.Python.3.12', uninstall_script)
+        self.assertIn('Gyan.FFmpeg', uninstall_script)
+        self.assertIn('source\\models', uninstall_script)
+        self.assertIn('uninstall_windows.ps1', installer_script)
+        self.assertIn('[UninstallRun]', installer_script)
+
     def test_ai_settings_preserve_one_time_huggingface_setup_choice(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ai_settings.json"

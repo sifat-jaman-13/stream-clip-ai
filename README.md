@@ -77,6 +77,8 @@ Later launches reuse the isolated runtime. Reinstalling a newer version over the
 
 Hugging Face authentication is optional and requested only once during setup. Paste a token to enable authenticated model downloads, or press **Enter** to skip; unauthenticated public downloads may be slower. The choice is remembered, and a token can be added later in **AI settings > Hugging Face**.
 
+Uninstalling removes the isolated Python runtime, pip-installed packages, and downloaded Whisper models. It also removes Python 3.12 or FFmpeg only when the StreamSnip AI setup recorded that it installed that global package. Existing clips, recordings, and local settings are preserved.
+
 ## Quick start
 
 1. Open StreamSnip AI.

@@ -11,6 +11,40 @@ from zernio_poster import ZernioPublisher
 
 
 class RegressionTests(unittest.TestCase):
+    def test_clip_metadata_sidecar_and_combined_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            sidecar, manifest = autoclip.write_clip_metadata_files(
+                output, "stream_clip1.mp4", "stream_recording.mp4", 12.8, 47.2,
+                "That was unbelievable! The whole chat went crazy.",
+                "@streamer"
+            )
+            self.assertEqual(sidecar, output / "stream_clip1.txt")
+            self.assertEqual(manifest, output / "clips_metadata.txt")
+            metadata = sidecar.read_text(encoding="utf-8")
+            self.assertEqual(metadata.splitlines()[0], "That was unbelievable!")
+            self.assertIn("\n\nThat was unbelievable! The whole chat went crazy.", metadata)
+            self.assertIn("Clip from @streamer", metadata)
+            self.assertIn("Clip: stream_clip1.mp4", metadata)
+            self.assertIn("Source: stream_recording.mp4", metadata)
+            self.assertIn("Timestamp: 00:00:12 - 00:00:47", metadata)
+            self.assertIn("#shorts", metadata)
+            autoclip.write_clip_metadata_files(
+                output, "stream_clip2.mp4", "stream_recording.mp4", 65, 91,
+                "Another great moment.", "@streamer"
+            )
+            index = manifest.read_text(encoding="utf-8")
+            self.assertIn("Clip: stream_clip1.mp4", index)
+            self.assertIn("Clip: stream_clip2.mp4", index)
+
+    def test_clip_metadata_fallback_when_no_speech_is_detected(self):
+        metadata = autoclip.build_clip_metadata_text(
+            "gameplay_clip1.mp4", "my_gameplay_recording.mp4", 0, 8, ""
+        )
+        self.assertEqual(metadata.splitlines()[0], "Highlight from my gameplay recording")
+        self.assertIn("No speech transcript was detected.", metadata)
+
+
     def test_publishing_auto_post_defaults_to_off_and_submit_obeys_toggle(self):
         core = object.__new__(autoclip.Core)
         core.publishing = {

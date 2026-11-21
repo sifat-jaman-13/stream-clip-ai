@@ -37,6 +37,12 @@ Relevant third-party services have their own privacy terms:
 
 Locally stored credentials, settings, recordings, and clips remain on the user's machine unless a corresponding external feature is deliberately used. See the README's [Data, credentials, and privacy](README.md#data-credentials-and-privacy) section for the documented network behavior.
 
+## SignPath Foundation eligibility checkpoint
+
+The current Windows runtime requirements include `nvidia-cublas-cu12` in `requirements.txt`, and the Windows setup script installs that file as part of the default runtime setup. PyPI currently identifies this package with the license expression `LicenseRef-NVIDIA-Proprietary`. SignPath Foundation's published conditions require OSI-approved licensing for all components and exclude proprietary components.
+
+This is a material eligibility concern, not a detail this policy can waive. Before applying for, or enabling, Foundation signing, the maintainer must obtain SignPath's written determination on this dependency or change the runtime packaging/dependency model and re-review the project. Do not set `SIGNPATH_ENABLED=true` or submit a signing request until this question is resolved and the Foundation has accepted the project.
+
 ## Build and signing procedure
 
 1. Prepare a release-ready commit on the trusted/default master branch.

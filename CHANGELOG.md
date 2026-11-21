@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-11-21
+
+### Fixed
+
+- Gemini quota/rate-limit errors now skip repeated attempts for the same model and rotate immediately to the next available model.
+
 ## [2.0.1] - 2026-11-21
 
 ### Added
@@ -128,7 +134,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.14...v2.0.0
 [1.2.14]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.13...v1.2.14

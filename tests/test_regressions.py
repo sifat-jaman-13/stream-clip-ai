@@ -458,6 +458,27 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(any("gemini-backup-flash:generateContent" in url for url in calls))
         self.assertEqual(sum("gemini-3.8-flash:generateContent" in url for url in calls), 3)
 
+    def test_gemini_quota_error_rotates_without_repeating_same_model(self):
+        calls = []
+        def fake_request(url, payload=None, headers=None, timeout=90):
+            if "/models?" in url:
+                return {"models": [
+                    {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/gemini-backup-flash", "supportedGenerationMethods": ["generateContent"]},
+                ]}
+            calls.append(url)
+            if "gemini-3.8-flash" in url:
+                raise ai_highlights.AIProviderError("HTTP 429 quota", quota=True, retryable=True)
+            return {"candidates": [{"content": {"parts": [{"text": '{"moments": []}'}]}}]}
+
+        with patch.object(ai_highlights, "_json_request", side_effect=fake_request):
+            result = ai_highlights._gemini("transcript", {
+                "gemini_api_key": "test-key", "gemini_model": "gemini-3.8-flash",
+            })
+        self.assertEqual(result, {"moments": []})
+        self.assertEqual(sum("gemini-3.8-flash" in url for url in calls), 1)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in calls), 1)
+
     def test_gemini_exhausts_three_attempts_for_every_model_before_fallback(self):
         generation_urls = []
 

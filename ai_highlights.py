@@ -313,6 +313,10 @@ def _gemini(prompt, config):
                 if not exc.retryable:
                     raise
                 retry_log = config.get("_gemini_log")
+                if exc.quota:
+                    if callable(retry_log):
+                        retry_log(f"Gemini model {model} hit its quota/rate limit; skipping retries for this model and rotating immediately.")
+                    break
                 if callable(retry_log):
                     if model_attempt < GEMINI_ATTEMPTS_PER_MODEL:
                         retry_log(f"Gemini model {model} failed ({str(exc)[:180]}). Retrying this model.")

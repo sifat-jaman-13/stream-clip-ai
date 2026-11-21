@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.8] - 2026-11-22
+
+### Fixed
+
+- Added gemini-3.1-flash-lite as the dedicated lightweight fallback for AI post copy; it was verified to generate copy with the saved API credential. Highlight-analysis model selection remains unchanged.
+- Gemini post-copy now makes at most one fallback request to the default model when the selected model is quota-limited, unavailable, or returns unusable JSON; invalid credentials are not retried.
+- Tightened the prompt to favor sentence-case title openers accepted by the grounded-copy validator.
+
+### Changed
+
+- Bumped StreamSnip AI to 2.0.8.
+
 ## [2.0.7] - 2026-11-22
 
 ### Added

@@ -109,7 +109,9 @@ Gemini currently prefers `gemini-3.8-flash`. On retryable model/API failures, St
 - Captions: karaoke or classic timing with Classic, Hormozi, Neon, MrBeast, Minimal, and Fire presets.
 - Customization: highlight color, font, words per line, font size, vertical position, text/stroke colors, and alignment.
 - Branding: automatic streamer credit, optional custom credit, end-card CTA, and optional Windows voice CTA.
-- Output: an `.mp4` clip plus a matching `.txt` caption/hashtag file.
+- Output: each `.mp4` clip has a matching `.txt` file. The **first non-empty line is the title** and everything below it is the description, so the files work directly with ScarClipScheduler's title/description scanner.
+- The matching TXT includes the clip transcript, creator credit (when available), hashtags, MP4 filename, source filename, and original-video timestamp range.
+- A cumulative `clips_metadata.txt` index in the output folder lists metadata for every generated clip.
 
 ## Zernio publishing
 

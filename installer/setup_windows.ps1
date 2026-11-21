@@ -200,19 +200,12 @@ function Request-HuggingFaceToken {
     try {
         Write-Host ""
         Write-Host "Hugging Face authentication" -ForegroundColor Cyan
-        Write-Host "Paste your hf_... token at the prompt below. Your typing is hidden; press Enter to skip." -ForegroundColor Yellow
-        $secure = Read-Host -Prompt "HF token" -AsSecureString
-        if ($secure.Length -eq 0) { return }
-        $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-        try {
-            $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-            if ($token) {
-                $env:HF_TOKEN = $token
-                $env:HUGGING_FACE_HUB_TOKEN = $token
-                Write-Host "Hugging Face token received. Authenticated model downloads enabled." -ForegroundColor Green
-            }
-        } finally {
-            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+        Write-Host "Paste your hf_... token now. Press Enter to use unauthenticated downloads." -ForegroundColor Yellow
+        $token = Read-Host -Prompt "HF token"
+        if ($token) {
+            $env:HF_TOKEN = $token.Trim()
+            $env:HUGGING_FACE_HUB_TOKEN = $env:HF_TOKEN
+            Write-Host "Hugging Face token received. Authenticated model downloads enabled." -ForegroundColor Green
         }
     } catch {
         Write-Host "No Hugging Face token supplied; continuing with the public download route." -ForegroundColor Yellow
@@ -239,6 +232,7 @@ try {
 
     Write-Host "StreamSnip AI setup" -ForegroundColor Cyan
     Write-Host "Setup log: $logPath"
+    Request-HuggingFaceToken
     if (-not (Test-Path $main) -or -not (Test-Path $requirements)) {
         throw "The StreamSnip AI source files are incomplete. Reinstall the application and try again."
     }
@@ -288,7 +282,6 @@ try {
 
         $speechModelRoot = Join-Path $source "models"
         Write-Host "Downloading and verifying StreamSnip AI speech models. This can take a while and needs an internet connection..." -ForegroundColor Cyan
-        Request-HuggingFaceToken
         Ensure-SpeechModels $runtimePython $speechModelRoot
 
         if (-not $SkipLaunch) {

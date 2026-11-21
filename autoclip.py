@@ -29,7 +29,7 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -106,12 +106,22 @@ _data_root = (pathlib.Path(_data_override).expanduser() if _data_override else
 OUT = _data_root / "out"
 REC = _data_root / "rec"
 WHISPER_MODELS = _data_root / "models"
+RUNTIME_LOG = _data_root / "streamsnip.log"
 
 def ensure_runtime_dirs():
     """Recreate runtime folders if the user, cleanup software, or an installer removed them."""
     OUT.mkdir(parents=True, exist_ok=True)
     REC.mkdir(parents=True, exist_ok=True)
     WHISPER_MODELS.mkdir(parents=True, exist_ok=True)
+
+
+def append_runtime_log(timestamp, message):
+    """Persist a plain-text diagnostic trail in the app data directory."""
+    try:
+        with RUNTIME_LOG.open("a", encoding="utf-8") as handle:
+            handle.write(f"{timestamp} {message}\n")
+    except OSError:
+        pass
 
 ensure_runtime_dirs()
 
@@ -1717,16 +1727,22 @@ class Core:
 
     def push(self, msg):
         with self.lock:
+            timestamp = time.strftime("%H:%M:%S")
             self.log_id += 1
-            self.logs.append((self.log_id, time.strftime("%H:%M:%S"), str(msg), None))
+            message = str(msg)
+            self.logs.append((self.log_id, timestamp, message, None))
+            append_runtime_log(timestamp, message)
             if len(self.logs) > 800:
                 del self.logs[:200]
 
     def push_file_lock(self, details):
         with self.lock:
+            timestamp = time.strftime("%H:%M:%S")
             self.log_id += 1
-            self.logs.append((self.log_id, time.strftime("%H:%M:%S"), str(details["message"]),
+            message = str(details["message"])
+            self.logs.append((self.log_id, timestamp, message,
                               details.get("file_lock")))
+            append_runtime_log(timestamp, message)
             if len(self.logs) > 800:
                 del self.logs[:200]
 
@@ -2086,7 +2102,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return False
         return hostname.lower().rstrip(".") in ("127.0.0.1", "localhost", "::1")
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8", extra_headers=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode("utf-8")
         elif isinstance(body, str):
@@ -2095,6 +2111,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -2182,6 +2200,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 try: clip_offset = max(0, int(q.get("clip_offset", ["0"])[0]))
                 except ValueError: clip_offset = 0
                 return self._send(200, CORE.state(since, clip_offset))
+            if path == "/api/log/download":
+                if not RUNTIME_LOG.is_file():
+                    return self._send(200, b"", "text/plain; charset=utf-8")
+                return self._send(200, RUNTIME_LOG.read_bytes(), "text/plain; charset=utf-8",
+                                  extra_headers={"Content-Disposition": 'attachment; filename="streamsnip.log"'})
             if path == "/api/words":
                 return self._send(200, {"text": read_custom_text(), "words": sorted(HYPE_WORDS), "phrases": sorted(HYPE_PHRASES)})
             if path in ("/assets/brand-logo.png", "/assets/app-icon.png"):
@@ -2562,6 +2585,7 @@ select.text option{background:#14161f}
 .empty .big{width:62px;height:62px;border-radius:20px;background:var(--grad);display:grid;place-items:center;margin-bottom:8px;box-shadow:0 12px 36px rgba(139,92,246,.4)}
 #log{font:12px/1.65 "Cascadia Mono",Consolas,monospace;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-height:100%}
 #log div{white-space:pre-wrap;word-break:break-word}#log .t{color:var(--mute);margin-right:10px}#log .err{color:var(--bad)}#log .okk{color:var(--ok)}
+.log-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.log-title{display:flex;align-items:center;gap:9px;font-weight:700}.log-live{font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:var(--ok);border:1px solid rgba(52,211,153,.35);border-radius:999px;padding:3px 8px}.log-live.paused{color:var(--warn);border-color:rgba(251,191,36,.35)}.log-actions{display:flex;gap:7px}.log-actions .btn{padding:7px 10px;font-size:11px}
 .hw{display:flex;flex-direction:column;gap:12px;min-height:100%}
 .hw textarea{flex:1;min-height:260px;resize:none;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:16px;padding:14px 16px;color:var(--tx);font:13px/1.6 "Cascadia Mono",Consolas,monospace;outline:0}
 .hw textarea:focus{border-color:var(--a1);box-shadow:0 0 0 3px rgba(139,92,246,.2)}
@@ -2735,7 +2759,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: v2.0.0. Check the published release before updating.</p>
+    <p class="hint">Current app version: v2.0.1. Check the published release before updating.</p>
     <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
     <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
     <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
@@ -2780,7 +2804,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   <div class="progress-wrap" id="progress-wrap" hidden><div class="progress-meta"><span id="progress-label">Preparing...</span><span id="progress-value">0%</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div></div>
   <div class="tabs" id="tabs">
     <button class="tab on" data-t="clips">Clips<em id="cnt" hidden></em></button>
-    <button class="tab" data-t="log">Activity</button>
+    <button class="tab" data-t="log">Live log</button>
     <button class="tab" data-t="words">Hype words</button>
   </div>
   <div class="panel" id="p-clips">
@@ -2790,7 +2814,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="prow" id="clip-pages" style="justify-content:center;margin-top:12px"><button class="btn ghost" id="btn-clips-newer">Newer</button><span class="hint" id="clip-page-label"></span><button class="btn ghost" id="btn-clips-older">Older</button></div>
     <div class="empty" id="empty"><div class="big"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h4>No clips yet</h4><p>Paste a Twitch or YouTube live link (or choose a VOD file) and hit Start. Finished 9:16 clips with captions appear here, ready to post.</p></div>
   </div>
-  <div class="panel" id="p-log" hidden><div id="log"></div></div>
+  <div class="panel" id="p-log" hidden><div class="log-head"><div class="log-title">Live diagnostic log <span id="log-live" class="log-live">Live</span></div><div class="log-actions"><button class="btn ghost" id="log-pause" type="button">Pause</button><button class="btn ghost" id="log-clear" type="button">Clear view</button><a class="btn ghost" href="/api/log/download" download="streamsnip.log">Download</a></div></div><div id="log"></div></div>
   <div class="panel" id="p-words" hidden>
     <div class="hw">
       <p class="help">One word or phrase per line. Add what <b>your</b> streamer actually says - e.g. <code>oh my days</code> or <code>no chance | 3</code> (the number is the weight, default 2). Lines starting with <code>#</code> are comments. Saved changes apply to the next chunk, even mid-stream.</p>
@@ -3195,6 +3219,7 @@ $("#btn-quit").onclick=async()=>{
 /* ---------- state polling ---------- */
 const PHASES={idle:"Ready",waiting:"Waiting for the stream",recording:"Recording live",transcribing:"Listening for hype",rendering:"Rendering clips",stopping:"Wrapping up",working:"Working"};
 let lastLog=0,fails=0,busy=false,order="",cards=new Map(),selectedClips=new Set(),lastPostDone=0,lastPostStarted=null;
+let logPaused=false;
 const fmtT=s=>{const m=Math.floor(s/60),h2=Math.floor(m/60);return h2?h2+":"+String(m%60).padStart(2,"0")+":"+String(s%60).padStart(2,"0"):m+":"+String(s%60).padStart(2,"0")};
 function ago(t){const s=Math.max(0,Date.now()/1000-t);if(s<60)return"just now";if(s<3600)return Math.floor(s/60)+" min ago";if(s<86400)return Math.floor(s/3600)+" h ago";return Math.floor(s/86400)+" d ago"}
 function addLogs(list){
@@ -3218,6 +3243,14 @@ function addLogs(list){
   while(box.children.length>500)box.firstChild.remove();
   if(stick)pl.scrollTop=pl.scrollHeight;
 }
+$("#log-pause").onclick=()=>{
+  logPaused=!logPaused;
+  const button=$("#log-pause"), badge=$("#log-live");
+  button.textContent=logPaused?"Resume":"Pause";
+  badge.textContent=logPaused?"Paused":"Live";
+  badge.classList.toggle("paused",logPaused);
+};
+$("#log-clear").onclick=()=>$("#log").replaceChildren();
 function updateSelectedButton(){
   const count=selectedClips.size;
   const b=$("#btn-publish-selected");b.textContent="Publish selected ("+count+")";b.disabled=count===0;
@@ -3341,7 +3374,7 @@ async function poll(){
   try{
     const r=await fetch("/api/state?since="+lastLog+"&clip_offset="+clipOffset,{cache:"no-store"});const s=await r.json();
     fails=0;$("#offline").hidden=true;
-    lastLog=s.last_id;addLogs(s.logs);updateRun(s);renderClips(s.clips,s.clip_total);
+    if(!logPaused){lastLog=s.last_id;addLogs(s.logs)}updateRun(s);renderClips(s.clips,s.clip_total);
   }catch(e){if(++fails>=3)$("#offline").hidden=false}
   busy=false;
 }

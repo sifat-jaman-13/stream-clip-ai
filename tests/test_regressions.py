@@ -618,6 +618,13 @@ class RegressionTests(unittest.TestCase):
                 engine.process(recording)
             self.assertFalse(recording.exists())
 
+    def test_runtime_log_is_persisted_for_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "streamsnip.log"
+            with patch.object(autoclip, "RUNTIME_LOG", log_path):
+                autoclip.append_runtime_log("12:34:56", "GPU load failed")
+            self.assertEqual(log_path.read_text(encoding="utf-8"), "12:34:56 GPU load failed\n")
+
     def test_ai_moment_without_explicit_score_is_rejected(self):
         self.assertEqual(ai_highlights._parse_moments(
             {"moments": [{"time": 10, "reason": "ordinary chat"}]}, 60), [])

@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-21
+
+### Added
+
+- Added a persistent live diagnostic log with pause/resume, clear-view, and download controls in the web UI.
+- Runtime logs are also saved to `streamsnip.log` in the app data directory for post-failure troubleshooting.
+
 ## [2.0.0] - 2026-11-21
 
 ### Added
@@ -121,7 +128,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.14...v2.0.0
 [1.2.14]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.13...v1.2.14
 [1.2.13]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.12...v1.2.13

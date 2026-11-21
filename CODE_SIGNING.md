@@ -19,7 +19,7 @@ StreamSnip AI is maintained by a single-person project team.
 - **Reviewer:** Sifat Jaman — reviews and decides whether external contributor pull requests may be merged. The project does not currently have additional committer/reviewer members.
 - **Release approver:** Sifat Jaman — reviews the proposed release commit, authorizes the release workflow, and is responsible for deciding whether the installer may be published and signed.
 
-Contributors who do not have committer rights cannot directly modify the trusted release branch. Their proposed changes must be reviewed by the maintainer before merge. The maintainer is the only person authorized to dispatch the release workflow.
+Contributors who do not have committer rights cannot directly modify the trusted release branch. Their proposed changes must be reviewed by the maintainer before merge. The maintainer is the only person authorized to dispatch the release workflow. The maintainer must use multi-factor authentication on both GitHub and SignPath accounts.
 
 ## Privacy and network behavior
 
@@ -35,7 +35,7 @@ Relevant third-party services have their own privacy terms:
 - [Twitch Privacy Notice](https://www.twitch.tv/p/legal/privacy-notice/) — when the user selects a Twitch stream.
 - [Google Privacy Policy](https://policies.google.com/privacy) — YouTube access and Google-hosted services.
 
-The project does not include advertising, telemetry, or background collection of user media. Locally stored credentials, settings, recordings, and clips remain on the user's machine unless a corresponding external feature is deliberately used. See the README's [Data, credentials, and privacy](README.md#data-credentials-and-privacy) section.
+Locally stored credentials, settings, recordings, and clips remain on the user's machine unless a corresponding external feature is deliberately used. See the README's [Data, credentials, and privacy](README.md#data-credentials-and-privacy) section for the documented network behavior.
 
 ## Build and signing procedure
 
@@ -62,7 +62,7 @@ Before enabling the release workflow, the maintainer must:
 5. Enable Trusted Build System verification and **Verify origin** for the release signing policy; restrict allowed branch names to master.
 6. Configure the artifact configuration to accept a single Windows PE executable and enforce the product name StreamSnip AI and the release product version.
 7. Create a signing-policy slug and an API token with submitter permission for that policy.
-8. Enable repository GitHub Actions access to the settings below.
+8. Configure the signing policy to require manual approval for every release request, with Sifat Jaman as the authorized approver.\n9. Enable repository GitHub Actions access to the settings below.
 
 Required repository Actions settings:
 
@@ -71,7 +71,7 @@ Required repository Actions settings:
 | Variable | SIGNPATH_ENABLED | true |
 | Variable | SIGNPATH_ORGANIZATION_ID | SignPath organization ID |
 | Variable | SIGNPATH_PROJECT_SLUG | SignPath project slug |
-| Variable | SIGNPATH_SIGNING_POLICY_SLUG | SignPath release signing-policy slug |
+| Variable | SIGNPATH_SIGNING_POLICY_SLUG | SignPath release signing-policy slug |\n| Variable | SIGNPATH_ARTIFACT_CONFIGURATION_SLUG | SignPath artifact configuration slug |
 | Secret | SIGNPATH_API_TOKEN | SignPath API token |
 
 The release workflow deliberately fails before building/publishing when these settings are absent or incomplete. It does not create an unsigned release while signing is unavailable.

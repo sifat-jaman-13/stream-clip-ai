@@ -185,8 +185,14 @@ for name in sys.argv[2:]:
         raise RuntimeError(f"{name} downloaded without model.bin")
     print(f"Speech model ready: {name}", flush=True)
 '@
-    & $RuntimePython -c $bootstrap $ModelRoot @models
-    if ($LASTEXITCODE -ne 0) { throw "Could not download and verify all StreamSnip AI speech models." }
+    $bootstrapPath = Join-Path $env:TEMP "streamsnip-model-bootstrap-$PID.py"
+    try {
+        Set-Content -LiteralPath $bootstrapPath -Value $bootstrap -Encoding UTF8
+        & $RuntimePython $bootstrapPath $ModelRoot @models
+        if ($LASTEXITCODE -ne 0) { throw "Could not download and verify all StreamSnip AI speech models." }
+    } finally {
+        Remove-Item -LiteralPath $bootstrapPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 try {

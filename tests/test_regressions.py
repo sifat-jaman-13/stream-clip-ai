@@ -913,5 +913,19 @@ class RegressionTests(unittest.TestCase):
             autoclip.cancel_window_close_shutdown()
 
 
+    def test_clip_metadata_title_stays_within_youtube_limit_and_keeps_full_text(self):
+        transcript = (
+            "This is a deliberately long first sentence that exceeds the YouTube title limit "
+            "while preserving the complete spoken words in the description for upload."
+        )
+        metadata = autoclip.build_clip_metadata_text(
+            "long_clip.mp4", "source_recording.ts", 4, 38, transcript
+        )
+        title, description = metadata.split("\n", 1)
+        self.assertLessEqual(len(title), 100)
+        self.assertTrue(title.endswith("..."))
+        self.assertIn(transcript, description)
+
+
 if __name__ == "__main__":
     unittest.main()

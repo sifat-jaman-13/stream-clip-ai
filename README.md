@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/brand-logo.png" alt="StreamSnip AI" width="760">
+  <img src="assets/streamsnipai-banner.svg" alt="StreamSnip AI — Find the moment. Make it a clip." width="100%">
+</p>
+<p align="center">
+  <img src="assets/streamsnipai-mini-banner.svg" alt="StreamSnip AI compact banner" width="72%">
 </p>
 
 <h1 align="center">StreamSnip AI</h1>
@@ -49,6 +52,49 @@ StreamSnip AI records supported live streams or reads local video files, transcr
 6. **Review and publish** from the local gallery or send selected clips to Zernio.
 
 Recordings, settings, transcription, rendering, and generated clips remain on the machine unless a hosted AI or publishing feature is explicitly used.
+
+## Before you install (Windows)
+
+> Check these requirements **before** running the Windows installer. The installer can prepare Python and FFmpeg automatically, but it still needs internet access and WinGet when those tools are missing.
+
+### Required for the Windows installer
+
+- **Operating system:** Windows 10 or Windows 11, 64-bit (x64).
+- **Internet connection:** required for first-time Python packages, FFmpeg if missing, and the Whisper speech-model downloads.
+- **Python:** 64-bit Python **3.10, 3.11, or 3.12**. The installer accepts these versions and installs Python 3.12 with WinGet when none is found.
+- **FFmpeg:** required for video/audio processing. The installer installs it with WinGet if it is not already available.
+- **WinGet / App Installer:** required only when the installer needs to download Python or FFmpeg automatically. If WinGet is unavailable, install the missing prerequisite manually from the links below.
+- **Free disk space:** leave room for the isolated Python environment, packages, downloaded Whisper models, recordings, and rendered clips. Model and output sizes depend on your selected workflow.
+- **GPU:** an NVIDIA GPU is optional. CPU processing is supported; compatible CUDA/NVENC hardware can accelerate supported stages.
+
+### Official downloads
+
+| Requirement | Download |
+|---|---|
+| Python for Windows (64-bit) | [python.org — Windows downloads](https://www.python.org/downloads/windows/) |
+| FFmpeg | [FFmpeg download page](https://ffmpeg.org/download.html) |
+| WinGet / App Installer | [Microsoft Store — App Installer](https://apps.microsoft.com/detail/9NBLGGH4NNS1) |
+| Git (source checkout only) | [git-scm.com — Windows](https://git-scm.com/download/win) |
+
+### PowerShell: install missing prerequisites with WinGet
+
+Open PowerShell and run only the commands for tools you do not already have. Python 3.12 and FFmpeg are the same package IDs used by the Windows setup script.
+
+```powershell
+winget --version
+
+# Install Python 3.12 (skip if Python 3.10–3.12 x64 is already installed)
+winget install --id Python.Python.3.12 --exact --source winget --scope user --accept-package-agreements --accept-source-agreements
+
+# Install FFmpeg (skip if ffmpeg.exe is already available on PATH)
+winget install --id Gyan.FFmpeg --exact --source winget --accept-package-agreements --accept-source-agreements
+
+# Verify the tools
+py -3.12 --version
+ffmpeg -version
+```
+
+If `winget` is not recognized, install or update **App Installer** from the Microsoft Store link above, reopen PowerShell, and check `winget --version` again. You can also install Python and FFmpeg manually from their official download pages. Git is only needed when cloning the source repository; it is not required for the Windows installer.
 
 ## Install on Windows
 

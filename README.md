@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">StreamSnip AI</h1>
-<p align="center"><strong>Current Windows build: v2.1.4</strong></p>
+<p align="center"><strong>Current source version: v2.1.4</strong></p>
 
 <p align="center"><a href="https://sifat-jaman-13.github.io/stream-clip-ai/"><strong>Visit the StreamSnip AI website</strong></a></p>
 

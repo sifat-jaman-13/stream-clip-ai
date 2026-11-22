@@ -29,8 +29,8 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-from post_metadata import generate_social_copy
-APP_VERSION = "2.1.4"
+from post_metadata import build_transcript_fallback, generate_social_copy
+APP_VERSION = "2.1.5"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -712,7 +712,9 @@ def load_ai_settings():
     defaults["metadata_copy_enabled"] = "true"
     if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
         defaults["provider"] = "hooks"
-    if defaults["gemini_model"] in RETIRED_GEMINI_MODELS:
+    if defaults["gemini_model"] in RETIRED_GEMINI_MODELS or defaults["gemini_model"] == "gemini-3.1-flash-lite":
+        # Gemini 3.1 Flash-Lite was replaced; use the current general Flash model
+        # for creator metadata and transcript analysis.
         defaults["gemini_model"] = DEFAULT_GEMINI_MODEL
     if defaults["huggingface_model"] == "Qwen/Qwen2.5-7B-Instruct-1M":
         defaults["huggingface_model"] = DEFAULT_HUGGINGFACE_MODEL
@@ -1550,13 +1552,16 @@ class Engine:
             if transcript and provider in {"ollama", "gemini", "huggingface"}:
                 post_copy = generate_social_copy(transcript, tag, ai_cfg, log=self.log)
             elif transcript and provider == "hooks":
-                self.log("Hook words is selected. This engine does not generate text, so transcript-based title and description will be used for this clip.")
+                self.log("Hook words is selected; using concise transcript-based post copy for this clip.")
+                post_copy = build_transcript_fallback(transcript, tag)
         except Exception as exc:
             provider = str(ai_cfg.get("provider", "unknown")).lower()
             self.log(
                 f"{provider.title()} post copy unavailable or failed validation; "
-                f"using transcript fallback: {str(exc)[:220]}"
+                f"using concise transcript fallback: {str(exc)[:220]}"
             )
+            if transcript:
+                post_copy = build_transcript_fallback(transcript, tag)
         if post_copy and cfg.get("profanity_filter_enabled", True):
             post_copy = dict(post_copy)
             extra_terms = cfg.get("profanity_filter_words", "")

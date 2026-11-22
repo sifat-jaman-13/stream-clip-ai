@@ -93,8 +93,8 @@ winget install --id Python.Python.3.12 --exact --source winget --scope user --ac
 # Install FFmpeg (skip if ffmpeg.exe is already available on PATH)
 winget install --id Gyan.FFmpeg --exact --source winget --accept-package-agreements --accept-source-agreements
 
-# Verify the tools
-py -3.12 --version
+# Verify the tools (py -0p lists installed Python versions)
+py -0p
 ffmpeg -version
 ```
 

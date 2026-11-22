@@ -3,10 +3,9 @@ import re
 import time
 import urllib.parse
 
-from ai_highlights import (AIProviderError, DEFAULT_GEMINI_MODEL, _extract_json, _json_request,
-                           _gemini_available_models, _gemini_model_order, ollama_models)
+from ai_highlights import AIProviderError, DEFAULT_GEMINI_MODEL, _extract_json, _json_request, ollama_models
 
-DEFAULT_GEMINI_COPY_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_GEMINI_COPY_MODEL = DEFAULT_GEMINI_MODEL
 
 def build_copy_prompt(transcript, creator_credit="", correction=""):
     transcript = re.sub(r"\s+", " ", str(transcript or "")).strip()[:12000]
@@ -65,85 +64,49 @@ def _provider_response(prompt, config, log=lambda _message: None):
     provider = str(config.get("provider", "hooks")).strip().lower()
     if provider == "gemini":
         key = str(config.get("gemini_api_key", "")).strip()
-        selected = str(config.get("gemini_model", "")).strip() or DEFAULT_GEMINI_MODEL
-        if not key:
-            raise AIProviderError("Gemini API key is missing in AI settings.")
-
-        # Migrate the old Flash-Lite setting at the point of use as well as in
-        # autoclip.load_ai_settings(), so older installations are protected.
-        if selected == "gemini-3.1-flash-lite":
-            selected = DEFAULT_GEMINI_MODEL
-
-        available = []
-        try:
-            available = _gemini_available_models(key)
-        except AIProviderError as exc:
-            if not exc.retryable:
-                raise
-            if callable(log):
-                log(f"Could not list Gemini models ({str(exc)[:140]}); using known supported model fallbacks.")
-
-        models = list(dict.fromkeys([
-            *_gemini_model_order(selected, available),
-            DEFAULT_GEMINI_COPY_MODEL,
-            *available,
-        ]))[:5]
-        if not models:
-            models = [DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_COPY_MODEL]
-
+        # Always honour the model selected in AI settings. In particular, keep
+        # gemini-3.1-flash-lite as the user's low-cost/free-tier model; never
+        # silently rotate metadata requests onto a different Gemini model.
+        model = str(config.get("gemini_model", "")).strip() or DEFAULT_GEMINI_MODEL
+        if not key or not model:
+            raise AIProviderError("Gemini key or model is missing in AI settings.")
         headers = {"Content-Type": "application/json", "x-goog-api-key": key}
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/" +
+            urllib.parse.quote(model, safe=".-") + ":generateContent"
+        )
         last_error = None
-        attempts = 0
-        for model_index, candidate in enumerate(models):
-            # One retry on the selected model; then fail over quickly to a
-            # different model instead of repeating the same 503 six times.
-            max_attempts = 2 if model_index == 0 else 1
-            for model_attempt in range(1, max_attempts + 1):
-                attempts += 1
-                if callable(log):
-                    log(f"Generating clip metadata with Gemini {candidate} (attempt {model_attempt}/{max_attempts}).")
-                url = (
-                    "https://generativelanguage.googleapis.com/v1beta/models/" +
-                    urllib.parse.quote(candidate, safe=".-") + ":generateContent"
-                )
+        for attempt in range(1, 3):
+            if callable(log):
+                log(f"Generating clip metadata with selected Gemini model {model} (attempt {attempt}/2).")
+            try:
+                data = _json_request(url, {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.35,
+                        "maxOutputTokens": 600,
+                        "responseMimeType": "application/json",
+                    },
+                }, headers=headers, timeout=45)
                 try:
-                    data = _json_request(url, {
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {
-                            "temperature": 0.35,
-                            "maxOutputTokens": 600,
-                            "responseMimeType": "application/json",
-                        },
-                    }, headers=headers, timeout=45)
-                    try:
-                        raw = data["candidates"][0]["content"]["parts"][0]["text"]
-                    except (KeyError, IndexError, TypeError) as exc:
-                        raise AIProviderError(
-                            "Gemini returned no social-copy response.", retryable=True
-                        ) from exc
-                    try:
-                        return _extract_json(raw)
-                    except AIProviderError as exc:
-                        exc.retryable = True
-                        raise
+                    raw = data["candidates"][0]["content"]["parts"][0]["text"]
+                except (KeyError, IndexError, TypeError) as exc:
+                    raise AIProviderError(
+                        "Gemini returned no social-copy response.", retryable=True
+                    ) from exc
+                try:
+                    return _extract_json(raw)
                 except AIProviderError as exc:
-                    last_error = exc
-                    if not exc.retryable:
-                        raise
-                    if model_attempt < max_attempts:
-                        if callable(log):
-                            log(f"Gemini {candidate} returned a temporary error; retrying once.")
-                        time.sleep(0.5)
-                    elif model_index + 1 < len(models) and callable(log):
-                        log(f"Gemini {candidate} is unavailable; trying {models[model_index + 1]}.")
-
-        if last_error:
-            raise AIProviderError(
-                f"Gemini post-copy generation failed after {attempts} attempts across "
-                f"{len(models)} models. Last error: {last_error}",
-                quota=last_error.quota, retryable=last_error.retryable,
-            ) from last_error
-        raise AIProviderError("No Gemini models supporting text generation are available for this API key.")
+                    exc.retryable = True
+                    raise
+            except AIProviderError as exc:
+                last_error = exc
+                if not exc.retryable or attempt == 2:
+                    raise
+                if callable(log):
+                    log(f"Gemini {model} returned a temporary error; retrying the same selected model once.")
+                time.sleep(0.5)
+        raise last_error or AIProviderError("Gemini did not return post copy.")
 
     if provider == "ollama":
         base = str(config.get("ollama_url", "http://127.0.0.1:11434")).rstrip("/")
@@ -153,10 +116,10 @@ def _provider_response(prompt, config, log=lambda _message: None):
         if not model:
             raise AIProviderError("Ollama has no installed models.")
         if callable(log):
-            log(f"Gemini is unavailable; generating clip metadata locally with Ollama {model}.")
+            log(f"Generating clip metadata locally with Ollama model {model}.")
         data = _json_request(base + "/api/generate", {
             "model": model, "prompt": prompt, "stream": False, "format": "json",
-            "options": {"temperature": 0.25, "num_ctx": 8192, "num_predict": 600},
+            "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 600},
         }, timeout=150)
         return _extract_json(data.get("response", ""))
 
@@ -176,6 +139,24 @@ def _provider_response(prompt, config, log=lambda _message: None):
         return _extract_json(raw)
 
     raise AIProviderError("Select Gemini, Ollama, or Hugging Face to enable AI post copy.")
+
+def _fallback_title_case(value):
+    words = str(value or "").strip().split()
+    small = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to", "up", "with"}
+    result = []
+    for index, word in enumerate(words):
+        core = re.sub(r"^[^\w]+|[^\w]+$", "", word)
+        if not core:
+            result.append(word)
+            continue
+        lower = core.lower()
+        if index and lower in small:
+            converted = lower
+        else:
+            converted = lower[0].upper() + lower[1:]
+        result.append(word.replace(core, converted, 1))
+    return " ".join(result)
+
 
 def _clean_title(value):
     title = str(value or "").strip()
@@ -408,6 +389,99 @@ def _generate_valid_copy(transcript, creator_credit, config, log, provider_label
 
 
 def generate_social_copy(transcript, creator_credit, config, log=lambda _message: None):
+    transcript = re.sub(r"\s+", " ", str(transcript or "")).strip()
+    if not transcript:
+        raise AIProviderError("No transcript is available for post copy.")
+    config = dict(config or {})
+    provider = str(config.get("provider", "hooks")).strip().lower()
+    try:
+        return _generate_valid_copy(transcript, creator_credit, config, log, provider)
+    except AIProviderError as primary_error:
+        # Gemini is the primary provider, but local Ollama is an actual fallback,
+        # not an entire raw transcript pasted into a public description.
+        if provider == "gemini":
+            fallback_config = dict(config)
+            fallback_config["provider"] = "ollama"
+            if callable(log):
+                log(
+                    f"Gemini post-copy generation failed ({str(primary_error)[:180]}). "
+                    "Trying the installed local Ollama model using the same transcript."
+                )
+            try:
+                return _generate_valid_copy(
+                    transcript, creator_credit, fallback_config, log, "local Ollama fallback"
+                )
+            except AIProviderError as fallback_error:
+                raise AIProviderError(
+                    f"Gemini post copy failed: {primary_error}. "
+                    f"Local Ollama fallback failed: {fallback_error}",
+                    retryable=primary_error.retryable or fallback_error.retryable,
+                    quota=primary_error.quota,
+                ) from fallback_error
+        raise
+
+
+def build_transcript_fallback(transcript, creator_credit=""):
+    """Create brief extractive copy; never paste an entire transcript into a post."""
+    text = re.sub(r"\s+", " ", str(transcript or "")).strip()
+    if not text:
+        return {
+            "title": "A Highlight From the Stream",
+            "description": "No usable speech transcript was available for this clip.",
+            "hashtags": ["#clips"],
+            "provider": "transcript fallback",
+        }
+
+    candidates = [
+        part.strip(" \t\r\n\"'“”‘’-—:;")
+        for part in re.split(r"(?<=[.!?])\s+", text)
+        if len(part.split()) >= 3
+    ]
+    if not candidates:
+        tokens = text.split()
+        candidates = [" ".join(tokens[i:i + 12]) for i in range(0, max(1, len(tokens) - 2), 5)]
+
+    def score(candidate):
+        words = candidate.split()
+        lower = candidate.lower()
+        reactions = sum(term in lower for term in (
+            "oh my god", "what the", "no way", "mine now", "i've got nothing",
+            "just kill me", "eight miles", "tracker", "i surrender", "for fuck's sake",
+            "what happened", "who's shooting", "ran over a cat",
+        ))
+        expressive = candidate.count("!") * 3 + candidate.count("?") * 2
+        length_fit = 10 - abs(len(words) - 9)
+        return reactions * 10 + expressive + length_fit
+
+    quote = max(candidates, key=score)[:140].strip()
+    title = _fallback_title_case(quote)
+    if len(title) > 90:
+        title = title[:87].rsplit(" ", 1)[0] + "..."
+    if len(title) < 12:
+        title = "A Standout Moment From the Stream"
+
+    # Use a second exact spoken line as context when one is available. This is
+    # intentionally extractive rather than inventing a description during an outage.
+    other_lines = [line for line in candidates if line != quote]
+    context = max(other_lines, key=score) if other_lines else ""
+    if context:
+        context = context[:130].strip()
+        description = f"“{quote}”\n\n“{context}”"
+    else:
+        description = f"“{quote}”"
+    result = {
+        "title": title,
+        "description": _clean_description(description),
+        "hashtags": ["#funny"] if any(
+            term in text.lower() for term in ("laugh", "funny", "awkward", "mine now", "ran over a cat")
+        ) else ["#clips"],
+        "provider": "transcript fallback",
+    }
+    if creator_credit:
+        result["creator_credit"] = str(creator_credit)
+    return result
+
+transcript, creator_credit, config, log=lambda _message: None):
     transcript = re.sub(r"\s+", " ", str(transcript or "")).strip()
     if not transcript:
         raise AIProviderError("No transcript is available for post copy.")

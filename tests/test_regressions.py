@@ -346,7 +346,25 @@ class RegressionTests(unittest.TestCase):
             }), encoding="utf-8")
             with patch.object(autoclip, "AI_SETTINGS_FILE", path):
                 settings = autoclip.load_ai_settings()
-        self.assertEqual(settings["gemini_model"], ai_highlights.DEFAULT_GEMINI_MODEL)
+        self.assertEqual(settings["gemini_model"], "gemini-3.1-flash-lite")
+
+    def test_ai_settings_default_to_free_gemini_flash_lite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                settings = autoclip.load_ai_settings()
+        self.assertEqual(settings["gemini_model"], "gemini-3.1-flash-lite")
+
+    def test_ai_settings_preserve_explicit_gemini_31_flash_lite_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            path.write_text(__import__("json").dumps({
+                "provider": "gemini",
+                "gemini_model": "gemini-3.1-flash-lite",
+            }), encoding="utf-8")
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                settings = autoclip.load_ai_settings()
+        self.assertEqual(settings["gemini_model"], "gemini-3.1-flash-lite")
 
     def test_common_hype_words_are_not_scored(self):
         for word in ("what", "actually", "literally", "hello", "stop", "mad", "gas", "clean", "peak", "send"):

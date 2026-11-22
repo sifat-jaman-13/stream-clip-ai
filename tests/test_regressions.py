@@ -1156,7 +1156,7 @@ class RegressionTests(unittest.TestCase):
 
             filtered_words = make_ass.call_args.args[0]
             self.assertEqual(filtered_words[1][2], "****")
-            self.assertIn("THIS **** WORKED!", copy.call_args.args[0])
+            self.assertEqual(copy.call_args.args[0], "This **** worked!")
             command = render_run.call_args.args[0]
             audio_filter = command[command.index("-af") + 1]
             self.assertIn("volume=0:enable=", audio_filter)

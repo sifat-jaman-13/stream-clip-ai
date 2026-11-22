@@ -458,7 +458,8 @@ def build_transcript_fallback(transcript, creator_credit=""):
         length_fit = 10 - abs(len(words) - 9)
         return reactions * 10 + expressive + length_fit
 
-    quote = _fallback_sentence_case(max(candidates, key=score)[:140].strip())
+    selected_line = max(candidates, key=score)
+    quote = _fallback_sentence_case(selected_line[:140].strip())
     title = _fallback_title_case(quote)
     if len(title) > 90:
         title = title[:87].rsplit(" ", 1)[0] + "..."
@@ -467,7 +468,7 @@ def build_transcript_fallback(transcript, creator_credit=""):
 
     # Use a second exact spoken line as context when one is available. This is
     # intentionally extractive rather than inventing a description during an outage.
-    other_lines = [line for line in candidates if line != quote]
+    other_lines = [line for line in candidates if line != selected_line]
     context = max(other_lines, key=score) if other_lines else ""
     if context:
         context = _fallback_sentence_case(context[:130].strip())

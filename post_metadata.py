@@ -181,7 +181,10 @@ def _clean_description(value):
     description = "\n".join(lines)
     description = re.sub(r"(?m)\s*#[A-Za-z0-9_]+", "", description)
     if "\n\n" not in description:
-        quote_followup = re.match(r'^\s*([“"].+?[”"])\s+(.+)    description = re.sub(r"\n{3,}", "\n\n", description).strip()
+        quote_followup = re.match(r'^\s*([“"].+?[”"])\s+(.+)$', description, flags=re.S)
+        if quote_followup:
+            description = quote_followup.group(1).strip() + "\n\n" + quote_followup.group(2).strip()
+    description = re.sub(r"\n{3,}", "\n\n", description).strip()
     if len(description) > 700:
         description = (description[:697].rsplit(" ", 1)[0].rstrip(" ,;:-") or description[:697].rstrip()) + "..."
     if description and description[-1] not in ".!?":
@@ -360,7 +363,9 @@ def _clean_hashtags(value):
 def _generate_valid_copy(transcript, creator_credit, config, log, provider_label):
     correction = ""
     last_error = None
-    for generation_attempt in range(2):
+    provider = str(config.get("provider", "")).strip().lower()
+    max_generations = 3 if provider == "ollama" else 2
+    for generation_attempt in range(max_generations):
         prompt = build_copy_prompt(transcript, creator_credit, correction=correction)
         response = _provider_response(prompt, config, log=log)
         if not isinstance(response, dict):
@@ -379,10 +384,13 @@ def _generate_valid_copy(transcript, creator_credit, config, log, provider_label
             _reject_negated_name_context(title, description, transcript)
         except AIProviderError as exc:
             last_error = exc
-            if generation_attempt == 0:
+            if generation_attempt + 1 < max_generations:
                 correction = str(exc)
                 if callable(log):
-                    log(f"AI post copy did not pass the quality/grounding checks; requesting a corrected version ({exc}).")
+                    log(
+                        f"AI post copy did not pass the quality/grounding checks; "
+                        f"requesting corrected version {generation_attempt + 2}/{max_generations} ({exc})."
+                    )
                 continue
             raise
         if callable(log):
@@ -394,7 +402,6 @@ def _generate_valid_copy(transcript, creator_credit, config, log, provider_label
             "provider": provider_label,
         }
     raise last_error or AIProviderError("AI could not produce usable post copy.")
-
 
 def generate_social_copy(transcript, creator_credit, config, log=lambda _message: None):
     transcript = re.sub(r"\s+", " ", str(transcript or "")).strip()

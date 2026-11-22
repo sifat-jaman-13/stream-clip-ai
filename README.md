@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">StreamSnip AI</h1>
-<p align="center"><strong>Current source version: v2.1.4</strong></p>
+<p align="center"><strong>Current source version: v2.1.5</strong></p>
 
 <p align="center"><a href="https://sifat-jaman-13.github.io/stream-clip-ai/"><strong>Visit the StreamSnip AI website</strong></a></p>
 
@@ -182,7 +182,7 @@ Gemini currently prefers `gemini-3.8-flash`. On retryable model/API failures, St
 - Customization: highlight color, font, words per line, font size, vertical position, text/stroke colors, and alignment.
 - Branding: automatic streamer credit and optional custom credit.
 - Output: each MP4 clip has a matching TXT file. The **first non-empty line is the title** and everything below it is the description.
-- **Automatic AI titles and descriptions (v2.1.3):** every finished clip is written with a title and description automatically. When Gemini, local Ollama, or Hugging Face is selected for highlight detection, that same provider generates the post copy (there is no separate copy-provider setting). All three providers receive the same creator-style instructions: catchy Title Case titles with fitting emojis, a short exact quote when the transcript contains a memorable line, a natural follow-up explaining the moment, and a concise topic hashtag. The TXT writer adds creator attribution when available plus the standard tags #shorts #fyp #streamer #clips #viral and one context-specific tag such as #funny. Titles are capped at 100 characters. Copy must stay grounded in the transcript and cannot invent dialogue, people, games, locations, visuals, or outcomes.
+- **Automatic AI titles and descriptions (v2.1.5):** Gemini, local Ollama, or Hugging Face generates post copy using clip-specific transcript text. The default Gemini metadata model is `gemini-3.1-flash-lite`, and the app does not silently rotate metadata requests to a different Gemini model. It retries the selected Gemini model once, then tries the installed local Ollama model before using a short extractive fallback. Titles must identify the actual event rather than use generic clickbait; descriptions use a short, exact spoken quote followed by a specific explanatory sentence. Unsupported claims, invented quotes, and generic filler are rejected and the AI is asked to correct them. The emergency fallback uses short transcript excerpts rather than pasting the whole transcript. The TXT writer adds creator attribution when available plus the standard tags #shorts #fyp #streamer #clips #viral and one context-specific tag such as #funny.
 - Quote-only or otherwise unusable AI descriptions are rejected. If Hook words is selected, or the selected provider returns an error/unusable response, the clip still renders and receives transcript-based fallback copy. Gemini/Hugging Face use hosted quota/credits; local Ollama uses your locally installed model and its available hardware.
 - The per-clip TXT contains post-ready title, description, creator credit (when available), and hashtags. Filenames and source timestamps stay in the cumulative `clips_metadata.txt` index instead of being accidentally included in the public post description.
 - A cumulative `clips_metadata.txt` index in the output folder lists metadata and source timestamps for every generated clip.

@@ -1,13 +1,6 @@
 <p align="center">
   <img src="assets/streamsnipai-banner.svg" alt="StreamSnip AI — Find the moment. Make it a clip." width="100%">
 </p>
-<p align="center">
-  <img src="assets/streamsnipai-mini-banner.svg" alt="StreamSnip AI compact banner" width="72%">
-</p>
-<p align="center">
-  <img src="assets/app-icon.png" alt="StreamSnip AI app icon" width="88">
-</p>
-<p align="center"><a href="assets/streamsnipai-social-card.svg">Open the 1200 × 630 social/share card</a></p>
 
 <h1 align="center">StreamSnip AI</h1>
 <p align="center"><strong>Current Windows build: v2.1.3</strong></p>
@@ -32,6 +25,27 @@ StreamSnip AI records supported live streams or reads local video files, transcr
 
 > [!IMPORTANT]
 > StreamSnip AI is local-first, not fully offline. Live-stream capture, first-time dependency/model downloads, hosted AI providers, update checks, and Zernio publishing require internet access.
+
+## Navigation
+
+- [Overview and supported features](#at-a-glance)
+- [How it works](#how-it-works)
+- [Windows installation requirements](#absolute-requirements-before-installing-windows)
+- [Install on Windows](#install-on-windows)
+- [Quick start](#quick-start)
+- [AI highlight engines](#highlight-engines)
+- [Captions and output formats](#captions-layouts-and-output)
+- [Zernio publishing](#zernio-publishing)
+- [Data, credentials and privacy](#data-credentials-and-privacy)
+- [Run from source](#run-from-source)
+- [Environment variables](#environment-variables)
+- [Docker](#docker)
+- [Development and validation](#development-and-validation)
+- [Repository map](#repository-map)
+- [Troubleshooting](#troubleshooting)
+- [Project and creator links](#project)
+- [License](#license)
+- [Changelog](CHANGELOG.md)
 
 ## At a glance
 

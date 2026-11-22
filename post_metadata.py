@@ -238,7 +238,7 @@ def _validate_transcript_grounding(title, description, transcript):
         )
 
     title_tokens = _grounding_tokens(title)
-    if not title_tokens.intersection(source_tokens):
+    if len(title_tokens.intersection(source_tokens)) < 2:
         raise AIProviderError(
             "The title does not contain a concrete detail supported by this clip's transcript."
         )

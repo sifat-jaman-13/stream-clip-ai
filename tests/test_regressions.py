@@ -117,7 +117,7 @@ class RegressionTests(unittest.TestCase):
 
             self.assertTrue((output / "fallback_clip.mp4").is_file())
             sidecar = (output / "fallback_clip.txt").read_text(encoding="utf-8")
-            self.assertEqual(sidecar.splitlines()[0], "That was unbelievable!")
+            self.assertEqual(sidecar.splitlines()[0], "That Was Unbelievable!")
             self.assertIn("That was unbelievable!", sidecar)
             self.assertEqual(copy.call_count, 1)
             self.assertTrue(any("using transcript fallback" in str(value).lower()

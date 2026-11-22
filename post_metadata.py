@@ -495,23 +495,3 @@ def build_transcript_fallback(transcript, creator_credit=""):
     if creator_credit:
         result["creator_credit"] = str(creator_credit)
     return result
-
-transcript, creator_credit, config, log=lambda _message: None):
-    prompt = build_copy_prompt(transcript, creator_credit)
-    provider = str(config.get("provider", "hooks")).strip().lower()
-    response = _provider_response(prompt, config)
-    if not isinstance(response, dict):
-        raise AIProviderError("AI social-copy response was not a JSON object.")
-    title = _clean_title(response.get("title"))
-    description = _clean_description(response.get("description"))
-    hashtags = _clean_hashtags(response.get("hashtags"))
-    if len(title) < 8:
-        raise AIProviderError("AI generated a title that was too short.")
-    if len(description) < 20:
-        raise AIProviderError("AI generated a description that was too short.")
-    _validate_description_structure(description)
-    _reject_unsupported_ownership_claims(title, description, transcript)
-    _reject_negated_name_context(title, description, transcript)
-    if callable(log):
-        log(f"AI post copy ready via {provider}: {title}")
-    return {"title": title, "description": description, "hashtags": hashtags or ["#Shorts"], "provider": provider}

@@ -1069,6 +1069,8 @@ class RegressionTests(unittest.TestCase):
         filtered = autoclip.censor_transcript_words(words)
         self.assertEqual(filtered[1][2], "****")
         self.assertEqual(filtered[3][2], "****")
+        jesus = autoclip.censor_transcript_words([(0.0, 0.2, "Jesus"), (0.2, 0.5, "Christ!")])
+        self.assertEqual([word[2] for word in jesus], ["****", "****"])
         self.assertEqual(filtered[2][2], "game")
         self.assertEqual(filtered[1][:2], words[1][:2])
         self.assertEqual(filtered[2], words[2])

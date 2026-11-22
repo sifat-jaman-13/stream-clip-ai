@@ -1126,5 +1126,47 @@ class RegressionTests(unittest.TestCase):
 
 
 
+    def test_renderer_mutes_profanity_and_sanitizes_ai_generated_metadata(self):
+        cfg = autoclip.clean_cfg({})
+        engine = autoclip.Engine(cfg, lambda *_: None)
+        engine.ai_cfg_for_render = {"provider": "gemini"}
+        words = [
+            (10.2, 10.6, "This"),
+            (10.6, 11.2, "fucking"),
+            (11.2, 11.7, "worked!"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+
+            def fake_run(command, cwd, **_kwargs):
+                (Path(cwd) / command[-1]).write_bytes(b"test video")
+                return types.SimpleNamespace(returncode=0, stderr="")
+
+            with patch.object(autoclip, "OUT", output), \
+                 patch.object(autoclip, "make_ass") as make_ass, \
+                 patch.object(autoclip, "run", side_effect=fake_run) as render_run, \
+                 patch.object(autoclip, "has_nvenc", return_value=False), \
+                 patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"), \
+                 patch.object(autoclip, "generate_social_copy", return_value={
+                     "title": "This fucking worked!",
+                     "description": "That was a shit moment.",
+                     "hashtags": ["#gaming", "#bullshit"],
+                 }) as copy:
+                engine.render("source_recording.mp4", 10, 18, words, "filtered_clip")
+
+            filtered_words = make_ass.call_args.args[0]
+            self.assertEqual(filtered_words[1][2], "****")
+            self.assertIn("THIS **** WORKED!", copy.call_args.args[0])
+            command = render_run.call_args.args[0]
+            audio_filter = command[command.index("-af") + 1]
+            self.assertIn("volume=0:enable=", audio_filter)
+            self.assertIn("between(t,0.500,1.300)", audio_filter)
+
+            metadata = (output / "filtered_clip.txt").read_text(encoding="utf-8").lower()
+            self.assertIn("****", metadata)
+            self.assertNotIn("fucking", metadata)
+            self.assertNotIn("bullshit", metadata)
+
+
 if __name__ == "__main__":
     unittest.main()

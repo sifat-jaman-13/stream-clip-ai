@@ -712,9 +712,7 @@ def load_ai_settings():
     defaults["metadata_copy_enabled"] = "true"
     if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
         defaults["provider"] = "hooks"
-    if defaults["gemini_model"] in RETIRED_GEMINI_MODELS or defaults["gemini_model"] == "gemini-3.1-flash-lite":
-        # Gemini 3.1 Flash-Lite was replaced; use the current general Flash model
-        # for creator metadata and transcript analysis.
+    if defaults["gemini_model"] in RETIRED_GEMINI_MODELS:
         defaults["gemini_model"] = DEFAULT_GEMINI_MODEL
     if defaults["huggingface_model"] == "Qwen/Qwen2.5-7B-Instruct-1M":
         defaults["huggingface_model"] = DEFAULT_HUGGINGFACE_MODEL

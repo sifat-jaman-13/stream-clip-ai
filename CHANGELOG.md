@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.4] - 2026-11-22
+
+### Added
+
+- Added a default-on profanity filter for timestamped transcripts.
+- Matching words and phrases are masked in subtitles and generated clip metadata, while their audio intervals are muted in exported videos.
+- Added an in-app switch and custom word/phrase list so creators can tune or disable filtering.
+
+### Tests
+
+- Added regression coverage for exact-token matching, custom phrases, preserved word timestamps, toggle behavior, and audio mute intervals.
+
 ## [2.1.3] - 2026-11-22
 
 ### Changed
@@ -252,7 +264,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.9...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.4...HEAD
+[2.1.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.3...v2.1.4
 [2.0.9]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.8...v2.0.9
 [2.0.7]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.5...v2.0.6

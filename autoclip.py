@@ -30,7 +30,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
 from post_metadata import DEFAULT_GEMINI_COPY_MODEL, build_transcript_fallback, generate_social_copy
-APP_VERSION = "2.1.5"
+APP_VERSION = "3.0.0"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:

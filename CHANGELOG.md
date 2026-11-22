@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.0.0] - 2026-11-22
+
+### Major release
+
+- Ships the transcript-grounded title and description generation overhaul as the 3.0.0 major release.
+- Keeps gemini-3.1-flash-lite as the creator-copy default and honors the exact Gemini model saved in AI settings.
+- Retries transient Gemini metadata failures once against the same selected model instead of silently switching Gemini models.
+- Validates titles, quotes, and descriptions against the actual clip transcript; rejects generic clickbait, unsupported ownership or event claims, invented quotes, and generic filler.
+- When Gemini is unavailable, attempts the installed Ollama model and then uses concise transcript excerpts rather than dumping the full transcript.
+- Updates the Windows installer metadata, README version, and download site to 3.0.0.
+
+### Verification
+
+- Runs regression tests for Gemini model selection and retry, transcript grounding, quote validation, and safe fallback behavior.
+- Windows installer is built from the same 3.0.0 source revision; see the GitHub release for the installer and SHA-256 checksum.
+
 ## [2.1.5] - 2026-11-22
 
 ### Changed
@@ -279,7 +295,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.5...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.5...v3.0.0
 [2.1.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.4...v2.1.5
 [2.1.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.3...v2.1.4
 [2.0.9]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.8...v2.0.9

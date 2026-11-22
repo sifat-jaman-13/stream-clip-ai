@@ -891,6 +891,7 @@ DEFAULT_PROFANITY_TERMS = (
     "cunt", "cunts", "pussy", "pussies", "slut", "sluts", "whore", "whores",
     "twat", "prick", "pricks", "wanker", "wankers", "bollocks",
     "piss", "pissed", "pissing", "stfu", "wtf", "fml",
+    "damn", "damned", "dammit", "goddamn", "goddammit", "hell", "crap", "jesus christ",
 )
 _PROFANITY_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?")
 

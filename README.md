@@ -4,6 +4,10 @@
 <p align="center">
   <img src="assets/streamsnipai-mini-banner.svg" alt="StreamSnip AI compact banner" width="72%">
 </p>
+<p align="center">
+  <img src="assets/app-icon.png" alt="StreamSnip AI app icon" width="88">
+</p>
+<p align="center"><a href="assets/streamsnipai-social-card.svg">Open the 1200 × 630 social/share card</a></p>
 
 <h1 align="center">StreamSnip AI</h1>
 <p align="center"><strong>Current Windows build: v2.1.3</strong></p>
@@ -21,7 +25,7 @@
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe"><img alt="Windows installer" src="https://img.shields.io/badge/download-Windows%20installer-7c3aed?logo=windows"></a>
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-22c55e"></a>
-  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white">
+  <img alt="Python 3.10–3.12" src="https://img.shields.io/badge/python-3.10%20to%203.12-3776ab?logo=python&logoColor=white">
 </p>
 
 StreamSnip AI records supported live streams or reads local video files, transcribes speech with faster-whisper, finds promising moments, and renders share-ready clips with FFmpeg. The default hook-word workflow runs locally and requires no cloud API key. Ollama provides optional local AI analysis; Gemini and Hugging Face are optional hosted providers.

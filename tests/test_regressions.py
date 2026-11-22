@@ -1057,9 +1057,6 @@ class RegressionTests(unittest.TestCase):
         self.assertIn(transcript, description)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_profanity_filter_masks_words_without_substring_false_positives(self):
         words = [
             (1.0, 1.2, "The"),
@@ -1127,3 +1124,7 @@ if __name__ == "__main__":
         self.assertIn("between(t,4.900,5.400)", audio_filter)
         self.assertNotIn("between(t,6.000", audio_filter)
 
+
+
+if __name__ == "__main__":
+    unittest.main()

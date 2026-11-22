@@ -120,7 +120,7 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(sidecar.splitlines()[0], "That Was Unbelievable!")
             self.assertIn("That was unbelievable!", sidecar)
             self.assertEqual(copy.call_count, 1)
-            self.assertTrue(any("using transcript fallback" in str(value).lower()
+            self.assertTrue(any("using concise transcript fallback" in str(value).lower()
                                 for _kind, value in logs))
 
     def test_legacy_cta_settings_are_ignored_and_no_cta_overlay_is_written(self):

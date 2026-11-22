@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.1.5] - 2026-11-22
+
+### Changed
+
+- Set `gemini-3.1-flash-lite` as the default Gemini model in new AI settings and preserve an existing explicit model selection.
+- Keep post-metadata requests on the selected Gemini model; retry that model once rather than silently rotating copy generation to another Gemini model.
+- When Gemini metadata generation fails, try the installed local Ollama model before falling back to short, exact transcript excerpts.
+- Strengthen title and description prompts and validation to reject generic clickbait, unsupported claims, invented quotes, and transcript dumps.
+- Replace the previous raw-transcript metadata fallback with a concise extractive title and short spoken-line excerpts.
+
+### Tests
+
+- Added coverage for the default/preserved Gemini 3.1 model, same-model retry, local Ollama fallback, grounding corrections, and concise fallback copy.
+- Verified the regression suite on Windows and Ubuntu with Python 3.10 and 3.12.
+
 ## [2.1.4] - 2026-11-22
 
 ### Added
@@ -264,7 +279,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.4...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.5...HEAD
+[2.1.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.4...v2.1.5
 [2.1.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.3...v2.1.4
 [2.0.9]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.8...v2.0.9
 [2.0.7]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.0.6...v2.0.7

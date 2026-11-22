@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="220" viewBox="0 0 1000 220" role="img" aria-labelledby="title">
-<title id="title">StreamSnip AI — Clip smarter, create faster</title>
-<defs><linearGradient id="b" x2="1" y2="1"><stop stop-color="#0a0c10"/><stop offset="1" stop-color="#1e1935"/></linearGradient><linearGradient id="a" x2="1"><stop stop-color="#d4ff62"/><stop offset="1" stop-color="#a6efe0"/></linearGradient></defs>
-<rect width="1000" height="220" rx="24" fill="url(#b)"/><circle cx="930" cy="20" r="190" fill="#b9a4ff" opacity=".1"/>
-<rect x="40" y="52" width="112" height="112" rx="28" fill="url(#a)"/><path d="M85 78v60l52-30z" fill="#17200a"/>
-<text x="190" y="105" fill="#f5f7f2" font-family="Segoe UI,Arial,sans-serif" font-size="52" font-weight="800">StreamSnip <tspan fill="#d4ff62">AI</tspan></text>
-<text x="194" y="151" fill="#b6c0b9" font-family="Segoe UI,Arial,sans-serif" font-size="22">Clip smarter. Create faster.</text>
-<g transform="translate(700 62)"><rect width="250" height="96" rx="15" fill="#11191c" stroke="#d4ff62" stroke-opacity=".3"/><text x="20" y="29" fill="#d4ff62" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="2">YOUR WORKFLOW</text><text x="20" y="57" fill="#f0f4ed" font-family="Segoe UI,Arial,sans-serif" font-size="17">Capture → Analyze</text><text x="20" y="80" fill="#c3d1c5" font-family="Segoe UI,Arial,sans-serif" font-size="17">Caption → Export</text></g>
-</svg>

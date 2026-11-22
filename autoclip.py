@@ -29,7 +29,7 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-from post_metadata import build_transcript_fallback, generate_social_copy
+from post_metadata import DEFAULT_GEMINI_COPY_MODEL, build_transcript_fallback, generate_social_copy
 APP_VERSION = "2.1.5"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -700,7 +700,7 @@ def save_publishing_settings(cfg):
 
 def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
-                "gemini_model": DEFAULT_GEMINI_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
+                "gemini_model": DEFAULT_GEMINI_COPY_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
                 "gemini_api_key": "", "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", "")),
                 "metadata_copy_enabled": "true", "huggingface_setup_completed": "false"}
     try:
@@ -713,7 +713,7 @@ def load_ai_settings():
     if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
         defaults["provider"] = "hooks"
     if defaults["gemini_model"] in RETIRED_GEMINI_MODELS:
-        defaults["gemini_model"] = DEFAULT_GEMINI_MODEL
+        defaults["gemini_model"] = DEFAULT_GEMINI_COPY_MODEL
     if defaults["huggingface_model"] == "Qwen/Qwen2.5-7B-Instruct-1M":
         defaults["huggingface_model"] = DEFAULT_HUGGINGFACE_MODEL
     return defaults

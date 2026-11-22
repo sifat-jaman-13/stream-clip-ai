@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">StreamSnip AI</h1>
-<p align="center"><strong>Current Windows build: v2.1.3</strong></p>
+<p align="center"><strong>Current Windows build: v2.1.4</strong></p>
 
 <p align="center"><a href="https://sifat-jaman-13.github.io/stream-clip-ai/"><strong>Visit the StreamSnip AI website</strong></a></p>
 
@@ -56,7 +56,7 @@ StreamSnip AI records supported live streams or reads local video files, transcr
 | Highlight detection | Hook words, Ollama, Gemini, or Hugging Face |
 | Rendering | FFmpeg with automatic CUDA/NVENC use when supported |
 | Formats | 9:16, 16:9, 1:1, and 4:5 |
-| Captions | Karaoke/classic modes, presets, colors, fonts, position, and size controls |
+| Captions | Karaoke/classic modes, presets, colors, fonts, position, and size controls; default-on profanity masking and audio muting |
 | Publishing | Manual or optional automatic publishing through Zernio |
 | Deployment | Windows installer, Python source, headless CLI, or Docker Compose |
 
@@ -178,6 +178,7 @@ Gemini currently prefers `gemini-3.8-flash`. On retryable model/API failures, St
 - Output ratios: **9:16**, **16:9**, **1:1**, and **4:5**.
 - Portrait layouts: facecam + gameplay, blurred background, center fill, or a selected crop.
 - Captions: karaoke or classic timing with Classic, Hormozi, Neon, MrBeast, Minimal, and Fire presets.
+- **Profanity filter (enabled by default):** detects common English swear words in the Whisper transcript, masks them as `****` in captions and generated post text, and mutes the matching audio intervals in exported clips. Add extra words or phrases or disable the filter in the Captions settings. Speech recognition can miss words, so review clips before publishing.
 - Customization: highlight color, font, words per line, font size, vertical position, text/stroke colors, and alignment.
 - Branding: automatic streamer credit and optional custom credit.
 - Output: each MP4 clip has a matching TXT file. The **first non-empty line is the title** and everything below it is the description.

@@ -411,6 +411,7 @@ DEFAULTS = {
     "model": "distil-large-v3", "compute_device": "gpu",
     "color": "Yellow", "position": "Lower third", "caption_size": 100, "words_per_line": 3, "font": "Impact",
     "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "Classic",
+    "profanity_filter_enabled": True, "profanity_filter_words": "",
     "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "streamer_tag": "", "show_tag_video": True,
@@ -464,6 +465,9 @@ def clean_cfg(raw):
                     ("subtitle_position", SUBTITLE_POSITIONS), ("subtitle_alignment", SUBTITLE_ALIGNMENTS)):
         if raw.get(k) in opts: c[k] = raw[k]
     c["subtitle_custom"] = bool(raw.get("subtitle_custom", False))
+    c["profanity_filter_enabled"] = bool(raw.get("profanity_filter_enabled", c["profanity_filter_enabled"]))
+    extra_profanity = str(raw.get("profanity_filter_words", c["profanity_filter_words"]) or "")
+    c["profanity_filter_words"] = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", extra_profanity)[:4000]
     for k, fallback in (("subtitle_text_color", "#FFFFFF"), ("subtitle_stroke_color", "#000000")):
         v = str(raw.get(k, fallback)).strip().upper()
         c[k] = v if re.fullmatch(r"#[0-9A-F]{6}", v) else fallback
@@ -875,6 +879,111 @@ def ts(t):
 
 def clean_word(w):
     return re.sub(r"[{}\\]", "", w).strip(" .,;:\"").upper()
+
+PROFANITY_FILTER_MASK = "****"
+DEFAULT_PROFANITY_TERMS = (
+    "fuck", "fucking", "fucked", "fucker", "fuckers", "fucks", "fuckin",
+    "motherfucker", "motherfuckers", "motherfucking", "mother fucker",
+    "shit", "shits", "shitty", "bullshit", "horseshit", "shithead",
+    "bitch", "bitches", "bitching", "son of a bitch",
+    "asshole", "assholes", "arsehole", "arseholes", "dumbass", "jackass", "jackasses",
+    "bastard", "bastards", "dick", "dicks", "dickhead", "cock", "cocks",
+    "cunt", "cunts", "pussy", "pussies", "slut", "sluts", "whore", "whores",
+    "twat", "prick", "pricks", "wanker", "wankers", "bollocks",
+    "piss", "pissed", "pissing", "stfu", "wtf", "fml",
+)
+_PROFANITY_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?")
+
+def _profanity_tokens(value):
+    """Tokenize speech/text without matching profanity inside unrelated words."""
+    return [match.group(0).replace("’", "'").casefold()
+            for match in _PROFANITY_TOKEN_RE.finditer(str(value or ""))]
+
+def _profanity_matches(tokens, terms):
+    matched = set()
+    for start in range(len(tokens)):
+        for term in terms:
+            stop = start + len(term)
+            if stop <= len(tokens) and tuple(tokens[start:stop]) == term:
+                matched.update(range(start, stop))
+    return matched
+
+def _profanity_terms(extra_terms=""):
+    terms = {tuple(_profanity_tokens(term)) for term in DEFAULT_PROFANITY_TERMS}
+    for line in re.split(r"[\r\n,;]+", str(extra_terms or "")):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        tokens = _profanity_tokens(line)
+        if tokens and len(tokens) <= 8:
+            terms.add(tuple(tokens))
+    terms.discard(())
+    return sorted(terms, key=lambda term: (-len(term), term))
+
+def censor_transcript_words(words, enabled=True, extra_terms=""):
+    """Replace detected profanity in timestamped Whisper words, preserving timing."""
+    entries = list(words or [])
+    if not enabled or not entries:
+        return entries
+    token_stream, token_owners = [], []
+    for index, entry in enumerate(entries):
+        if len(entry) < 3:
+            continue
+        tokens = _profanity_tokens(entry[2])
+        token_stream.extend(tokens)
+        token_owners.extend([index] * len(tokens))
+    matched_tokens = _profanity_matches(token_stream, _profanity_terms(extra_terms))
+    matched_words = {token_owners[index] for index in matched_tokens}
+    safe_words = []
+    for index, entry in enumerate(entries):
+        values = list(entry)
+        if index in matched_words and len(values) >= 3:
+            values[2] = PROFANITY_FILTER_MASK
+        safe_words.append(tuple(values))
+    return safe_words
+
+def censor_profanity_text(value, enabled=True, extra_terms=""):
+    """Mask profanity in generated titles, descriptions, hashtags, or other text."""
+    text = str(value or "")
+    if not enabled or not text:
+        return text
+    matches = list(_PROFANITY_TOKEN_RE.finditer(text))
+    tokens = [match.group(0).replace("’", "'").casefold() for match in matches]
+    matched = _profanity_matches(tokens, _profanity_terms(extra_terms))
+    for index in sorted(matched, reverse=True):
+        match = matches[index]
+        text = text[:match.start()] + PROFANITY_FILTER_MASK + text[match.end():]
+    return text
+
+def profanity_audio_filter(words, start, end, padding=0.10):
+    """Build an FFmpeg volume filter that mutes censored words in clip-relative time."""
+    try:
+        clip_start, duration = float(start), max(0.0, float(end) - float(start))
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if duration <= 0:
+        return ""
+    intervals = []
+    for word_start, word_end, word in words or []:
+        if str(word).strip() != PROFANITY_FILTER_MASK:
+            continue
+        try:
+            left = max(0.0, float(word_start) - clip_start - padding)
+            right = min(duration, float(word_end) - clip_start + padding)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if right <= left:
+            continue
+        if intervals and left <= intervals[-1][1] + 0.025:
+            intervals[-1] = (intervals[-1][0], max(intervals[-1][1], right))
+        else:
+            intervals.append((left, right))
+    if not intervals:
+        return ""
+    expression = "+".join(
+        f"between(t,{left:.3f},{right:.3f})" for left, right in intervals
+    )
+    return f"volume=0:enable='{expression}'"
 
 def group_words(ws, max_words, max_chars, gap=0.7):
     groups, cur = [], []
@@ -1379,6 +1488,10 @@ class Engine:
     # ---- render
     def render(self, src, start, end, words, name):
         cfg = self.cfg
+        words = censor_transcript_words(
+            words, enabled=cfg.get("profanity_filter_enabled", True),
+            extra_terms=cfg.get("profanity_filter_words", "")
+        )
         out_w, out_h = output_size(cfg)
         make_ass(words, start, end, OUT / f"{name}.ass", cfg)
         if cfg["layout"].startswith("Facecam") and cfg.get("output_format", "9:16") == "9:16":
@@ -1406,11 +1519,13 @@ class Engine:
                   f"setsar=1,subtitles={name}.ass[v]")
         enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
+        mute_filter = profanity_audio_filter(words, start, end) if cfg.get("profanity_filter_enabled", True) else ""
+        audio_filter = ((mute_filter + ",") if mute_filter else "") + "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS"
         tmp = f"{name}.tmp.mp4"
         cmd = [ffmpeg_exe(), "-y", "-v", "error", "-fflags", "+genpts", "-ss", f"{start:.2f}", "-accurate_seek",
                "-t", f"{end - start:.2f}", "-i", str(pathlib.Path(src).resolve()),
                "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
-               *enc, "-pix_fmt", "yuv420p", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS",
+               *enc, "-pix_fmt", "yuv420p", "-af", audio_filter,
                "-c:a", "aac", "-b:a", "160k", "-r", "30", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", tmp]
         r = run(cmd, cwd=OUT, capture_output=True, text=True)
         (OUT / f"{name}.ass").unlink(missing_ok=True)
@@ -1441,6 +1556,15 @@ class Engine:
                 f"{provider.title()} post copy unavailable or failed validation; "
                 f"using transcript fallback: {str(exc)[:220]}"
             )
+        if post_copy and cfg.get("profanity_filter_enabled", True):
+            post_copy = dict(post_copy)
+            extra_terms = cfg.get("profanity_filter_words", "")
+            for key in ("title", "description"):
+                if post_copy.get(key):
+                    post_copy[key] = censor_profanity_text(post_copy[key], extra_terms=extra_terms)
+            if isinstance(post_copy.get("hashtags"), (list, tuple)):
+                post_copy["hashtags"] = [censor_profanity_text(tag, extra_terms=extra_terms)
+                                          for tag in post_copy["hashtags"]]
         final_video = OUT / f"{name}.mp4"
         self.replace_output(OUT / tmp, final_video)
         try:
@@ -1461,7 +1585,14 @@ class Engine:
         stem = re.sub(r"[^A-Za-z0-9_-]", "_", pth.stem)[:40] or "stream"
         self.status(f"Transcribing {pth.name}...", "transcribing", 0)
         self.log(f"Processing {pth.name}")
-        words = self.transcribe(path)
+        raw_words = self.transcribe(path)
+        words = censor_transcript_words(
+            raw_words, enabled=self.cfg.get("profanity_filter_enabled", True),
+            extra_terms=self.cfg.get("profanity_filter_words", "")
+        )
+        censored_count = sum(1 for _start, _end, word in words if word == PROFANITY_FILTER_MASK)
+        if censored_count:
+            self.log(f"Profanity filter: muted and masked {censored_count} detected word(s).")
         self.check()
         if words:
             transcript = " ".join(clean_word(word) for _start, _end, word in words).strip()
@@ -2783,6 +2914,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       </div>
       <p class="hint">Presets control the font and animation. Text/stroke colors, position, alignment, and size remain yours to tune.</p>
     </div>
+    <div class="subhead"><span>Profanity filter</span><label class="toggle compact"><span>Mute audio + mask captions</span><input type="checkbox" id="t-profanity"><i class="sl"></i></label></div>
+    <textarea id="profanity-words" class="text" rows="3" spellcheck="false" placeholder="Add extra words or phrases, one per line"></textarea>
+    <p class="hint">Enabled by default. Detected English profanity is muted in the exported audio and shown as **** in captions and generated post text. Add extra words or phrases above. Speech recognition can miss words, so review every clip before publishing.</p>
   </div>
 
   <div class="card">
@@ -3053,6 +3187,10 @@ $("#show-tag-video").addEventListener("change",e=>{S.show_tag_video=e.target.che
 $("#t-sub-custom").checked=!!S.subtitle_custom;
 $("#sub-custom-fields").hidden=!S.subtitle_custom;
 $("#t-sub-custom").addEventListener("change",e=>{S.subtitle_custom=e.target.checked;$("#sub-custom-fields").hidden=!S.subtitle_custom;scheduleSave();preview()});
+ $("#t-profanity").checked=S.profanity_filter_enabled!==false;
+ $("#t-profanity").addEventListener("change",e=>{S.profanity_filter_enabled=e.target.checked;scheduleSave()});
+ $("#profanity-words").value=S.profanity_filter_words||"";
+ $("#profanity-words").addEventListener("input",e=>{S.profanity_filter_words=e.target.value.slice(0,4000);scheduleSave()});
 $("#sub-mode").value=S.subtitle_mode;$("#sub-mode").addEventListener("change",e=>{S.subtitle_mode=e.target.value;scheduleSave()});
 $("#sub-style").value=S.subtitle_style;$("#sub-style").addEventListener("change",e=>{S.subtitle_style=e.target.value;scheduleSave();preview()});
 $("#sub-text-color").value=S.subtitle_text_color;$("#sub-text-color").addEventListener("input",e=>{S.subtitle_text_color=e.target.value.toUpperCase();scheduleSave();preview()});

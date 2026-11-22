@@ -5,7 +5,7 @@ import urllib.parse
 
 from ai_highlights import AIProviderError, DEFAULT_GEMINI_MODEL, _extract_json, _json_request, ollama_models
 
-DEFAULT_GEMINI_COPY_MODEL = DEFAULT_GEMINI_MODEL
+DEFAULT_GEMINI_COPY_MODEL = "gemini-3.1-flash-lite"
 
 def build_copy_prompt(transcript, creator_credit="", correction=""):
     transcript = re.sub(r"\s+", " ", str(transcript or "")).strip()[:12000]
@@ -67,7 +67,7 @@ def _provider_response(prompt, config, log=lambda _message: None):
         # Always honour the model selected in AI settings. In particular, keep
         # gemini-3.1-flash-lite as the user's low-cost/free-tier model; never
         # silently rotate metadata requests onto a different Gemini model.
-        model = str(config.get("gemini_model", "")).strip() or DEFAULT_GEMINI_MODEL
+        model = str(config.get("gemini_model", "")).strip() or DEFAULT_GEMINI_COPY_MODEL
         if not key or not model:
             raise AIProviderError("Gemini key or model is missing in AI settings.")
         headers = {"Content-Type": "application/json", "x-goog-api-key": key}

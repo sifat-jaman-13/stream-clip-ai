@@ -231,8 +231,8 @@ def _grounding_tokens(value):
     return result
 
 def _validate_transcript_grounding(title, description, transcript):
-    """Reject generic headlines and invented dialogue/details not in the clip transcript."""
-    source = " ".join(re.findall(r"[a-z0-9']+", str(transcript or "").lower()))
+    """Reject generic headlines and unsupported claims in clip copy."""
+    source = re.sub(r"\s+", " ", str(transcript or "")).lower()
     source_tokens = _grounding_tokens(transcript)
     title_lower = str(title or "").strip().lower()
     if re.match(
@@ -247,19 +247,23 @@ def _validate_transcript_grounding(title, description, transcript):
     title_tokens = _grounding_tokens(title)
     if len(title_tokens.intersection(source_tokens)) < 2:
         raise AIProviderError(
-            "The title does not contain a concrete detail supported by this clip's transcript."
+            "The title does not contain at least two concrete details supported by this clip's transcript."
         )
 
     unsupported_claims = {
         "rare", "stole", "steal", "stolen", "robbed", "robs", "robbery",
         "destroyed", "destroy", "murdered", "murder", "exposed", "caught",
         "legendary", "world-record", "first-ever", "biggest", "fastest",
+        "crash", "crashed", "accident", "incident", "installed", "installation",
+        "attached", "fitted", "exploded", "explosion", "burned", "burnt", "smashed",
+        "wrecked", "item", "consequence", "devastating",
     }
-    title_words = set(re.findall(r"[a-z0-9-]+", title_lower))
-    unsupported = (title_words & unsupported_claims) - set(re.findall(r"[a-z0-9-]+", source))
+    output_words = set(re.findall(r"[a-z0-9-]+", (title_lower + " " + str(description or "").lower())))
+    source_words = set(re.findall(r"[a-z0-9-]+", source))
+    unsupported = (output_words & unsupported_claims) - source_words
     if unsupported:
         raise AIProviderError(
-            "The title contains an unsupported claim: " + ", ".join(sorted(unsupported)) + "."
+            "AI copy introduced unsupported details: " + ", ".join(sorted(unsupported)) + "."
         )
 
     quoted = re.match(r'^\s*[“"](.+?)[”"]', str(description or ""), flags=re.S)
@@ -275,7 +279,7 @@ def _validate_transcript_grounding(title, description, transcript):
     explanation_tokens = _grounding_tokens(explanation)
     if len(explanation_tokens.intersection(source_tokens)) < 2:
         raise AIProviderError(
-            "The description is too generic or does not explain a detail supported by this clip."
+            "The description is too generic or does not explain at least two details supported by this clip."
         )
 
     generic_phrases = (
@@ -287,9 +291,6 @@ def _validate_transcript_grounding(title, description, transcript):
         raise AIProviderError(
             "The description relies on generic filler instead of explaining the specific moment."
         )
-
-
-
 
 def _reject_unsupported_ownership_claims(title, description, transcript):
     """Avoid claiming ownership of a vehicle when the transcript does not establish it."""

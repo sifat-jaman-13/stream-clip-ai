@@ -449,6 +449,68 @@ def build_transcript_fallback(transcript, creator_credit=""):
     def score(candidate):
         words = candidate.split()
         lower = candidate.lower()
+        event_score = sum(weight for term, weight in (
+            ("totaled", 22), ("ran over a cat", 22), ("i surrender", 18),
+            ("i've got nothing", 18), ("mine now", 18), ("just kill me", 16),
+            ("no way", 12), ("eight miles", 10), ("tracker", 9),
+            ("oh my god", 8), ("what the", 8), ("for fuck's sake", 8),
+            ("what happened", 8), ("who's shooting", 8),
+        ) if term in lower)
+        expressive = candidate.count("!") * 3 + candidate.count("?") * 2
+        length_fit = 10 - abs(len(words) - 9)
+        return event_score + expressive + length_fit
+
+    selected_line = max(candidates, key=score)
+    quote = _fallback_sentence_case(selected_line[:140].strip())
+    title = _fallback_title_case(quote)
+    if len(title) > 90:
+        title = title[:87].rsplit(" ", 1)[0] + "..."
+    if len(title) < 12:
+        title = "A Standout Moment From the Stream"
+
+    # A second exact spoken line adds context without inventing an explanation.
+    other_lines = [line for line in candidates if line != selected_line]
+    if other_lines:
+        context = _fallback_sentence_case(max(other_lines, key=score)[:130].strip())
+        description = f"“{quote}”\n\n“{context}”"
+    else:
+        description = f"“{quote}”"
+
+    result = {
+        "title": title,
+        "description": _clean_description(description),
+        "hashtags": ["#funny"] if any(
+            term in text.lower() for term in ("laugh", "funny", "awkward", "mine now", "ran over a cat")
+        ) else ["#clips"],
+        "provider": "transcript fallback",
+    }
+    if creator_credit:
+        result["creator_credit"] = str(creator_credit)
+    return result
+
+transcript, creator_credit=""):
+    """Create brief extractive copy; never paste an entire transcript into a post."""
+    text = re.sub(r"\s+", " ", str(transcript or "")).strip()
+    if not text:
+        return {
+            "title": "A Highlight From the Stream",
+            "description": "No usable speech transcript was available for this clip.",
+            "hashtags": ["#clips"],
+            "provider": "transcript fallback",
+        }
+
+    candidates = [
+        part.strip(" \t\r\n\"'“”‘’-—:;")
+        for part in re.split(r"(?<=[.!?])\s+", text)
+        if len(part.split()) >= 3
+    ]
+    if not candidates:
+        tokens = text.split()
+        candidates = [" ".join(tokens[i:i + 12]) for i in range(0, max(1, len(tokens) - 2), 5)]
+
+    def score(candidate):
+        words = candidate.split()
+        lower = candidate.lower()
         reactions = sum(term in lower for term in (
             "oh my god", "what the", "no way", "mine now", "i've got nothing",
             "just kill me", "eight miles", "tracker", "i surrender", "for fuck's sake",

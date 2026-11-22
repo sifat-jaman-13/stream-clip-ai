@@ -487,7 +487,7 @@ def build_transcript_fallback(transcript, creator_credit=""):
             ("i've got nothing", 18), ("mine now", 18), ("just kill me", 16),
             ("no way", 12), ("eight miles", 10), ("tracker", 9),
             ("oh my god", 8), ("what the", 8), ("for fuck's sake", 8),
-            ("what happened", 8), ("who's shooting", 8),
+            ("what happened", 8), ("who's shooting", 8), ("toilet", 12),
         ) if term in lower)
         expressive = candidate.count("!") * 3 + candidate.count("?") * 2
         length_fit = 10 - abs(len(words) - 9)

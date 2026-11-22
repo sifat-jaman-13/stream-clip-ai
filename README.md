@@ -3,8 +3,9 @@
 </p>
 
 <h1 align="center">StreamSnip AI</h1>
+<p align="center"><strong>Current Windows build: v2.1.3</strong></p>
 
-<p align="center"><a href="https://sifat-jaman-13.github.io/stream-clip-ai/"><strong>🌐 Visit the StreamSnip AI website</strong></a></p>
+<p align="center"><a href="https://sifat-jaman-13.github.io/stream-clip-ai/"><strong>Visit the StreamSnip AI website</strong></a></p>
 
 > First-time website setup: open **Settings → Pages** and set **Build and deployment → Source** to **GitHub Actions**. The workflow in `.github/workflows/deploy-site.yml` will then publish the site.
 
@@ -75,6 +76,8 @@ The lightweight installer:
 
 Later launches reuse the isolated runtime. Reinstalling a newer version over the existing installation preserves local settings and updates the packaged source files.
 
+**Important - safe shutdown (v2.1.3):** StreamSnip AI prints an explicit startup warning in its support terminal. Keep that terminal window **OPEN** while the app is running. To exit, click **Quit** inside StreamSnip AI and wait until the app has fully shut down before closing the terminal. Closing the terminal directly may interrupt active recording, clip processing, or uploads.
+
 Hugging Face authentication is optional and requested only once during setup. Paste a token to enable authenticated model downloads, or press **Enter** to skip; unauthenticated public downloads may be slower. The choice is remembered, and a token can be added later in **AI settings > Hugging Face**.
 
 Uninstalling removes the isolated Python runtime, pip-installed packages, and downloaded Whisper models. It also removes Python 3.12 or FFmpeg only when the StreamSnip AI setup recorded that it installed that global package. Existing clips, recordings, and local settings are preserved.
@@ -89,7 +92,7 @@ Uninstalling removes the isolated Python runtime, pip-installed packages, and do
 6. Select **Start clipping**.
 7. Review finished clips in the gallery, copy captions, download files, reveal them in Explorer, or publish selected clips.
 
-Use **Stop & finish clips** to finish already captured live content, **Stop now** for an immediate stop, and **Quit** (or close the app window) to terminate the local server and all app-owned child processes.
+Use **Stop & finish clips** to finish already captured live content and **Stop now** for an immediate stop. To exit StreamSnip AI, click **Quit** inside the app and wait for shutdown to complete before closing the support terminal. Keep the terminal open while the app is running; closing it directly may interrupt active recording, clip processing, or uploads.
 
 ## Highlight engines
 
@@ -114,7 +117,7 @@ Gemini currently prefers `gemini-3.8-flash`. On retryable model/API failures, St
 - Customization: highlight color, font, words per line, font size, vertical position, text/stroke colors, and alignment.
 - Branding: automatic streamer credit and optional custom credit.
 - Output: each MP4 clip has a matching TXT file. The **first non-empty line is the title** and everything below it is the description.
-- **Automatic AI titles and descriptions:** every finished clip is written with a title and description automatically. When Gemini, local Ollama, or Hugging Face is selected for highlight detection, that same provider generates the post copy (there is no separate copy-provider setting). All three providers receive the same creator-style instructions: catchy Title Case titles with fitting emojis, a short exact quote when the transcript contains a memorable line, a natural follow-up explaining the moment, and a concise topic hashtag. The TXT writer adds creator attribution when available plus the standard tags #shorts #fyp #streamer #clips #viral and one context-specific tag such as #funny. Titles are capped at 100 characters. Copy must stay grounded in the transcript and cannot invent dialogue, people, games, locations, visuals, or outcomes.
+- **Automatic AI titles and descriptions (v2.1.3):** every finished clip is written with a title and description automatically. When Gemini, local Ollama, or Hugging Face is selected for highlight detection, that same provider generates the post copy (there is no separate copy-provider setting). All three providers receive the same creator-style instructions: catchy Title Case titles with fitting emojis, a short exact quote when the transcript contains a memorable line, a natural follow-up explaining the moment, and a concise topic hashtag. The TXT writer adds creator attribution when available plus the standard tags #shorts #fyp #streamer #clips #viral and one context-specific tag such as #funny. Titles are capped at 100 characters. Copy must stay grounded in the transcript and cannot invent dialogue, people, games, locations, visuals, or outcomes.
 - Quote-only or otherwise unusable AI descriptions are rejected. If Hook words is selected, or the selected provider returns an error/unusable response, the clip still renders and receives transcript-based fallback copy. Gemini/Hugging Face use hosted quota/credits; local Ollama uses your locally installed model and its available hardware.
 - The per-clip TXT contains post-ready title, description, creator credit (when available), and hashtags. Filenames and source timestamps stay in the cumulative `clips_metadata.txt` index instead of being accidentally included in the public post description.
 - A cumulative `clips_metadata.txt` index in the output folder lists metadata and source timestamps for every generated clip.
@@ -286,7 +289,7 @@ Build output:
 - **Buttons do not respond:** disable ad blocking for `127.0.0.1` / `localhost`.
 - **Gemini/Hugging Face failure:** use **Test connection** and verify the account has API access/quota or provider credits.
 - **Zernio DNS error:** check internet, VPN, firewall, and DNS settings; the app retries transient DNS failures automatically.
-- **App appears to remain active:** use **Quit**. Closing the desktop app window also stops its local server and child processes after a short reload grace period.
+- **Safe shutdown:** click **Quit** inside StreamSnip AI and wait until it has shut down before closing the support terminal. Do not close the terminal directly while recording, clip processing, or uploads may be active.
 
 ## Project
 

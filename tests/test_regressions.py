@@ -11,6 +11,14 @@ from zernio_poster import ZernioPublisher
 
 
 class RegressionTests(unittest.TestCase):
+    def test_streamsnip_terminal_warns_about_safe_shutdown(self):
+        source = Path(__file__).resolve().parents[1] / "autoclip.py"
+        content = source.read_text(encoding="utf-8")
+        self.assertIn("Keep this terminal window OPEN while StreamSnip AI is running.", content)
+        self.assertIn("click Quit inside StreamSnip AI and wait for it to shut down.", content)
+        self.assertIn("Do NOT close this terminal directly.", content)
+        self.assertIn("active recording, clip processing, or uploads.", content)
+
     def test_render_creates_matching_title_description_txt_and_combined_index(self):
         cfg = autoclip.clean_cfg({
             "compute_device": "cpu",

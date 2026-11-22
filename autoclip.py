@@ -30,7 +30,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
 from post_metadata import generate_social_copy
-APP_VERSION = "2.1.2"
+APP_VERSION = "2.1.3"
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -2465,7 +2465,13 @@ def main():
         public_host = f"[{public_host}]"
     url = f"http://{public_host}:{srv.server_address[1]}/"
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    print(f"{PRODUCT_NAME} by ScarZero is running at {url}\nChoose Quit in the app, or keep this terminal open while it runs.")
+    print(
+        f"{PRODUCT_NAME} by ScarZero is running at {url}\n"
+        "IMPORTANT: Keep this terminal window OPEN while StreamSnip AI is running.\n"
+        "To close the app safely, click Quit inside StreamSnip AI and wait for it to shut down.\n"
+        "Do NOT close this terminal directly. Doing so may interrupt active recording, clip processing, or uploads.",
+        flush=True,
+    )
     if bind_host in ("127.0.0.1", "localhost", "::1"):
         open_window(url)
     try:

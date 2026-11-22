@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.3] - 2026-11-22
+
+### Changed
+
+- Rewrote the support-terminal startup message to clearly warn users to keep the terminal open while StreamSnip AI runs.
+- Explained that users must click **Quit** inside the app and wait for shutdown before closing the terminal.
+- Warned that closing the terminal directly may interrupt active recording, clip processing, or uploads.
+- Updated the README and GitHub Pages site to describe provider-matched automatic titles/descriptions and the explicit safe-shutdown instructions.
+
 Notable StreamSnip AI changes are documented here. Complete release notes and downloadable assets are available on the [GitHub Releases page](https://github.com/sifat-jaman-13/stream-clip-ai/releases).
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use semantic versioning.

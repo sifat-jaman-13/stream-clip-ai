@@ -219,7 +219,7 @@ class PostMetadataTests(unittest.TestCase):
             "WHERE'S THE TOILET ONE? THIS IS THE NEXT COLLECTIBLE CARD AND WE HAVE TO FIND IT."
         )
         result = post_metadata.build_transcript_fallback(transcript, "@creator")
-        self.assertEqual(result["title"], "Oh My God He Just Ran Over a Cat")
+        self.assertEqual(result["title"], "Oh My God He Just Ran Over a Cat!")
         self.assertLess(len(result["description"]), 250)
         self.assertNotIn(transcript, result["description"])
         self.assertNotIn("AI providers did not return", result["description"])

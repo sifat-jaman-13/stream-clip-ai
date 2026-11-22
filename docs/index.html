@@ -83,7 +83,7 @@
     .btn-quiet { border-color: var(--line-strong); background: rgba(255,255,255,.025); color: var(--text); }
     .btn-quiet:hover { border-color: rgba(212,255,98,.45); background: rgba(212,255,98,.06); }
     .btn svg { width: 16px; height: 16px; }
-    .hero { padding: 88px 0 76px; overflow: hidden; }
+    .site-banner{display:block;width:min(100% - 44px,1180px);height:auto;margin:34px auto 0;border:1px solid var(--line);border-radius:20px;box-shadow:0 24px 65px rgba(0,0,0,.28)}.hero { padding: 42px 0 76px; overflow: hidden; }
     .hero-grid { display: grid; grid-template-columns: .94fr 1.06fr; align-items: center; gap: 62px; }
     .eyebrow { display: inline-flex; align-items: center; gap: 9px; color: var(--lime); text-transform: uppercase; font-size: 10px; font-weight: 820; letter-spacing: .17em; }
     .eyebrow:before { content: ""; width: 21px; height: 1px; background: var(--lime); }
@@ -288,7 +288,7 @@
 
   <main id="top">
     <section class="hero">
-      <div class="wrap hero-grid">
+      <div class="wrap"><img class="site-banner" src="../assets/streamsnipai-banner.svg" alt="StreamSnip AI ? Find the moment. Make it a clip."></div><div class="wrap hero-grid">
         <div class="reveal">
           <div class="eyebrow">Your streams, made shareable</div>
           <h1>Find the moment.<br><span class="accent">Make it a clip.</span></h1>

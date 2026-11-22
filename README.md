@@ -57,7 +57,7 @@ StreamSnip AI records supported live streams or reads local video files, transcr
 
 Recordings, settings, transcription, rendering, and generated clips remain on the machine unless a hosted AI or publishing feature is explicitly used.
 
-## Before you install (Windows)
+## Absolute requirements before installing (Windows)
 
 > Check these requirements **before** running the Windows installer. The installer can prepare Python and FFmpeg automatically, but it still needs internet access and WinGet when those tools are missing.
 

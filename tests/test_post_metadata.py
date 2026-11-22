@@ -27,7 +27,7 @@ class PostMetadataTests(unittest.TestCase):
         }
 
     def test_gemini_31_flash_lite_remains_the_default_free_model(self):
-        self.assertEqual(ai_highlights.DEFAULT_GEMINI_MODEL, "gemini-3.1-flash-lite")
+        self.assertEqual(ai_highlights.DEFAULT_GEMINI_MODEL, "gemini-3.8-flash")
         self.assertEqual(post_metadata.DEFAULT_GEMINI_COPY_MODEL, "gemini-3.1-flash-lite")
 
     def test_prompt_requests_specific_transcript_grounded_copy(self):

@@ -1059,3 +1059,71 @@ class RegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_profanity_filter_masks_words_without_substring_false_positives(self):
+        words = [
+            (1.0, 1.2, "The"),
+            (1.2, 1.6, "Fucking"),
+            (1.6, 1.9, "game"),
+            (1.9, 2.2, "shit!"),
+            (2.2, 2.5, "is"),
+            (2.5, 2.8, "over."),
+        ]
+        filtered = autoclip.censor_transcript_words(words)
+        self.assertEqual(filtered[1][2], "****")
+        self.assertEqual(filtered[3][2], "****")
+        self.assertEqual(filtered[2][2], "game")
+        self.assertEqual(filtered[1][:2], words[1][:2])
+        self.assertEqual(filtered[2], words[2])
+
+        # Whole-token matching must not censor innocent words containing "ass".
+        safe_text = autoclip.censor_profanity_text("The assistant passed the class.")
+        self.assertEqual(safe_text, "The assistant passed the class.")
+
+    def test_profanity_filter_supports_multiword_and_custom_terms(self):
+        words = [
+            (0.0, 0.2, "You"),
+            (0.2, 0.4, "son"),
+            (0.4, 0.6, "of"),
+            (0.6, 0.8, "a"),
+            (0.8, 1.0, "bitch!"),
+            (1.0, 1.2, "you"),
+            (1.2, 1.4, "absolute"),
+            (1.4, 1.6, "clown"),
+        ]
+        filtered = autoclip.censor_transcript_words(words, extra_terms="absolute clown")
+        self.assertEqual([entry[2] for entry in filtered],
+                         ["You", "****", "****", "****", "****", "you", "****", "****"])
+        self.assertEqual(
+            autoclip.censor_profanity_text("You absolute clown!", extra_terms="absolute clown"),
+            "You **** ****!"
+        )
+
+    def test_profanity_filter_can_be_disabled_and_defaults_to_enabled(self):
+        self.assertTrue(autoclip.clean_cfg({})["profanity_filter_enabled"])
+        self.assertFalse(autoclip.clean_cfg({
+            "profanity_filter_enabled": False
+        })["profanity_filter_enabled"])
+        words = [(0.0, 0.5, "fuck")]
+        self.assertEqual(
+            autoclip.censor_transcript_words(words, enabled=False),
+            words
+        )
+        self.assertEqual(
+            autoclip.censor_profanity_text("fuck you", enabled=False),
+            "fuck you"
+        )
+
+    def test_profanity_audio_filter_uses_word_timestamps_and_merges_nearby_intervals(self):
+        words = [
+            (12.1, 12.4, "****"),
+            (12.45, 12.8, "****"),
+            (15.0, 15.3, "****"),
+            (16.0, 16.4, "clean"),
+        ]
+        audio_filter = autoclip.profanity_audio_filter(words, 10.0, 18.0)
+        self.assertIn("volume=0:enable=", audio_filter)
+        self.assertIn("between(t,2.000,2.900)", audio_filter)
+        self.assertIn("between(t,4.900,5.400)", audio_filter)
+        self.assertNotIn("between(t,6.000", audio_filter)
+

@@ -140,6 +140,11 @@ def _provider_response(prompt, config, log=lambda _message: None):
 
     raise AIProviderError("Select Gemini, Ollama, or Hugging Face to enable AI post copy.")
 
+def _fallback_sentence_case(value):
+    text = " ".join(str(value or "").strip().split()).lower()
+    return text[:1].upper() + text[1:]
+
+
 def _fallback_title_case(value):
     words = str(value or "").strip().split()
     small = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to", "up", "with"}
@@ -453,7 +458,7 @@ def build_transcript_fallback(transcript, creator_credit=""):
         length_fit = 10 - abs(len(words) - 9)
         return reactions * 10 + expressive + length_fit
 
-    quote = max(candidates, key=score)[:140].strip()
+    quote = _fallback_sentence_case(max(candidates, key=score)[:140].strip())
     title = _fallback_title_case(quote)
     if len(title) > 90:
         title = title[:87].rsplit(" ", 1)[0] + "..."
@@ -465,7 +470,7 @@ def build_transcript_fallback(transcript, creator_credit=""):
     other_lines = [line for line in candidates if line != quote]
     context = max(other_lines, key=score) if other_lines else ""
     if context:
-        context = context[:130].strip()
+        context = _fallback_sentence_case(context[:130].strip())
         description = f"“{quote}”\n\n“{context}”"
     else:
         description = f"“{quote}”"

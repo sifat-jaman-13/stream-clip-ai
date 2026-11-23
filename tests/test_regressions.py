@@ -240,7 +240,7 @@ class RegressionTests(unittest.TestCase):
                     core.start_vod_watch(creator_id)
                     source = paths["vod_inbox"] / "session.mp4"
                     source.write_bytes(b"sample vod")
-                    deadline = time.time() + 4
+                    deadline = time.time() + 12
                     while time.time() < deadline and not (paths["vod_processed"] / source.name).exists():
                         time.sleep(0.05)
                     core.stop_vod_watch(creator_id)

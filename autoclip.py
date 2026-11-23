@@ -1887,7 +1887,8 @@ class Engine:
         # Live capture chunks are temporary working files, not user-owned VODs.
         # Free disk space after a completed analysis that produced clips or no worthwhile moments.
         # Keep the source if every render failed so the user can retry it.
-        if self.cfg.get("mode", "live") == "live" and pth.parent == self.rec_dir and (not peaks or rendered_count > 0):
+        same_recording_dir = os.path.normcase(str(pth.parent.resolve())) == os.path.normcase(str(self.rec_dir.resolve()))
+        if self.cfg.get("mode", "live") == "live" and same_recording_dir and (not peaks or rendered_count > 0):
             try:
                 pth.unlink(missing_ok=True)
                 reason = "no worthwhile clips" if not peaks else f"{rendered_count} clip(s) rendered"

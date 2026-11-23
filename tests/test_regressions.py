@@ -212,8 +212,8 @@ class RegressionTests(unittest.TestCase):
                 vod = next(item for item in items if item["source"] == "vod")
                 self.assertEqual(live["creator_name"], "Gallery Creator")
                 self.assertEqual(vod["title"], "VOD title")
-                self.assertEqual(autoclip.find_clip_path(live["name"]), files[1][0])
-                self.assertEqual(autoclip.find_clip_path(vod["name"]), files[2][0])
+                self.assertEqual(autoclip.find_clip_path(live["name"]), files[1][0].resolve())
+                self.assertEqual(autoclip.find_clip_path(vod["name"]), files[2][0].resolve())
 
     def test_creator_vod_folder_watcher_processes_and_archives_stable_files(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -567,7 +567,7 @@ class RegressionTests(unittest.TestCase):
                     account_ids={"instagram": "ig-account"},
                 )
             self.assertEqual(result["queued"], 1)
-            self.assertEqual(publisher.publish_one.call_args.args[0], clip)
+            self.assertEqual(publisher.publish_one.call_args.args[0], clip.resolve())
             self.assertEqual(publisher.publish_one.call_args.kwargs["caption_override"], "Edited title\n\nEdited description")
             self.assertEqual(publisher.publish_one.call_args.kwargs["accounts"], {"instagram": "ig-account"})
             self.assertEqual(core.posting["completed"], 1)
@@ -1220,7 +1220,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_rejected_recording_chunk_is_deleted_immediately(self):
         with tempfile.TemporaryDirectory() as directory:
-            recording = Path(directory) / "segment.ts"
+            recording = Path(directory).resolve() / "segment.ts"
             recording.touch()
             engine = object.__new__(autoclip.Engine)
             engine.cfg = {"min_score": 70, "pre": 20, "post": 15, "delete_rec": False}

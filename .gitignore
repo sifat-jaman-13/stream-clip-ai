@@ -22,6 +22,7 @@ ENV/
 # Runtime outputs (user-generated)
 out/
 rec/
+models/
 settings.json
 custom_words.txt
 zernio.json

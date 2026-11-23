@@ -5,7 +5,7 @@
 ### Added
 - Added direct per-clip Zernio publishing from the clip dialog, including editable title/description, per-post destination selection, multi-platform account mapping, and manual native-upload fallback.
 - Expanded Zernio account discovery and publishing targets to connected social accounts across Instagram, TikTok, Facebook, YouTube, X, LinkedIn, Pinterest, Reddit, Bluesky, Threads, and Google Business.
-- Moved the primary live-capture Start/Stop controls above the dashboard so they remain prominent.
+- Kept the simple single-source live Start/Stop control at the top of the workspace and added independent Start Live / Stop Live controls to every saved creator.
 - Added a per-creator custom transcriber option. Users can run a local executable or script with input/output/language placeholders and return timestamped word or segment JSON; local custom transcribers require no StreamSnip API key.
 - Added custom transcriber JSON parsing for word-level output, segment-level output, and Whisper.cpp-style millisecond offsets.
 - Added the multi-creator dashboard with independent live controls and separate Live and Recorded VOD folder trees, including per-creator watched VOD inboxes, output clips, processed originals, and failed archives.
@@ -19,15 +19,14 @@
 - Kept manual upload pages as a fallback; users still attach the local file and press Publish themselves.
 - Changed profanity handling so the original, uncensored transcript is used for viral-moment scoring. Optional censoring only changes rendered audio, captions, and generated post copy; it never rejects a clip or blocks publishing.
 - Clarified that no API key is required for local capture, local transcription, or rendering. Zernio credentials are only needed for direct publishing; hosted AI credentials are only needed when the user selects a hosted provider.
+- Corrected package metadata to identify the proprietary non-commercial licence rather than MIT.
 - Kept the current stable app version at 3.0.0 until the 4.0 installer and release are ready.
 
 ### Verification
-- Installed Windows app runtime: 127 regression tests passed; all Python modules and test modules compiled successfully.
+- Windows source environment (Python 3.11.9): 127 regression tests passed; all Python modules and test modules compiled successfully.
 - Verified the embedded app JavaScript and GitHub Pages JavaScript with Node syntax checks; parsed the landing page and checked for duplicate IDs and broken in-page anchors.
-- Ran a local end-to-end smoke test with the installed faster-whisper small model on CUDA, synthetic speech, FFmpeg clip rendering, subtitles, and TXT metadata sidecars.
-- Verified the saved Zernio credential with a read-only connected-account request; two connected accounts were returned. No public or scheduled post was created during testing.
-- The saved Gemini key is accepted, but both the selected Gemini 3.1 Flash Lite model and the recommended Gemini 3.8 Flash model returned HTTP 503 high-demand responses. The old gemini-2.5-flash fallback is retired.
-- The saved Hugging Face token was rejected for inference because it lacks Inference Providers access. Ollama was not running on this PC during the check.
+- Ran a local end-to-end smoke test with faster-whisper base on CUDA, synthetic speech, FFmpeg clip rendering, subtitles, and TXT metadata sidecars.
+- Exercised the read-only Zernio connected-account check. No public or scheduled post was created during testing.
 
 ## [3.0.0] - 2026-11-22
 

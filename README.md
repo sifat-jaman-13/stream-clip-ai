@@ -30,9 +30,9 @@ The development integration supports connected Zernio social accounts for Instag
 
 ### Live monitor comes first
 
-- Keep the primary live-capture controls at the top of the workspace.
+- Keep a simple single-source Start/Stop capture control at the very top of the workspace.
 - Add multiple creators and control each one independently.
-- Each creator has their own Start Live and Stop Live controls.
+- Each creator has their own Start Live and Stop Live controls, just like the single-source workflow.
 - Monitor stream state and processing status without stopping other creators.
 - Capture up to two live sources concurrently by default; transcription, AI analysis, and rendering share a resource-controlled processing queue.
 

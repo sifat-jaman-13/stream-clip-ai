@@ -17,7 +17,7 @@
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sifat-jaman-13/stream-clip-ai?display_name=tag&sort=semver"></a>
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe"><img alt="Windows installer" src="https://img.shields.io/badge/download-Windows%20installer-7c3aed?logo=windows"></a>
   <a href="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-22c55e"></a>
+  <a href="LICENSE"><img alt="GPL-3.0-only License" src="https://img.shields.io/badge/license-GPL--3.0--only-blue"></a>
   <img alt="Python 3.10–3.12" src="https://img.shields.io/badge/python-3.10%20to%203.12-3776ab?logo=python&logoColor=white">
 </p>
 
@@ -375,4 +375,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change and [SECURITY.m
 
 ## License
 
-StreamSnip AI is available under the [MIT License](LICENSE).
+StreamSnip AI is available under the [GNU General Public License v3.0 only](LICENSE) (GPL-3.0-only).

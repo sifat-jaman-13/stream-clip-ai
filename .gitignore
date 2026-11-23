@@ -28,6 +28,9 @@ custom_words.txt
 zernio.json
 publishing.json
 ai_settings.json
+posted.json
+creators.json
+creators/
 data/
 .autoclip.lock
 

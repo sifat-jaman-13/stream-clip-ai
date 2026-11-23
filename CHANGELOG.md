@@ -12,6 +12,9 @@
 - Added stable-file detection before a watched VOD is processed, preventing files that are still copying from being opened.
 - Added a shared resource-controlled processing queue while allowing up to two stream captures concurrently.
 - Unified the clip gallery across local, per-creator Live, and per-creator Recorded VOD outputs, with source labels and shared preview, download, delete, and direct-publish actions.
+- Added automatic cleanup of temporary live recording chunks after successful clip rendering or a completed no-clip analysis. If all clip renders fail, the source recording is retained for retry; manually supplied VOD originals are never removed by this cleanup.
+- Added a persistent Posted tab backed by a local registry. Immediate Zernio posts and opt-in auto-post successes move automatically; manual platform uploads can be marked posted by the creator. Scheduled posts are not marked as posted prematurely.
+- Added per-clip delete, select-all across the entire current tab, delete-selected, and delete-all-current-tab actions for both Clips and Posted.
 - Rewrote the README and updated the GitHub Pages site to announce the 4.0 roadmap, local-first credential requirements, creator workflow, and licence.
 
 ### Changed
@@ -23,10 +26,11 @@
 - Kept the current stable app version at 3.0.0 until the 4.0 installer and release are ready.
 
 ### Verification
-- Windows source environment (Python 3.11.9): 127 regression tests passed; all Python modules and test modules compiled successfully.
-- Verified the embedded app JavaScript and GitHub Pages JavaScript with Node syntax checks; parsed the landing page and checked for duplicate IDs and broken in-page anchors.
-- Ran a local end-to-end smoke test with faster-whisper base on CUDA, synthetic speech, FFmpeg clip rendering, subtitles, and TXT metadata sidecars.
-- Exercised the read-only Zernio connected-account check. No public or scheduled post was created during testing.
+- Windows PC: 133 tests passed in both unittest and pytest; one unrelated AnyIO / pytest deprecation warning remains.
+- Compiled all application and test Python modules using the installed StreamSnip runtime.
+- Verified embedded app and GitHub Pages JavaScript with Node syntax checks; parsed the landing page and confirmed there are no duplicate IDs or broken in-page anchors.
+- Added regression coverage for live recording cleanup, retaining sources after render failures, persistent Posted state, and immediate-versus-scheduled Zernio posting callbacks.
+- No real social post was created during this test run. A real live capture and long-duration VOD session still need a user-session acceptance test.
 
 ## [3.0.0] - 2026-11-22
 

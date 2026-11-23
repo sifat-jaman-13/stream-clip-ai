@@ -28,8 +28,9 @@ def _truthy(value):
 class ZernioPublisher:
     """Uploads and publishes clips in background threads when explicitly enabled."""
 
-    def __init__(self, log, config=None):
+    def __init__(self, log, config=None, on_success=None):
         self.log = log
+        self.on_success = on_success
         self.configure(config or {})
 
     def configure(self, config):
@@ -226,6 +227,11 @@ class ZernioPublisher:
             targets = ", ".join(p["platform"] for p in platforms)
             suffix = f" ({self.schedule_minutes} min delay)" if self.schedule_minutes else ""
             self.log(f"Zernio: {path.name} {state} to {targets}{suffix}.")
+            if not self.schedule_minutes and callable(self.on_success):
+                try:
+                    self.on_success(path)
+                except Exception as callback_error:
+                    self.log(f"Zernio Posted status update failed for {path.name}: {callback_error}")
         except Exception as e:
             self.log(f"Zernio error for {path.name}: {e}")
             if raise_errors:

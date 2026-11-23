@@ -23,6 +23,8 @@ The 4.0 update is focused on making StreamSnip a creator operations workspace, n
 - Choose connected accounts and platforms for each post.
 - Edit the title, description, and hashtags before publishing.
 - See upload progress and failures in the app.
+- Successful immediate Zernio posts move automatically into a persistent **Posted** tab; after manual uploads, click **Mark as posted** to move the clip there.
+- Delete a clip individually, delete selected clips, or delete everything in the current Clips / Posted tab after confirmation.
 - Keep manual upload links as a fallback when a creator prefers native platform publishing.
 - Auto-post remains opt-in. It is off by default.
 
@@ -35,6 +37,7 @@ The development integration supports connected Zernio social accounts for Instag
 - Each creator has their own Start Live and Stop Live controls, just like the single-source workflow.
 - Monitor stream state and processing status without stopping other creators.
 - Capture up to two live sources concurrently by default; transcription, AI analysis, and rendering share a resource-controlled processing queue.
+- Temporary live recording chunks are automatically deleted after a completed analysis when clips were rendered or no worthwhile moment was found. If every render fails, the source is kept for retry.
 
 ### Live and recorded VODs never mix
 
@@ -78,6 +81,8 @@ The optional censor can mute detected words and mask captions or generated post 
 - Generate transcript-grounded titles, descriptions, and hashtags.
 - Review and play clips before sharing; the main gallery includes local clips plus each creator's Live and Recorded VOD clips.
 - Publish any gallery clip directly through Zernio when connected, or open native upload pages and copy post text manually.
+- Track successfully posted clips in a persistent Posted tab, separate from clips still waiting for review or publishing.
+- Delete individual clips, selected batches, or all clips in the current tab.
 - Keep recordings, clips, AI settings, and credentials in local folders.
 
 ## API keys and privacy

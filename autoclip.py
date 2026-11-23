@@ -290,6 +290,7 @@ CUSTOM_FILE = _data_root / "custom_words.txt"
 ZERNIO_FILE = _data_root / "zernio.json"
 PUBLISHING_FILE = _data_root / "publishing.json"
 AI_SETTINGS_FILE = _data_root / "ai_settings.json"
+POSTED_FILE = _data_root / "posted.json"
 INSTANCE_LOCK_FILE = _data_root / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
 STORAGE_PATH_WARNING = ""
@@ -705,6 +706,40 @@ def load_publishing_settings():
 
 def save_publishing_settings(cfg):
     atomic_json_write(PUBLISHING_FILE, cfg)
+
+def load_posted_registry():
+    try:
+        raw = json.loads(POSTED_FILE.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+def save_posted_registry(registry):
+    atomic_json_write(POSTED_FILE, registry)
+
+def mark_clip_posted(name, platform="manual", accounts=None):
+    path = find_clip_path(name)
+    if not path:
+        raise ValueError("Clip not found.")
+    registry = load_posted_registry()
+    registry[name] = {
+        "posted_at": time.time(), "platform": str(platform or "manual")[:40],
+        "accounts": [str(x)[:100] for x in (accounts or [])][:20],
+    }
+    save_posted_registry(registry)
+    invalidate_clip_cache()
+    return registry[name]
+
+def forget_posted_clips(names):
+    registry = load_posted_registry()
+    changed = False
+    for name in names:
+        if name in registry:
+            registry.pop(name, None)
+            changed = True
+    if changed:
+        save_posted_registry(registry)
+    invalidate_clip_cache()
 
 def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
@@ -1826,12 +1861,7 @@ class Engine:
             self.log("WARNING: no speech was transcribed - check the speech model / GPU messages above.")
         if not peaks:
             self.log("Chunk too short or silent - nothing to clip.")
-            if pth.parent == self.rec_dir:
-                try:
-                    pth.unlink()
-                    self.log(f"Deleted {pth.name}: processing produced no clips.")
-                except OSError as exc:
-                    self.log(f"Could not delete {pth.name}: {exc}")
+        rendered_count = 0
         stamp = time.strftime("%H%M%S")
         for i, (p, sc) in enumerate(peaks, 1):
             self.check()
@@ -1846,6 +1876,7 @@ class Engine:
                         int((i - 1) / max(1, len(peaks)) * 100))
             try:
                 self.render(path, start, end, words, name)
+                rendered_count += 1
                 self.status(f"Rendered clip {i} of {len(peaks)}.", "rendering",
                             int(i / max(1, len(peaks)) * 100))
             except FileBusyError as e:
@@ -1853,9 +1884,16 @@ class Engine:
             except Exception as e:
                 self.log(f"Render error: {e}")
         self.emit("chunk", "")
-        if self.cfg["delete_rec"] and pth.parent == self.rec_dir:
-            try: pth.unlink()
-            except Exception: pass
+        # Live capture chunks are temporary working files, not user-owned VODs.
+        # Free disk space after a completed analysis that produced clips or no worthwhile moments.
+        # Keep the source if every render failed so the user can retry it.
+        if self.cfg.get("mode", "live") == "live" and pth.parent == self.rec_dir and (not peaks or rendered_count > 0):
+            try:
+                pth.unlink(missing_ok=True)
+                reason = "no worthwhile clips" if not peaks else f"{rendered_count} clip(s) rendered"
+                self.log(f"Deleted temporary live recording {pth.name} after processing ({reason}).")
+            except OSError as exc:
+                self.log(f"Could not delete temporary live recording {pth.name}: {exc}")
 
     # ---- live
     def wait_live(self, url):
@@ -2487,7 +2525,11 @@ class Core:
         if enabled is None:
             enabled = bool(self._config_for().get("auto_post", False))
         cfg = dict(self._config_for(), enabled=enabled)
-        return ZernioPublisher(self.push, cfg) if ZERNIO_AVAILABLE else None
+        return ZernioPublisher(
+            self.push, cfg,
+            on_success=lambda path: mark_clip_posted(path.name, "zernio", list(cfg.get("accounts", {}).keys()) or
+                                                     [key for key in ("instagram", "youtube") if cfg.get(key + "_id")]),
+        ) if ZERNIO_AVAILABLE else None
 
     def _provider_status(self, provider):
         cfg = self._config_for()
@@ -2577,9 +2619,11 @@ class Core:
                 self.push("Stopping now." if (force or self.engine.cfg["mode"] != "live")
                           else "Stopping the recording - finishing the clips already captured.")
 
-    def state(self, since, clip_offset=0):
-        clips = list_clips(offset=clip_offset)
-        clip_total = len(_clip_index())
+    def state(self, since, clip_offset=0, clip_tab="clips"):
+        clips = list_clips(offset=clip_offset, clip_tab=clip_tab)
+        clip_total = len(list_clips(limit=1_000_000, clip_tab=clip_tab))
+        posted_registry = load_posted_registry()
+        posted_total = sum(1 for item in _clip_index() if item["name"] in posted_registry)
         with self.lock:
             s = self.session
             el = int((s["ended"] or time.time()) - s["started"]) if s["started"] else 0
@@ -2597,6 +2641,7 @@ class Core:
                 "session": {"clips": s["clips"], "chunks": s["chunks"], "elapsed": el},
                 "clips": clips,
                 "clip_total": clip_total,
+                "posted_total": posted_total,
             }
 
     def stop_file_holder(self, name, pid):
@@ -2739,6 +2784,8 @@ class Core:
                 for index, name in enumerate(valid):
                     try:
                         publisher = self._make_publisher(provider, False)
+                        if publisher:
+                            publisher.on_success = lambda path: mark_clip_posted(path.name, "zernio", list(selected_accounts.keys()))
                         delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
                         with self.lock: self.posting["current"] = name
                         self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
@@ -2847,8 +2894,15 @@ def split_clip_post_copy(text):
     return parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
 
 
-def list_clips(limit=60, offset=0):
-    items = [dict(item) for item in _clip_index()[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]]
+def list_clips(limit=60, offset=0, clip_tab="clips"):
+    posted = load_posted_registry()
+    indexed = _clip_index()
+    if clip_tab == "posted":
+        indexed = [item for item in indexed if item["name"] in posted]
+        indexed.sort(key=lambda item: float(posted[item["name"]].get("posted_at", item["mtime"])), reverse=True)
+    else:
+        indexed = [item for item in indexed if item["name"] not in posted]
+    items = [dict(item) for item in indexed[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]]
     for item in items:
         clip_path = pathlib.Path(item.pop("_path"))
         try:
@@ -2856,6 +2910,8 @@ def list_clips(limit=60, offset=0):
         except Exception:
             item["caption"] = ""
         item["title"], item["description"] = split_clip_post_copy(item["caption"])
+        item["posted"] = item["name"] in posted
+        item["posted_at"] = posted.get(item["name"], {}).get("posted_at")
     return items
 
 def reveal(path):
@@ -3059,6 +3115,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         "ai": public_ai_settings()}
                 html = HTML.replace("__BOOT__", json.dumps(boot).replace("</", "<\\/")).replace("__TOKEN__", TOKEN).replace("__APP_VERSION__", APP_VERSION)
                 return self._send(200, html, "text/html; charset=utf-8")
+            if path == "/api/clips/names":
+                q = urllib.parse.parse_qs(u.query)
+                tab = q.get("tab", ["clips"])[0]
+                if tab not in {"clips", "posted"}: tab = "clips"
+                registry = load_posted_registry()
+                names = [item["name"] for item in _clip_index()
+                         if (item["name"] in registry) == (tab == "posted")]
+                return self._send(200, {"names": names})
             if path == "/api/creators":
                 return self._send(200, {"creators": CORE.list_creators()})
             if path == "/api/state":
@@ -3067,7 +3131,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 except ValueError: since = 0
                 try: clip_offset = max(0, int(q.get("clip_offset", ["0"])[0]))
                 except ValueError: clip_offset = 0
-                return self._send(200, CORE.state(since, clip_offset))
+                clip_tab = q.get("clip_tab", ["clips"])[0]
+                if clip_tab not in {"clips", "posted"}: clip_tab = "clips"
+                return self._send(200, CORE.state(since, clip_offset, clip_tab))
             if path == "/api/log/download":
                 if not RUNTIME_LOG.is_file():
                     return self._send(200, b"", "text/plain; charset=utf-8")
@@ -3156,7 +3222,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/publishing/publish":
                     names = body.get("names", [])
                     if body.get("all"):
-                        names = [item["name"] for item in _clip_index()]
+                        posted_names = load_posted_registry()
+                        names = [item["name"] for item in _clip_index()
+                                 if item["name"] not in posted_names]
                     elif not isinstance(names, list): names = []
                     return self._send(200, CORE.publish_clips([str(n) for n in names],
                                                                account_ids=body.get("account_ids")))
@@ -3181,6 +3249,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     cancel_window_close_shutdown(); return self._send(200, {"ok": True})
                 if path == "/api/window/closing":
                     schedule_window_close_shutdown(); return self._send(200, {"ok": True})
+                if path == "/api/delete_all":
+                    tab = str(body.get("clip_tab", "clips"))
+                    if tab not in {"clips", "posted"}: tab = "clips"
+                    registry = load_posted_registry()
+                    names = [item["name"] for item in _clip_index()
+                             if (item["name"] in registry) == (tab == "posted")]
+                    deleted = []
+                    for name in names:
+                        clip_path = find_clip_path(name)
+                        if not clip_path: continue
+                        for target in (clip_path, clip_path.with_suffix(".txt")):
+                            target.unlink(missing_ok=True)
+                        deleted.append(name)
+                    forget_posted_clips(deleted)
+                    return self._send(200, {"ok": True, "deleted": len(deleted)})
                 if path == "/api/delete_many":
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
@@ -3199,6 +3282,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     CORE.push_file_lock(details)
                                     raise RuntimeError(details["message"]) from exc
                                 raise
+                    forget_posted_clips(valid)
                     return self._send(200, {"ok": True, "deleted": len(valid)})
                 if path in ("/api/delete", "/api/reveal"):
                     name = str(body.get("name", ""))
@@ -3217,7 +3301,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     CORE.push_file_lock(details)
                                     raise RuntimeError(details["message"]) from exc
                                 raise
+                    if path == "/api/delete":
+                        forget_posted_clips([name])
                     return self._send(200, {"ok": True})
+                if path == "/api/posted/mark":
+                    name = str(body.get("name", ""))
+                    posted = mark_clip_posted(name, body.get("platform", "manual"), body.get("accounts", []))
+                    return self._send(200, {"ok": True, "posted": posted})
                 if path == "/api/open_folder":
                     open_folder(OUT); return self._send(200, {"ok": True})
                 if path == "/api/frame":
@@ -3381,7 +3471,7 @@ header{display:flex;align-items:center;gap:14px;padding:16px 22px}
 .text::placeholder{color:var(--mute)}
 .hint{color:var(--mute);font-size:12px;margin-top:9px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:12px;font-weight:600;transition:.15s;white-space:nowrap}
-.btn.ghost{background:var(--card2);border:1px solid var(--line)}
+.btn.ghost{background:var(--card2);border:1px solid var(--line)}.prow .btn.on{border-color:var(--a1);color:var(--a1)}
 .btn.ghost:hover{background:rgba(255,255,255,.11);border-color:var(--line2)}
 .btn.lock-stop{font-size:11px;padding:4px 9px;margin:5px 0 2px 8px;border-color:rgba(248,113,113,.45);color:#ffd7db}
 .btn.danger{background:#dc4452;color:#fff}.btn.danger:hover{background:#ec5a68}
@@ -3692,7 +3782,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <input id="transcriber-language" class="text" type="text" value="auto" maxlength="20" placeholder="auto">
       <p class="hint">No StreamSnip API key is needed. Use your own local executable or script. Placeholders: {input}, {output}, {language}. Return JSON to {output} or stdout with timestamped words: {"words":[{"start":0.1,"end":0.5,"word":"hello"}]}. Segment JSON with start/end/text is also accepted. Your own transcriber handles any credentials it needs. Do not paste secrets in this command field; use environment variables or its secure local config.</p>
     </div>
-    <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
+    <p class="hint">Temporary live recordings are automatically deleted after clips render or when no worthwhile moments are found. Original VOD files are kept and archived.</p>
     <div class="row"><label>Tag / credit</label></div>
     <input id="streamer-tag" class="text" type="text" maxlength="80" placeholder="Auto-detect from stream URL">
     <p class="hint">Leave blank to tag the Twitch or YouTube handle from the source URL. Enter a value to override it.</p>
@@ -3756,7 +3846,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   </div>
   <div class="panel" id="p-clips">
     <div class="post-progress" id="post-progress" hidden><div class="progress-meta"><span id="post-label">Preparing uploads...</span><span><span id="post-value">0%</span> · <span id="post-time">0:00</span></span></div><div class="progress-track"><div class="progress-fill" id="post-fill"></div></div></div>
-    <div class="prow" style="justify-content:flex-end;margin-bottom:10px"><button class="btn ghost" id="btn-select-all">Select all</button><button class="btn ghost" id="btn-publish-selected">Publish selected (0)</button><button class="btn danger" id="btn-delete-selected">Delete selected (0)</button><button class="btn danger" id="btn-publish-all">Publish all clips</button></div>
+    <div class="prow" style="justify-content:space-between;margin-bottom:10px"><div class="prow"><button class="btn ghost on" id="btn-view-clips">Clips</button><button class="btn ghost" id="btn-view-posted">Posted</button></div><div class="prow"><button class="btn ghost" id="btn-select-all">Select all</button><button class="btn ghost" id="btn-publish-selected">Publish selected (0)</button><button class="btn danger" id="btn-delete-selected">Delete selected (0)</button><button class="btn danger" id="btn-delete-all">Delete all</button><button class="btn danger" id="btn-publish-all">Publish all clips</button></div></div>
     <div class="grid" id="grid"></div>
     <div class="prow" id="clip-pages" style="justify-content:center;margin-top:12px"><button class="btn ghost" id="btn-clips-newer">Newer</button><span class="hint" id="clip-page-label"></span><button class="btn ghost" id="btn-clips-older">Older</button></div>
     <div class="empty" id="empty"><div class="big"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h4>No clips yet</h4><p>Paste a Twitch or YouTube live link (or choose a VOD file) and hit Start. Finished 9:16 clips with captions appear here, ready to post.</p></div>
@@ -3803,7 +3893,7 @@ const P=Object.assign({provider:"zernio",providers:{}},BOOT.publishing||{});
 let activeProvider="zernio";
 let Z=Object.assign({},(P.providers&&P.providers[activeProvider])||{});
 let accountsLoadedFor="";
-let clipOffset=0;
+let clipOffset=0,clipTab="clips",tabClipNames=[];
 const CLIP_PAGE_SIZE=60;
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
 const ICON={
@@ -4030,7 +4120,7 @@ $("#transcriber-language").addEventListener("change",e=>{S.transcriber_language=
 updateTranscriberFields();
 $("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}function resetCropForFormat(){const r=({"9:16":9/16,"16:9":16/9,"1:1":1,"4:5":4/5}[S.output_format]||9/16),w=Math.min(100,100*r/(16/9));S.crop_w=+w.toFixed(1);S.crop_h=100;S.crop_x=+( (100-w)/2 ).toFixed(1);S.crop_y=0}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;resetCropForFormat();updateFormatUI();preview();scheduleSave()});updateFormatUI();
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
-$("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
+// Temporary live capture cleanup is automatic; original VOD files are preserved.
 $("#show-tag-video").checked=!!S.show_tag_video;
 $("#show-tag-video").addEventListener("change",e=>{S.show_tag_video=e.target.checked;scheduleSave()});
 $("#t-sub-custom").checked=!!S.subtitle_custom;
@@ -4305,14 +4395,15 @@ function updateSelectedButton(){
   const count=selectedClips.size;
   const b=$("#btn-publish-selected");b.textContent="Publish selected ("+count+")";b.disabled=count===0;
   const d=$("#btn-delete-selected");d.textContent="Delete selected ("+count+")";d.disabled=count===0;
-  const all=cards.size>0&&count===cards.size;$("#btn-select-all").textContent=all?"Clear selection":"Select all";
+  const all=tabClipNames.length>0&&tabClipNames.every(name=>selectedClips.has(name));$("#btn-select-all").textContent=all?"Clear selection":"Select all";
 }
-function selectAllClips(){
-  const all=cards.size>0&&selectedClips.size===cards.size;
-  selectedClips.clear();
-  if(!all)for(const name of cards.keys())selectedClips.add(name);
-  cards.forEach(card=>{const pick=card.querySelector(".pick");if(pick)pick.checked=selectedClips.has(card.dataset.name)});
-  updateSelectedButton();
+async function selectAllClips(){
+  try{
+    const all=tabClipNames.length>0&&tabClipNames.every(name=>selectedClips.has(name));
+    if(all){selectedClips.clear()}else{tabClipNames.forEach(name=>selectedClips.add(name))}
+    cards.forEach(card=>{const pick=card.querySelector(".pick");if(pick)pick.checked=selectedClips.has(card.dataset.name)});
+    updateSelectedButton();
+  }catch(e){toast(e.message,"bad")}
 }
 function toggleClipSelection(name){
   if(selectedClips.has(name))selectedClips.delete(name);else selectedClips.add(name);
@@ -4422,6 +4513,7 @@ function openSocialPost(c){
     else toast("Opened "+opened+" platform page(s). Upload the clip, copy its title/description, and publish.","ok");
     close();
   }},"Open selected platforms");
+  const markPosted=h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/posted/mark",{name:c.name,platform:"manual"});toast("Moved to Posted","ok");close();selectedClips.delete(c.name);order="";poll(true)}catch(e){toast(e.message,"bad")}}},"Mark as posted");
   const cancel=h("button",{class:"btn ghost",onclick:close},"Cancel");
   overlay.append(h("div",{class:"post-dialog"},
     h("h3",{},"Prepare social post"),
@@ -4436,7 +4528,7 @@ function openSocialPost(c){
     h("label",{},"Manual upload fallback"),
     manualChoices,
     h("p",{class:"post-note"},"Manual upload opens the selected native upload pages. Download the clip, attach it yourself, and paste the copied title and description; platform security prevents silent form filling or local-file attachment."),
-    h("div",{class:"prow",style:"justify-content:flex-end"},cancel,h("a",{class:"btn ghost",href:"/clips/"+encodeURIComponent(c.name),download:c.name},"Download clip"),copyTitle,copyDescription,publish,open)
+    h("div",{class:"prow",style:"justify-content:flex-end"},cancel,h("a",{class:"btn ghost",href:"/clips/"+encodeURIComponent(c.name),download:c.name},"Download clip"),copyTitle,copyDescription,markPosted,publish,open)
   ));
   document.body.append(overlay);
   document.addEventListener("keydown",onKey);
@@ -4446,7 +4538,7 @@ function clipCard(c){
   const first=(c.caption||"").split("\n")[0]||c.name;
   const when=h("span",{class:"when","data-t":c.mtime},ago(c.mtime));
   const origin=c.creator_name?c.creator_name+" · "+(c.source==="vod"?"Recorded VOD":"Live"):"Local recording";
-  const pick=h("input",{class:"pick",type:"checkbox",title:"Select this clip for publishing"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>{pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);updateSelectedButton()};
+  const pick=h("input",{class:"pick",type:"checkbox",title:"Select this clip"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>{pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);updateSelectedButton()};
   const copy=()=>{navigator.clipboard.writeText(c.caption||"").then(()=>toast("Caption copied","ok"),()=>toast("Couldn't copy","bad"))};
   const post=()=>openSocialPost(c);
   const del=async()=>{if(await confirmBox("Delete this clip?","This permanently removes the video and its caption file.","Delete")){try{await api("/api/delete",{name:c.name});toast("Clip deleted");poll(true)}catch(e){toast(e.message,"bad")}}};
@@ -4456,16 +4548,21 @@ function clipCard(c){
       h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB · "+origin),
         h("span",{class:"acts"},
           h("button",{class:"ib post",title:"Prepare a post for Instagram, TikTok, Facebook, or YouTube",onclick:post},"Post"),
+          ...(!c.posted?[h("button",{class:"ib",title:"Move this clip to Posted after you publish it manually",onclick:async()=>{try{await api("/api/posted/mark",{name:c.name,platform:"manual"});selectedClips.delete(c.name);toast("Moved to Posted","ok");order="";poll(true)}catch(e){toast(e.message,"bad")}}},"Mark posted")]:[]),
           h("button",{class:"ib",title:"Copy caption + hashtags",onclick:copy},ico("copy",15)),
           h("a",{class:"ib",title:"Download",href:"/clips/"+encodeURIComponent(c.name),download:c.name},ico("download",15)),
           h("button",{class:"ib",title:"Show in folder",onclick:()=>api("/api/reveal",{name:c.name}).catch(e=>toast(e.message,"bad"))},ico("folder",15)),
           h("button",{class:"ib del",title:"Delete",onclick:del},ico("trash",15))))));
 }
 function renderClips(list,total=0){
+  $("#btn-publish-all").hidden=clipTab==="posted";
+
   if(!list.length&&clipOffset>0){clipOffset=Math.max(0,clipOffset-CLIP_PAGE_SIZE);return}
   const sig=list.map(c=>c.name).join("|");
   $("#empty").hidden=list.length>0;$("#grid").hidden=list.length===0;
   const cnt=$("#cnt");cnt.hidden=!list.length;cnt.textContent=list.length;
+  $("#empty h4").textContent=clipTab==="posted"?"No posted clips yet":"No clips yet";
+  $("#empty p").textContent=clipTab==="posted"?"Clips appear here after a successful Zernio post or when you mark a manual upload as posted.":"Paste a Twitch or YouTube live link (or choose a video file) and hit Start. Finished clips appear here, ready to review and post.";
   $("#clip-page-label").textContent=list.length?`${clipOffset+1}-${clipOffset+list.length} of ${total} clips`:"0 clips";
   $("#btn-clips-newer").disabled=clipOffset===0;
   $("#btn-clips-older").disabled=clipOffset+list.length>=total;
@@ -4487,12 +4584,15 @@ async function publishNames(names){
 }
 $("#btn-publish-selected").onclick=()=>publishNames([...selectedClips]);
 $("#btn-select-all").onclick=selectAllClips;
+$("#btn-view-clips").onclick=()=>{clipTab="clips";clipOffset=0;selectedClips.clear();order="";$("#btn-view-clips").classList.add("on");$("#btn-view-posted").classList.remove("on");poll(true)};
+$("#btn-view-posted").onclick=()=>{clipTab="posted";clipOffset=0;selectedClips.clear();order="";$("#btn-view-posted").classList.add("on");$("#btn-view-clips").classList.remove("on");poll(true)};
+$("#btn-delete-all").onclick=async()=>{const count=tabClipNames.length;if(!count){toast("Nothing to delete in this tab","bad");return}if(!(await confirmBox("Delete all "+(clipTab==="posted"?"posted":"unposted")+" clips?","This permanently removes all "+count+" video(s) and their caption files from this tab.","Delete all")))return;try{const r=await api("/api/delete_all",{clip_tab:clipTab});selectedClips.clear();toast("Deleted "+r.deleted+" clip(s)","ok");order="";poll(true)}catch(e){toast(e.message,"bad")}};
 $("#btn-delete-selected").onclick=async()=>{
   const names=[...selectedClips];if(!names.length){toast("Select at least one clip first","bad");return}
   if(!(await confirmBox("Delete selected clips?","This permanently removes "+names.length+" video(s) and their caption files.","Delete")))return;
   try{const r=await api("/api/delete_many",{names});selectedClips.clear();toast("Deleted "+r.deleted+" clip(s)","ok");poll(true)}catch(e){toast(e.message,"bad")}
 };
-$("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This submits every finished clip in your clips folder to the connected Zernio accounts. This may publish many videos.","Publish all")))return;const accounts=Object.assign({},Z.accounts||{});if(!Object.keys(accounts).length){if(Z.instagram_id)accounts.instagram=Z.instagram_id;if(Z.youtube_id)accounts.youtube=Z.youtube_id}try{const r=await api("/api/publishing/publish",{all:true,account_ids:accounts});toast("Started uploading "+r.queued+" clip(s) to "+Object.keys(accounts).join(", "),"ok")}catch(e){toast(e.message,"bad")}};
+$("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This submits every unposted clip in the clips tab to the connected Zernio accounts. This may publish many videos.","Publish all")))return;const accounts=Object.assign({},Z.accounts||{});if(!Object.keys(accounts).length){if(Z.instagram_id)accounts.instagram=Z.instagram_id;if(Z.youtube_id)accounts.youtube=Z.youtube_id}try{const r=await api("/api/publishing/publish",{all:true,account_ids:accounts});toast("Started uploading "+r.queued+" clip(s) to "+Object.keys(accounts).join(", "),"ok")}catch(e){toast(e.message,"bad")}};
 $("#btn-clips-newer").onclick=()=>{clipOffset=Math.max(0,clipOffset-CLIP_PAGE_SIZE);poll()};
 $("#btn-clips-older").onclick=()=>{clipOffset+=CLIP_PAGE_SIZE;poll()};
 function openClip(c){
@@ -4511,7 +4611,9 @@ function openClip(c){
 async function poll(){
   if(busy)return;busy=true;
   try{
-    const r=await fetch("/api/state?since="+lastLog+"&clip_offset="+clipOffset,{cache:"no-store"});const s=await r.json();
+    const r=await fetch("/api/state?since="+lastLog+"&clip_offset="+clipOffset+"&clip_tab="+clipTab,{cache:"no-store"});const s=await r.json();
+    const namesResponse=await fetch("/api/clips/names?tab="+clipTab,{cache:"no-store"});const namesData=await namesResponse.json();tabClipNames=namesData.names||[];updateSelectedButton();
+    $("#btn-view-posted").textContent="Posted ("+(s.posted_total||0)+")";
     fails=0;$("#offline").hidden=true;
     if(!logPaused){lastLog=s.last_id;addLogs(s.logs)}updateRun(s);renderClips(s.clips,s.clip_total);
   }catch(e){if(++fails>=3)$("#offline").hidden=false}

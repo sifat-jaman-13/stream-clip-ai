@@ -24,6 +24,87 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(autoclip.split_clip_post_copy("Just a title"), ("Just a title", ""))
         self.assertEqual(autoclip.split_clip_post_copy(""), ("", ""))
 
+    def test_live_recording_is_deleted_after_rendered_clip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rec = root / "rec"
+            out = root / "out"
+            rec.mkdir()
+            out.mkdir()
+            recording = rec / "live_chunk.ts"
+            recording.write_bytes(b"temporary capture")
+            engine = object.__new__(autoclip.Engine)
+            engine.cfg = {"mode": "live", "min_score": 70, "pre": 2, "post": 2, "delete_rec": False}
+            engine.rec_dir, engine.out_dir = rec, out
+            engine.transcribe = lambda _path: [(4.0, 5.0, "hello")]
+            engine.find_peaks = lambda *_args: ([(5, 90.0)], 12)
+            engine.status = lambda *_args: None
+            engine.log = lambda *_args: None
+            engine.check = lambda: None
+            engine.render = lambda *_args: None
+            engine.emit = lambda *_args: None
+            engine._process(str(recording))
+            self.assertFalse(recording.exists())
+
+    def test_live_recording_is_deleted_when_no_clip_is_worthwhile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rec, out = root / "rec", root / "out"
+            rec.mkdir()
+            out.mkdir()
+            recording = rec / "quiet_chunk.ts"
+            recording.write_bytes(b"temporary capture")
+            engine = object.__new__(autoclip.Engine)
+            engine.cfg = {"mode": "live", "min_score": 70, "pre": 2, "post": 2, "delete_rec": False}
+            engine.rec_dir, engine.out_dir = rec, out
+            engine.transcribe = lambda _path: []
+            engine.find_peaks = lambda *_args: ([], 12)
+            engine.status = lambda *_args: None
+            engine.log = lambda *_args: None
+            engine.check = lambda: None
+            engine.emit = lambda *_args: None
+            engine._process(str(recording))
+            self.assertFalse(recording.exists())
+
+    def test_live_recording_is_kept_if_every_clip_render_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rec, out = root / "rec", root / "out"
+            rec.mkdir()
+            out.mkdir()
+            recording = rec / "retry_chunk.ts"
+            recording.write_bytes(b"temporary capture")
+            engine = object.__new__(autoclip.Engine)
+            engine.cfg = {"mode": "live", "min_score": 70, "pre": 2, "post": 2, "delete_rec": False}
+            engine.rec_dir, engine.out_dir = rec, out
+            engine.transcribe = lambda _path: [(4.0, 5.0, "hello")]
+            engine.find_peaks = lambda *_args: ([(5, 90.0)], 12)
+            engine.status = lambda *_args: None
+            engine.log = lambda *_args: None
+            engine.check = lambda: None
+            engine.render = lambda *_args: (_ for _ in ()).throw(RuntimeError("render failed"))
+            engine.emit = lambda *_args: None
+            engine._process(str(recording))
+            self.assertTrue(recording.exists())
+
+    def test_posted_registry_moves_clips_between_tabs_and_can_be_deleted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "out"
+            output.mkdir()
+            clip = output / "finished_clip.mp4"
+            clip.write_bytes(b"video")
+            with patch.object(autoclip, "OUT", output), patch.object(autoclip, "POSTED_FILE", root / "posted.json"), patch.object(autoclip, "CORE", None):
+                autoclip.invalidate_clip_cache()
+                self.assertEqual(len(autoclip.list_clips(clip_tab="clips")), 1)
+                autoclip.mark_clip_posted(clip.name, "manual")
+                self.assertEqual(autoclip.list_clips(clip_tab="clips"), [])
+                posted = autoclip.list_clips(clip_tab="posted")
+                self.assertEqual([item["name"] for item in posted], [clip.name])
+                self.assertEqual(posted[0]["posted"], True)
+                autoclip.forget_posted_clips([clip.name])
+                self.assertEqual(len(autoclip.list_clips(clip_tab="clips")), 1)
+
     def test_custom_openai_compatible_highlight_provider_uses_chat_completions(self):
         config = {
             "custom_api_base": "https://free-provider.example/v1",
@@ -829,6 +910,33 @@ class RegressionTests(unittest.TestCase):
         core.worker.join.assert_called_once_with(timeout=6)
         self.assertEqual(shutdown_children.call_count, 2)
         self.assertFalse(core.running)
+
+    def test_zernio_immediate_success_moves_clip_to_posted_callback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            video = Path(directory) / "clip.mp4"
+            video.write_bytes(b"video")
+            callback = MagicMock()
+            publisher = ZernioPublisher(lambda *_: None, {"api_key": "test", "enabled": True},
+                                        on_success=callback)
+            publisher.accounts_map = {"instagram": "account"}
+            publisher._upload = MagicMock(return_value="https://cdn.invalid/clip.mp4")
+            publisher._json_request = MagicMock(return_value={"data": {"post": {"status": "published"}}})
+            publisher._publish(video, raise_errors=True)
+            callback.assert_called_once_with(video)
+
+    def test_zernio_scheduled_post_does_not_claim_it_is_already_posted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            video = Path(directory) / "clip.mp4"
+            video.write_bytes(b"video")
+            callback = MagicMock()
+            publisher = ZernioPublisher(lambda *_: None, {"api_key": "test", "enabled": True},
+                                        on_success=callback)
+            publisher.accounts_map = {"instagram": "account"}
+            publisher.schedule_minutes = 10
+            publisher._upload = MagicMock(return_value="https://cdn.invalid/clip.mp4")
+            publisher._json_request = MagicMock(return_value={"data": {"post": {"status": "scheduled"}}})
+            publisher._publish(video, raise_errors=True)
+            callback.assert_not_called()
 
     def test_zernio_upload_streams_file_instead_of_reading_all_bytes(self):
         with tempfile.TemporaryDirectory() as directory:

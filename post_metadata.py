@@ -134,6 +134,33 @@ def _provider_response(prompt, config, log=lambda _message: None):
         }, timeout=150)
         return _extract_json(data.get("response", ""))
 
+    if provider == "custom":
+        base = str(config.get("custom_api_base", "")).strip().rstrip("/")
+        model = str(config.get("custom_api_model", "")).strip()
+        key = str(config.get("custom_api_key", "")).strip()
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise AIProviderError("Enter a valid HTTP or HTTPS API base URL.")
+        if not model:
+            raise AIProviderError("Enter the model name for your OpenAI-compatible API.")
+        url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = "Bearer " + key
+        if callable(log):
+            log(f"Generating clip metadata with custom OpenAI-compatible model {model}.")
+        data = _json_request(url, {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.35,
+            "max_tokens": 600,
+            "stream": False,
+        }, headers=headers, timeout=150)
+        try:
+            return _extract_json(data["choices"][0]["message"]["content"])
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AIProviderError("Custom API returned no social-copy response.") from exc
+
     if provider == "huggingface":
         token = str(config.get("huggingface_token", "")).strip()
         model = str(config.get("huggingface_model", "")).strip()
@@ -157,7 +184,7 @@ def _provider_response(prompt, config, log=lambda _message: None):
             ) from exc
         return _extract_json(raw)
 
-    raise AIProviderError("Select Gemini, Ollama, or Hugging Face to enable AI post copy.")
+    raise AIProviderError("Select Gemini, Ollama, Hugging Face, or a custom compatible API to enable AI post copy.")
 
 
 def _fallback_sentence_case(value):

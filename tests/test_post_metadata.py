@@ -26,6 +26,32 @@ class PostMetadataTests(unittest.TestCase):
             ]}}]
         }
 
+    def test_custom_openai_compatible_provider_generates_social_copy(self):
+        config = {
+            "provider": "custom",
+            "custom_api_base": "https://free-provider.example/v1",
+            "custom_api_model": "free-chat-model",
+            "custom_api_key": "custom-secret",
+        }
+        response = {"choices": [{"message": {"content": json.dumps(self.valid_response)}}]}
+        with patch.object(post_metadata, "_json_request", return_value=response) as request:
+            result = post_metadata.generate_social_copy(self.transcript, "@creator", config)
+        self.assertEqual(result["title"], self.valid_response["title"])
+        self.assertEqual(result["provider"], "custom")
+        self.assertEqual(request.call_args.args[0], "https://free-provider.example/v1/chat/completions")
+        self.assertEqual(request.call_args.kwargs["headers"]["Authorization"], "Bearer custom-secret")
+
+    def test_custom_openai_compatible_provider_accepts_local_endpoint_without_key(self):
+        config = {
+            "provider": "custom",
+            "custom_api_base": "http://127.0.0.1:8080/v1",
+            "custom_api_model": "local-model",
+        }
+        response = {"choices": [{"message": {"content": json.dumps(self.valid_response)}}]}
+        with patch.object(post_metadata, "_json_request", return_value=response) as request:
+            post_metadata.generate_social_copy(self.transcript, "", config)
+        self.assertNotIn("Authorization", request.call_args.kwargs["headers"])
+
     def test_gemini_31_flash_lite_remains_the_default_free_model(self):
         self.assertEqual(ai_highlights.DEFAULT_GEMINI_MODEL, "gemini-3.8-flash")
         self.assertEqual(post_metadata.DEFAULT_GEMINI_COPY_MODEL, "gemini-3.1-flash-lite")

@@ -368,6 +368,42 @@ def _huggingface(prompt, config):
         raise AIProviderError("Hugging Face returned no highlight response.") from exc
 
 
+def _openai_compatible(prompt, config):
+    """Call any user-configured OpenAI-compatible chat-completions endpoint."""
+    base = str(config.get("custom_api_base", "")).strip().rstrip("/")
+    model = str(config.get("custom_api_model", "")).strip()
+    key = str(config.get("custom_api_key", "")).strip()
+    parsed = urllib.parse.urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise AIProviderError("Enter a valid HTTP or HTTPS API base URL.")
+    if not model:
+        raise AIProviderError("Enter the model name for your OpenAI-compatible API.")
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    report = config.get("_ai_log")
+    if callable(report):
+        start, end = config.get("_ai_window", (0, 0))
+        report(f"Running custom OpenAI-compatible model {model} for transcript window {int(start)}–{int(end)}s.")
+    data = _json_request(url, {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "stream": False,
+    }, headers=headers, timeout=150)
+    try:
+        raw = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise AIProviderError("Custom API returned no chat-completions content.") from exc
+    result = _extract_json(raw)
+    if callable(report):
+        start, end = config.get("_ai_window", (0, 0))
+        count = len(result.get("moments", [])) if isinstance(result, dict) and isinstance(result.get("moments", []), list) else 0
+        report(f"Custom OpenAI-compatible model {model} analyzed transcript window {int(start)}–{int(end)}s and returned {count} moments.")
+    return result
+
+
 def test_provider(provider, config):
     """Make a minimal authenticated request and return a secret-free status."""
     if provider == "hooks":
@@ -474,6 +510,34 @@ def test_provider(provider, config):
             raise AIProviderError("Hugging Face accepted the token but returned an empty test response.")
         return {"ok": True, "provider": "huggingface", "model": model,
                 "message": f"Hugging Face token works. Inference succeeded with {model}."}
+    if provider == "custom":
+        base = str(config.get("custom_api_base", "")).strip().rstrip("/")
+        model = str(config.get("custom_api_model", "")).strip()
+        key = str(config.get("custom_api_key", "")).strip()
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise AIProviderError("Enter a valid HTTP or HTTPS API base URL.")
+        if not model:
+            raise AIProviderError("Enter the model name for your OpenAI-compatible API.")
+        url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = "Bearer " + key
+        try:
+            data = _json_request(url, {
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply with exactly STREAMSNIP_OK."}],
+                "temperature": 0,
+                "max_tokens": 32,
+                "stream": False,
+            }, headers=headers, timeout=90)
+            response = str(data["choices"][0]["message"]["content"]).strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AIProviderError("Custom API returned no chat-completions response.") from exc
+        if not response:
+            raise AIProviderError("Custom API returned an empty test response.")
+        return {"ok": True, "provider": "custom", "model": model,
+                "message": f"Custom OpenAI-compatible API works. Model {model} responded."}
     raise AIProviderError("Unknown highlight provider.")
 
 
@@ -497,10 +561,11 @@ def _call_backend(backend, prompt, config, cancelled):
 
 
 def select_moments(provider, words, duration, config, log=lambda _message: None, cancelled=None):
-    """Analyze the full transcript in 5-minute windows; Gemini quota falls back to Ollama."""
+    """Analyze the full transcript in user-selected 3–15 minute windows."""
     if provider == "hooks":
         return None
-    backend = {"ollama": _ollama, "gemini": _gemini, "huggingface": _huggingface}.get(provider)
+    backend = {"ollama": _ollama, "gemini": _gemini, "huggingface": _huggingface,
+               "custom": _openai_compatible}.get(provider)
     if backend is None:
         raise AIProviderError("Unknown highlight provider.")
     if provider == "gemini":
@@ -514,7 +579,11 @@ def select_moments(provider, words, duration, config, log=lambda _message: None,
     active_provider = provider
     fell_back = False
     fallback_reason = ""
-    window_size = 300
+    try:
+        window_minutes = int(config.get("ai_window_minutes", 5))
+    except (TypeError, ValueError):
+        window_minutes = 5
+    window_size = max(180, min(900, window_minutes * 60))
     window_start = 0
     while window_start < duration:
         if cancelled and cancelled():

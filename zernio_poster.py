@@ -15,6 +15,10 @@ import urllib.request
 
 
 API_ROOT = "https://zernio.com/api/v1"
+SUPPORTED_SOCIAL_PLATFORMS = {
+    "twitter", "instagram", "facebook", "linkedin", "tiktok", "youtube",
+    "pinterest", "reddit", "bluesky", "threads", "googlebusiness",
+}
 
 
 def _truthy(value):
@@ -33,6 +37,17 @@ class ZernioPublisher:
         self.api_key = str(config.get("api_key", os.environ.get("ZERNIO_API_KEY", ""))).strip()
         self.instagram_id = str(config.get("instagram_id", os.environ.get("ZERNIO_INSTAGRAM_ACCOUNT_ID", ""))).strip()
         self.youtube_id = str(config.get("youtube_id", os.environ.get("ZERNIO_YOUTUBE_ACCOUNT_ID", ""))).strip()
+        configured_accounts = config.get("accounts", {})
+        self.accounts_map = {
+            str(platform).strip().lower(): str(account_id).strip()
+            for platform, account_id in configured_accounts.items()
+            if str(platform).strip().lower() in SUPPORTED_SOCIAL_PLATFORMS and str(account_id).strip()
+        } if isinstance(configured_accounts, dict) else {}
+        if not self.accounts_map:
+            if self.instagram_id:
+                self.accounts_map["instagram"] = self.instagram_id
+            if self.youtube_id:
+                self.accounts_map["youtube"] = self.youtube_id
         self.enabled = bool(config.get("enabled", _truthy(os.environ.get("ZERNIO_ENABLED"))))
         try:
             self.schedule_minutes = max(0, int(config.get("schedule_minutes", os.environ.get("ZERNIO_SCHEDULE_MINUTES", "0"))))
@@ -44,7 +59,7 @@ class ZernioPublisher:
 
     @property
     def configured(self):
-        return self.enabled and bool(self.api_key) and bool(self.instagram_id or self.youtube_id)
+        return self.enabled and bool(self.api_key) and bool(self.accounts_map)
 
     def submit(self, video_path):
         if not self.configured:
@@ -104,7 +119,7 @@ class ZernioPublisher:
             raise RuntimeError("Zernio returned an unexpected accounts response.")
         out = []
         for account in data:
-            if not isinstance(account, dict) or account.get("platform") not in ("instagram", "youtube"):
+            if not isinstance(account, dict) or account.get("platform") not in SUPPORTED_SOCIAL_PLATFORMS:
                 continue
             aid = account.get("accountId") or account.get("id") or account.get("_id")
             if aid:
@@ -140,41 +155,59 @@ class ZernioPublisher:
             video.close()
         return public_url
 
-    def publish_one(self, path, instagram_id=None, youtube_id=None, schedule_minutes=None):
-        old = (self.instagram_id, self.youtube_id, self.schedule_minutes)
-        self.instagram_id = (instagram_id if instagram_id is not None else self.instagram_id).strip()
-        self.youtube_id = (youtube_id if youtube_id is not None else self.youtube_id).strip()
+    def publish_one(self, path, instagram_id=None, youtube_id=None, schedule_minutes=None,
+                    accounts=None, caption_override=None):
+        old = (self.instagram_id, self.youtube_id, self.schedule_minutes, dict(self.accounts_map))
+        if instagram_id is not None:
+            self.instagram_id = str(instagram_id).strip()
+        if youtube_id is not None:
+            self.youtube_id = str(youtube_id).strip()
+        if accounts is not None:
+            if not isinstance(accounts, dict):
+                raise ValueError("Choose at least one connected social account.")
+            selected = {
+                str(platform).strip().lower(): str(account_id).strip()
+                for platform, account_id in accounts.items()
+                if str(platform).strip().lower() in SUPPORTED_SOCIAL_PLATFORMS and str(account_id).strip()
+            }
+            self.accounts_map = selected
+            self.instagram_id = selected.get("instagram", "")
+            self.youtube_id = selected.get("youtube", "")
+        else:
+            self.accounts_map = {}
+            if self.instagram_id:
+                self.accounts_map["instagram"] = self.instagram_id
+            if self.youtube_id:
+                self.accounts_map["youtube"] = self.youtube_id
         if schedule_minutes is not None:
             self.schedule_minutes = max(0, int(schedule_minutes))
         try:
-            self._publish(path, raise_errors=True)
+            self._publish(path, raise_errors=True, caption_override=caption_override)
         finally:
-            self.instagram_id, self.youtube_id, self.schedule_minutes = old
+            self.instagram_id, self.youtube_id, self.schedule_minutes, self.accounts_map = old
 
-    def _publish(self, path, raise_errors=False):
+    def _publish(self, path, raise_errors=False, caption_override=None):
         path = pathlib.Path(path)
         try:
             caption_path = path.with_suffix(".txt")
-            caption = caption_path.read_text(encoding="utf-8", errors="replace").strip() if caption_path.is_file() else ""
+            caption = (str(caption_override).strip() if caption_override is not None else
+                       caption_path.read_text(encoding="utf-8", errors="replace").strip()
+                       if caption_path.is_file() else "")
             lines = [line.strip() for line in caption.splitlines() if line.strip()]
             title = (lines[0] if lines else path.stem).replace("#", "").strip()[:100] or "StreamSnip Clip"
             content = caption[:2200] or title
             platforms = []
-            if self.instagram_id:
-                platforms.append({
-                    "platform": "instagram",
-                    "accountId": self.instagram_id,
-                    "platformSpecificData": {"shareToFeed": True},
-                })
-            if self.youtube_id:
-                platforms.append({
-                    "platform": "youtube",
-                    "accountId": self.youtube_id,
-                    "platformSpecificData": {
-                        "title": title,
-                        "visibility": self.visibility,
-                    },
-                })
+            for platform, account_id in self.accounts_map.items():
+                target = {"platform": platform, "accountId": account_id}
+                if platform == "instagram":
+                    target["platformSpecificData"] = {"shareToFeed": True}
+                elif platform == "youtube":
+                    target["platformSpecificData"] = {"title": title, "visibility": self.visibility}
+                elif platform == "facebook":
+                    target["platformSpecificData"] = {"contentType": "reel", "title": title}
+                platforms.append(target)
+            if not platforms:
+                raise RuntimeError("Select at least one connected Zernio account before publishing.")
             public_url = self._upload(path)
             body = {
                 "content": content,

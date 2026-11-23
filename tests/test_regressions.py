@@ -1,5 +1,7 @@
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 from pathlib import Path
@@ -11,6 +13,334 @@ from zernio_poster import ZernioPublisher
 
 
 class RegressionTests(unittest.TestCase):
+    def test_clip_post_copy_splits_title_and_description(self):
+        title, description = autoclip.split_clip_post_copy(
+            "The clutch save surprised everyone\n\nWhat a finish!\n\n#gaming #shorts"
+        )
+        self.assertEqual(title, "The clutch save surprised everyone")
+        self.assertEqual(description, "What a finish!\n\n#gaming #shorts")
+
+    def test_clip_post_copy_handles_missing_description(self):
+        self.assertEqual(autoclip.split_clip_post_copy("Just a title"), ("Just a title", ""))
+        self.assertEqual(autoclip.split_clip_post_copy(""), ("", ""))
+
+    def test_custom_openai_compatible_highlight_provider_uses_chat_completions(self):
+        config = {
+            "custom_api_base": "https://free-provider.example/v1",
+            "custom_api_model": "free-chat-model",
+            "custom_api_key": "test-secret",
+        }
+        response = {"choices": [{"message": {"content": '{"moments":[{"time":45,"score":88,"reason":"strong payoff"}]}'}}]}
+        with patch.object(ai_highlights, "_json_request", return_value=response) as request:
+            result = ai_highlights._openai_compatible("transcript prompt", config)
+        self.assertEqual(result["moments"][0]["score"], 88)
+        self.assertEqual(request.call_args.args[0], "https://free-provider.example/v1/chat/completions")
+        self.assertEqual(request.call_args.kwargs["headers"]["Authorization"], "Bearer test-secret")
+
+    def test_custom_api_connection_test_returns_secret_free_success(self):
+        config = {
+            "custom_api_base": "https://provider.example/v1",
+            "custom_api_model": "test-model",
+            "custom_api_key": "private-test-key",
+        }
+        response = {"choices": [{"message": {"content": "STREAMSNIP_OK"}}]}
+        with patch.object(ai_highlights, "_json_request", return_value=response):
+            result = ai_highlights.test_provider("custom", config)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["provider"], "custom")
+        self.assertNotIn("private-test-key", str(result))
+
+    def test_custom_ai_analysis_uses_selected_three_minute_windows(self):
+        words = [(0, 1, "wow"), (180, 181, "insane"), (360, 361, "no way")]
+        config = {"ai_window_minutes": 3}
+        with patch.object(ai_highlights, "_openai_compatible", return_value={"moments": []}) as backend:
+            result = ai_highlights.select_moments("custom", words, 400, config)
+        self.assertEqual(result, [])
+        self.assertEqual(backend.call_count, 3)
+        self.assertEqual(config["_ai_window"], (360, 400))
+
+    def test_creator_monitor_accepts_twitch_and_youtube_but_rejects_lookalike_hosts(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = autoclip.threading.RLock()
+        core.creators = {}
+        core.creator_status = {}
+        core.creator_workers = {}
+        core.creator_engines = {}
+        core.push = MagicMock()
+        core._save_creator_profiles = MagicMock()
+        with patch.object(autoclip, "streamlink_available", return_value=True):
+            added = core.add_creator({"name": "Test creator", "target": "https://www.twitch.tv/test_channel"})
+            self.assertEqual(added["creator"]["name"], "Test creator")
+            with self.assertRaisesRegex(ValueError, "Twitch or YouTube"):
+                core.add_creator({"name": "Impostor", "target": "https://twitch.tv.evil.example/live"})
+
+    def test_quit_stops_all_active_creator_engines(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = autoclip.threading.RLock()
+        engine = MagicMock()
+        core.creator_engines = {"creator_a": engine}
+        core.creator_workers = {"creator_a": types.SimpleNamespace(is_alive=lambda: True)}
+        core.creator_status = {"creator_a": {"phase": "recording", "clips": 2}}
+        self.assertEqual(core.stop_all_creators(), 1)
+        engine.stop.assert_called_once_with(force=True)
+        self.assertEqual(core.creator_status["creator_a"]["phase"], "stopping")
+
+    def test_engine_uses_isolated_creator_recording_and_output_folders(self):
+        cfg = autoclip.clean_cfg({
+            "creator_id": "creator_one",
+            "creator_out_dir": str(Path(tempfile.gettempdir()) / "streamsnip-test-out-one"),
+            "creator_rec_dir": str(Path(tempfile.gettempdir()) / "streamsnip-test-rec-one"),
+        })
+        engine = autoclip.Engine(cfg, lambda *_: None)
+        self.assertEqual(engine.out_dir, Path(cfg["creator_out_dir"]).resolve())
+        self.assertEqual(engine.rec_dir, Path(cfg["creator_rec_dir"]).resolve())
+        self.assertTrue(engine.out_dir.is_dir())
+        self.assertTrue(engine.rec_dir.is_dir())
+
+    def test_creator_profiles_are_validated_and_persisted_locally(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.multiple(
+                autoclip, _data_root=Path(directory),
+                load_settings=MagicMock(return_value=autoclip.clean_cfg({})),
+                apply_storage_paths=MagicMock(),
+                streamlink_available=MagicMock(return_value=True),
+            ):
+                core = autoclip.Core()
+                core.push = MagicMock()
+                result = core.add_creator({"name": "Creator One\n", "target": "https://twitch.tv/example"})
+                creator_id = result["creator"]["id"]
+                self.assertEqual(result["creator"]["name"], "Creator One")
+                self.assertEqual(result["creator"]["phase"], "offline")
+                reloaded = autoclip.Core()
+                self.assertIn(creator_id, reloaded.creators)
+                self.assertEqual(reloaded.creators[creator_id]["target"], "https://twitch.tv/example")
+                with self.assertRaisesRegex(ValueError, "Stop this creator's live monitor"):
+                    core.creator_workers[creator_id] = types.SimpleNamespace(is_alive=lambda: True)
+                    core.remove_creator(creator_id)
+
+    def test_creator_monitor_rejects_non_stream_targets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.multiple(
+                autoclip, _data_root=Path(directory),
+                load_settings=MagicMock(return_value=autoclip.clean_cfg({})),
+                apply_storage_paths=MagicMock(),
+                streamlink_available=MagicMock(return_value=True),
+            ):
+                core = autoclip.Core()
+                with self.assertRaisesRegex(ValueError, "Twitch or YouTube"):
+                    core.add_creator({"name": "Invalid", "target": "https://example.com/live"})
+
+    def test_creator_monitors_use_separate_folders_and_limit_workers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.multiple(
+                autoclip, _data_root=Path(directory),
+                load_settings=MagicMock(return_value=autoclip.clean_cfg({})),
+                apply_storage_paths=MagicMock(),
+                streamlink_available=MagicMock(return_value=True),
+            ):
+                class FakeEngine:
+                    def __init__(self, cfg, emit):
+                        self.cfg = cfg
+                        self.done = threading.Event()
+                    def run(self):
+                        self.done.wait(3)
+                    def stop(self, force=False):
+                        self.done.set()
+
+                core = autoclip.Core()
+                core.push = MagicMock()
+                ids = [
+                    core.add_creator({"name": f"Creator {i}", "target": f"https://twitch.tv/channel{i}"})["creator"]["id"]
+                    for i in range(3)
+                ]
+                with patch.object(autoclip, "Engine", FakeEngine):
+                    try:
+                        core.start_creator(ids[0])
+                        core.start_creator(ids[1])
+                        first = core.creator_engines[ids[0]].cfg
+                        second = core.creator_engines[ids[1]].cfg
+                        self.assertNotEqual(first["creator_out_dir"], second["creator_out_dir"])
+                        self.assertNotEqual(first["creator_rec_dir"], second["creator_rec_dir"])
+                        with self.assertRaisesRegex(ValueError, "Two creator monitors"):
+                            core.start_creator(ids[2])
+                    finally:
+                        for creator_id in ids[:2]:
+                            if creator_id in core.creator_engines:
+                                core.stop_creator(creator_id, force=True)
+                        for worker in core.creator_workers.values():
+                            worker.join(timeout=1)
+
+    def test_creator_live_and_recorded_vod_folders_are_separate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(autoclip, "_data_root", Path(directory)):
+                core = object.__new__(autoclip.Core)
+                core.creators = {"creator_x": {"id": "creator_x", "name": "Creator X"}}
+                core.lock = threading.RLock()
+                legacy_clip_dir = Path(directory) / "creators" / "creator_x" / "clips"
+                legacy_clip_dir.mkdir(parents=True)
+                (legacy_clip_dir / "old_live_clip.mp4").write_bytes(b"keep")
+                paths = core._ensure_creator_paths("creator_x")
+                self.assertTrue(paths["root"].name.startswith("Creator_X_"))
+                self.assertTrue((paths["live_clips"] / "old_live_clip.mp4").exists())
+                self.assertNotEqual(paths["live_clips"], paths["vod_clips"])
+                self.assertNotEqual(paths["live_recordings"], paths["vod_inbox"])
+                self.assertTrue(paths["live_clips"].is_dir())
+                self.assertTrue(paths["vod_inbox"].is_dir())
+                self.assertTrue(paths["vod_clips"].is_dir())
+
+    def test_main_clip_gallery_indexes_creator_live_and_vod_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            core = object.__new__(autoclip.Core)
+            core.lock = threading.RLock()
+            core.creators = {"creator_gallery": {"id": "creator_gallery", "name": "Gallery Creator"}}
+            with patch.object(autoclip, "_data_root", root / "data"), patch.object(autoclip, "OUT", root / "main"), patch.object(autoclip, "CORE", core):
+                autoclip.OUT.mkdir(parents=True)
+                paths = core._ensure_creator_paths("creator_gallery")
+                files = [
+                    (autoclip.OUT / "local_clip.mp4", "Local title"),
+                    (paths["live_clips"] / "creator_g_live_stream_clip1.mp4", "Live title"),
+                    (paths["vod_clips"] / "creator_g_vod_recorded_clip1.mp4", "VOD title"),
+                ]
+                for video, title in files:
+                    video.write_bytes(b"clip")
+                    video.with_suffix(".txt").write_text(title + "\n\nCaption", encoding="utf-8")
+                autoclip.invalidate_clip_cache()
+                items = autoclip.list_clips(limit=10)
+                self.assertEqual({item["source"] for item in items}, {"main", "live", "vod"})
+                live = next(item for item in items if item["source"] == "live")
+                vod = next(item for item in items if item["source"] == "vod")
+                self.assertEqual(live["creator_name"], "Gallery Creator")
+                self.assertEqual(vod["title"], "VOD title")
+                self.assertEqual(autoclip.find_clip_path(live["name"]), files[1][0])
+                self.assertEqual(autoclip.find_clip_path(vod["name"]), files[2][0])
+
+    def test_creator_vod_folder_watcher_processes_and_archives_stable_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.multiple(
+                autoclip, _data_root=Path(directory),
+                load_settings=MagicMock(return_value=autoclip.clean_cfg({})),
+                apply_storage_paths=MagicMock(),
+            ):
+                class FakeEngine:
+                    seen = []
+                    def __init__(self, cfg, emit):
+                        self.cfg, self.emit = cfg, emit
+                    def process(self, filename):
+                        self.seen.append((filename, self.cfg["creator_out_dir"]))
+                    def stop(self, force=False):
+                        pass
+
+                core = autoclip.Core()
+                core.push = MagicMock()
+                creator_id = "creator_watch"
+                core.creators[creator_id] = {"id": creator_id, "name": "Watched"}
+                paths = core._ensure_creator_paths(creator_id)
+                with patch.object(autoclip, "Engine", FakeEngine):
+                    core.start_vod_watch(creator_id)
+                    source = paths["vod_inbox"] / "session.mp4"
+                    source.write_bytes(b"sample vod")
+                    deadline = time.time() + 4
+                    while time.time() < deadline and not (paths["vod_processed"] / source.name).exists():
+                        time.sleep(0.05)
+                    core.stop_vod_watch(creator_id)
+                    core.creator_watchers[creator_id].join(timeout=2)
+                self.assertTrue((paths["vod_processed"] / source.name).exists())
+                self.assertEqual(FakeEngine.seen[0][1], str(paths["vod_clips"]))
+                self.assertFalse(source.exists())
+
+    def test_vod_processing_status_does_not_overwrite_live_status(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.creators = {"creator_x": {"name": "Creator X"}}
+        core.creator_status = {"creator_x": {"phase": "recording", "status": "Live capture active"}}
+        core.push = MagicMock()
+        core.emit_vod("creator_x", "status", ("transcribing", "Transcribing recorded VOD...", 20))
+        self.assertEqual(core.creator_status["creator_x"]["phase"], "recording")
+        self.assertEqual(core.creator_status["creator_x"]["vod_status"], "Transcribing recorded VOD...")
+
+    def test_custom_transcriber_config_defaults_to_local_and_accepts_cli_provider(self):
+        defaults = autoclip.clean_cfg({})
+        self.assertEqual(defaults["transcriber_provider"], "faster-whisper")
+        custom = autoclip.clean_cfg({
+            "transcriber_provider": "custom-command",
+            "transcriber_command": "whisper-cli -f {input} -oj -of {output}",
+            "transcriber_language": "en-US",
+        })
+        self.assertEqual(custom["transcriber_provider"], "custom-command")
+        self.assertEqual(custom["transcriber_language"], "en-US")
+
+    def test_custom_transcriber_parses_word_and_segment_json(self):
+        engine = autoclip.Engine(autoclip.clean_cfg({"transcriber_provider": "custom-command"}), lambda *_: None)
+        word_result = engine._custom_transcript_words({
+            "words": [{"start": 0.1, "end": 0.5, "word": "hello"}]
+        })
+        self.assertEqual(word_result, [(0.1, 0.5, "hello")])
+        segment_result = engine._custom_transcript_words({
+            "transcription": [{"from": 1000, "to": 3000, "text": "hello there"}]
+        })
+        self.assertEqual(segment_result, [(1.0, 2.0, "hello"), (2.0, 3.0, "there")])
+        whisper_cpp_result = engine._custom_transcript_words({
+            "transcription": [{"offsets": {"from": 2000, "to": 4000}, "text": "nested offsets"}]
+        })
+        self.assertEqual(whisper_cpp_result, [(2.0, 3.0, "nested"), (3.0, 4.0, "offsets")])
+
+    def test_custom_transcriber_cli_runs_without_streamsnip_api_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.mp4"
+            source.write_bytes(b"placeholder")
+            script = root / "transcribe.py"
+            script.write_text(
+                "import json,sys\n"
+                "json.dump({'words':[{'start':0.2,'end':0.7,'word':'custom'}]},"
+                "open(sys.argv[2]+'.json','w',encoding='utf-8'))\n",
+                encoding="utf-8",
+            )
+            command = f'"{sys.executable}" "{script}" "{{input}}" "{{output}}" "{{language}}"'
+            cfg = autoclip.clean_cfg({
+                "transcriber_provider": "custom-command",
+                "transcriber_command": command,
+                "transcriber_language": "en",
+            })
+            engine = autoclip.Engine(cfg, lambda *_: None)
+            result = engine.transcribe(str(source))
+        self.assertEqual(result, [(0.2, 0.7, "custom")])
+
+    def test_profanity_censor_does_not_hide_words_from_viral_scoring(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.ts"
+            raw_words = [(1.0, 1.4, "that"), (1.5, 1.9, "was"), (2.0, 2.4, "damn")]
+            engine = autoclip.Engine(autoclip.clean_cfg({"profanity_filter_enabled": True}), lambda *_: None)
+            engine.transcribe = MagicMock(return_value=raw_words)
+            engine.find_peaks = MagicMock(return_value=([], 10))
+            engine.check = MagicMock()
+            engine._process(str(source))
+            self.assertEqual(engine.find_peaks.call_args.args[1], raw_words)
+            censored = autoclip.censor_transcript_words(raw_words, enabled=True)
+            self.assertEqual(censored[-1][2], autoclip.PROFANITY_FILTER_MASK)
+
+    def test_creator_processing_waits_for_shared_transcription_slot(self):
+        engine = autoclip.Engine(autoclip.clean_cfg({}), lambda *_: None)
+        entered = threading.Event()
+        engine._process = lambda _path: entered.set()
+        autoclip.PROCESSING_LOCK.acquire()
+        worker = threading.Thread(target=engine.process, args=("queued-segment.ts",))
+        try:
+            worker.start()
+            self.assertFalse(entered.wait(0.1))
+        finally:
+            autoclip.PROCESSING_LOCK.release()
+        self.assertTrue(entered.wait(1))
+        worker.join(timeout=1)
+        self.assertFalse(worker.is_alive())
+
+    def test_analysis_window_is_limited_to_three_through_fifteen_minutes(self):
+        self.assertEqual(autoclip.clean_cfg({"chunk_min": 1})["chunk_min"], 3)
+        self.assertEqual(autoclip.clean_cfg({"chunk_min": 3})["chunk_min"], 3)
+        self.assertEqual(autoclip.clean_cfg({"chunk_min": 15})["chunk_min"], 15)
+        self.assertEqual(autoclip.clean_cfg({"chunk_min": 30})["chunk_min"], 15)
+
     def test_streamsnip_terminal_warns_about_safe_shutdown(self):
         source = Path(__file__).resolve().parents[1] / "autoclip.py"
         content = source.read_text(encoding="utf-8")
@@ -45,6 +375,7 @@ class RegressionTests(unittest.TestCase):
                      "description": "A sudden turn leaves the streamer stunned and the chat reacting.",
                      "hashtags": ["#Shorts", "#Gaming"],
                  }) as copy:
+                engine.out_dir = output
                 engine.render(
                     "source_recording.mp4", 10, 18,
                     [(10.1, 10.5, "That"), (10.5, 11.0, "was"),
@@ -205,6 +536,70 @@ class RegressionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "upload failed"):
                 publisher.publish_one(video)
             self.assertTrue(any("Zernio error" in line for line in logs))
+
+    def test_publish_queue_accepts_creator_live_and_vod_clip_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            core = object.__new__(autoclip.Core)
+            core.lock = threading.RLock()
+            core.creators = {"creator_publish": {"id": "creator_publish", "name": "Publish Creator"}}
+            core.publishing = {"zernio": {"api_key": "test-key", "accounts": {"instagram": "ig-account"}}}
+            core.posting = {"active": False, "total": 0, "completed": 0, "current": "", "started": 0,
+                            "done": 0, "last_name": "", "errors": 0}
+            core.push = MagicMock()
+            publisher = MagicMock()
+            core._make_publisher = MagicMock(return_value=publisher)
+
+            class InlineThread:
+                def __init__(self, target, **_kwargs):
+                    self.target = target
+                def start(self):
+                    self.target()
+
+            with patch.object(autoclip, "_data_root", root / "data"), patch.object(autoclip, "OUT", root / "main"), patch.object(autoclip, "CORE", core), patch.object(autoclip.threading, "Thread", InlineThread):
+                paths = core._ensure_creator_paths("creator_publish")
+                clip = paths["live_clips"] / "creator_p_live_clip1.mp4"
+                clip.write_bytes(b"video")
+                autoclip.invalidate_clip_cache()
+                result = core.publish_clips(
+                    [clip.name],
+                    caption_overrides={clip.name: "Edited title\n\nEdited description"},
+                    account_ids={"instagram": "ig-account"},
+                )
+            self.assertEqual(result["queued"], 1)
+            self.assertEqual(publisher.publish_one.call_args.args[0], clip)
+            self.assertEqual(publisher.publish_one.call_args.kwargs["caption_override"], "Edited title\n\nEdited description")
+            self.assertEqual(publisher.publish_one.call_args.kwargs["accounts"], {"instagram": "ig-account"})
+            self.assertEqual(core.posting["completed"], 1)
+
+    def test_zernio_direct_publish_supports_multiple_platforms_and_keeps_profanity_postable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            video = Path(directory) / "clip.mp4"
+            video.write_bytes(b"video")
+            publisher = ZernioPublisher(lambda _: None, {"api_key": "test-key"})
+            publisher._upload = MagicMock(return_value="https://media.example/clip.mp4")
+            publisher._json_request = MagicMock(return_value={"data": {"post": {"status": "published"}}})
+            publisher.publish_one(
+                video,
+                accounts={"tiktok": "tt-account", "facebook": "fb-account"},
+                caption_override="That was damn wild!\n\nThe streamer could not believe it.",
+            )
+            body = publisher._json_request.call_args.args[2]
+            self.assertEqual(body["content"], "That was damn wild!\n\nThe streamer could not believe it.")
+            self.assertEqual({item["platform"] for item in body["platforms"]}, {"tiktok", "facebook"})
+            facebook = next(item for item in body["platforms"] if item["platform"] == "facebook")
+            self.assertEqual(facebook["platformSpecificData"]["contentType"], "reel")
+
+    def test_zernio_accounts_returns_supported_video_social_platforms(self):
+        publisher = ZernioPublisher(lambda _: None)
+        publisher._json_request = MagicMock(return_value={"data": {"accounts": [
+            {"platform": "tiktok", "accountId": "tt1", "username": "creator"},
+            {"platform": "facebook", "accountId": "fb1", "displayName": "Page"},
+            {"platform": "whatsapp", "accountId": "wa1"},
+            {"platform": "youtube", "accountId": "yt1"},
+        ]}})
+        accounts = publisher.accounts()
+        self.assertEqual({item["platform"] for item in accounts}, {"tiktok", "facebook", "youtube"})
 
     def test_zernio_empty_success_response_is_valid(self):
         publisher = ZernioPublisher(lambda _: None)
@@ -595,6 +990,23 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(core.publishing["zernio"]["instagram_id"], "ig-saved")
         self.assertEqual(core.publishing["zernio"]["youtube_id"], "yt-saved")
 
+    def test_publishing_save_persists_multi_platform_account_selection(self):
+        core = object.__new__(autoclip.Core)
+        core.publishing = {"provider": "zernio", "zernio": {"api_key": "secret"}}
+        core._make_publisher = MagicMock(return_value=object())
+        with patch.object(autoclip, "save_publishing_settings"):
+            result = core.publishing_save({
+                "provider": "zernio", "api_key": "", "account_ids": {
+                    "tiktok": "tt-account", "facebook": "fb-account"
+                }
+            })
+        self.assertEqual(core.publishing["zernio"]["accounts"], {
+            "tiktok": "tt-account", "facebook": "fb-account"
+        })
+        self.assertEqual(result["providers"]["zernio"]["accounts"], {
+            "tiktok": "tt-account", "facebook": "fb-account"
+        })
+
     def test_render_uses_frame_accurate_input_seeking_for_captions(self):
         engine = autoclip.Engine(autoclip.clean_cfg({"compute_device": "cpu"}), lambda *_: None)
         with tempfile.TemporaryDirectory() as directory:
@@ -891,6 +1303,8 @@ class RegressionTests(unittest.TestCase):
             with patch.object(autoclip, "AI_SETTINGS_FILE", path):
                 saved = autoclip.save_ai_settings({
                     "provider": "gemini", "gemini_api_key": "secret",
+                    "custom_api_base": "https://free-provider.example/v1",
+                    "custom_api_model": "free-model", "custom_api_key": "custom-secret",
                     "metadata_copy_enabled": False,
                 })
                 stored = path.read_text(encoding="utf-8")
@@ -900,8 +1314,12 @@ class RegressionTests(unittest.TestCase):
                 self.assertTrue(disabled["metadata_copy_enabled"])
                 self.assertEqual(autoclip.load_ai_settings()["metadata_copy_enabled"], "true")
             self.assertTrue(saved["gemini_key_set"])
+            self.assertTrue(saved["custom_api_key_set"])
+            self.assertEqual(saved["custom_api_base"], "https://free-provider.example/v1")
+            self.assertEqual(saved["custom_api_model"], "free-model")
             self.assertNotIn("secret", str(saved))
             self.assertIn("secret", stored)
+            self.assertIn("custom-secret", stored)
 
     def test_installer_tracks_and_removes_only_its_owned_global_dependencies(self):
         root = Path(__file__).resolve().parents[1]

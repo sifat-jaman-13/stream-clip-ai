@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased — StreamSnip AI 4.0 development
+
+### Added
+- Added direct per-clip Zernio publishing from the clip dialog, including editable title/description, per-post destination selection, multi-platform account mapping, and manual native-upload fallback.
+- Expanded Zernio account discovery and publishing targets to connected social accounts across Instagram, TikTok, Facebook, YouTube, X, LinkedIn, Pinterest, Reddit, Bluesky, Threads, and Google Business.
+- Moved the primary live-capture Start/Stop controls above the dashboard so they remain prominent.
+- Added a per-creator custom transcriber option. Users can run a local executable or script with input/output/language placeholders and return timestamped word or segment JSON; local custom transcribers require no StreamSnip API key.
+- Added custom transcriber JSON parsing for word-level output, segment-level output, and Whisper.cpp-style millisecond offsets.
+- Added the multi-creator dashboard with independent live controls and separate Live and Recorded VOD folder trees, including per-creator watched VOD inboxes, output clips, processed originals, and failed archives.
+- Added stable-file detection before a watched VOD is processed, preventing files that are still copying from being opened.
+- Added a shared resource-controlled processing queue while allowing up to two stream captures concurrently.
+- Unified the clip gallery across local, per-creator Live, and per-creator Recorded VOD outputs, with source labels and shared preview, download, delete, and direct-publish actions.
+- Rewrote the README and updated the GitHub Pages site to announce the 4.0 roadmap, local-first credential requirements, creator workflow, and licence.
+
+### Changed
+- Direct publishing now supports per-post account selections and caption overrides without modifying the saved sidecar caption.
+- Kept manual upload pages as a fallback; users still attach the local file and press Publish themselves.
+- Changed profanity handling so the original, uncensored transcript is used for viral-moment scoring. Optional censoring only changes rendered audio, captions, and generated post copy; it never rejects a clip or blocks publishing.
+- Clarified that no API key is required for local capture, local transcription, or rendering. Zernio credentials are only needed for direct publishing; hosted AI credentials are only needed when the user selects a hosted provider.
+- Kept the current stable app version at 3.0.0 until the 4.0 installer and release are ready.
+
+### Verification
+- Installed Windows app runtime: 127 regression tests passed; all Python modules and test modules compiled successfully.
+- Verified the embedded app JavaScript and GitHub Pages JavaScript with Node syntax checks; parsed the landing page and checked for duplicate IDs and broken in-page anchors.
+- Ran a local end-to-end smoke test with the installed faster-whisper small model on CUDA, synthetic speech, FFmpeg clip rendering, subtitles, and TXT metadata sidecars.
+- Verified the saved Zernio credential with a read-only connected-account request; two connected accounts were returned. No public or scheduled post was created during testing.
+- The saved Gemini key is accepted, but both the selected Gemini 3.1 Flash Lite model and the recommended Gemini 3.8 Flash model returned HTTP 503 high-demand responses. The old gemini-2.5-flash fallback is retired.
+- The saved Hugging Face token was rejected for inference because it lacks Inference Providers access. Ollama was not running on this PC during the check.
+
 ## [3.0.0] - 2026-11-22
 
 ### Major release

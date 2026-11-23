@@ -20,7 +20,7 @@ Each finished clip is written as an MP4 plus a matching TXT caption/hashtag
 file. Runtime paths, providers, captions, layouts, and custom hook words are
 configurable from the local UI.
 """
-import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64, uuid
+import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64, uuid, shlex, tempfile
 import math
 import urllib.request
 from importlib import metadata as importlib_metadata
@@ -409,6 +409,7 @@ DEFAULTS = {
     "rec_dir": "", "out_dir": "",
     "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 70,
     "model": "distil-large-v3", "compute_device": "gpu",
+    "transcriber_provider": "faster-whisper", "transcriber_command": "", "transcriber_language": "auto",
     "color": "Yellow", "position": "Lower third", "caption_size": 100, "words_per_line": 3, "font": "Impact",
     "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "Classic",
     "profanity_filter_enabled": True, "profanity_filter_words": "",
@@ -441,7 +442,7 @@ def clean_cfg(raw):
         except (TypeError, ValueError, OverflowError): v = c[k]
         if isinstance(v, float) and not math.isfinite(v): v = c[k]
         c[k] = max(lo, min(hi, v))
-    num("clips_per_chunk", 0, 10, int); num("chunk_min", 1, 30, int)
+    num("clips_per_chunk", 0, 10, int); num("chunk_min", 3, 15, int)
     num("pre", 3, 90, int); num("post", 3, 90, int)
     num("capture_bitrate_kbps", 6000, 50000, int)
     num("min_score", 0, 100, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
@@ -455,6 +456,10 @@ def clean_cfg(raw):
     for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x", "crop_x", "crop_y", "crop_w", "crop_h"): c[k] = round(c[k], 1)
     if raw.get("mode") in ("live", "file"): c["mode"] = raw["mode"]
     c["target"] = str(raw.get("target", "")).strip()[:1000]
+    transcriber = str(raw.get("transcriber_provider", "faster-whisper")).strip().lower()
+    c["transcriber_provider"] = transcriber if transcriber in {"faster-whisper", "custom-command"} else "faster-whisper"
+    c["transcriber_command"] = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("transcriber_command", "")))[:2000]
+    c["transcriber_language"] = re.sub(r"[^A-Za-z0-9_-]", "", str(raw.get("transcriber_language", "auto")))[:20] or "auto"
     # Hardware is automatic: CUDA whenever a supported NVIDIA GPU is visible.
     # Keep the setting key for compatibility with existing settings files.
     c["compute_device"] = "gpu"
@@ -477,11 +482,14 @@ def clean_cfg(raw):
     f = str(raw.get("font", c["font"])).strip()
     if re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", f): c["font"] = f
     c["delete_rec"] = bool(raw.get("delete_rec", False))
-    for k in ("rec_dir", "out_dir"):
+    for k in ("rec_dir", "out_dir", "creator_rec_dir", "creator_out_dir"):
         value = str(raw.get(k, "") or "").strip()
         # Keep user-selected paths portable across Windows installs while avoiding
         # control characters or excessively large values in settings.json.
         c[k] = value[:1000] if "\x00" not in value else ""
+    creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(raw.get("creator_id", "")))[:48]
+    if creator_id:
+        c["creator_id"] = creator_id
     return c
 
 def apply_storage_paths(cfg):
@@ -701,7 +709,9 @@ def save_publishing_settings(cfg):
 def load_ai_settings():
     defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
                 "gemini_model": DEFAULT_GEMINI_COPY_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
-                "gemini_api_key": "", "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", "")),
+                "custom_api_base": "https://api.openai.com/v1", "custom_api_model": "",
+                "custom_api_key": "", "gemini_api_key": "",
+                "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", "")),
                 "metadata_copy_enabled": "true", "huggingface_setup_completed": "false"}
     try:
         data = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -710,7 +720,7 @@ def load_ai_settings():
         pass
     # AI-written titles and descriptions are always enabled; ignore legacy opt-out values.
     defaults["metadata_copy_enabled"] = "true"
-    if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface"}:
+    if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface", "custom"}:
         defaults["provider"] = "hooks"
     if defaults["gemini_model"] in RETIRED_GEMINI_MODELS:
         defaults["gemini_model"] = DEFAULT_GEMINI_COPY_MODEL
@@ -723,6 +733,8 @@ def public_ai_settings():
     return {"provider": cfg["provider"], "ollama_url": cfg["ollama_url"],
             "ollama_model": cfg["ollama_model"], "gemini_model": cfg["gemini_model"],
             "huggingface_model": cfg["huggingface_model"],
+            "custom_api_base": cfg["custom_api_base"], "custom_api_model": cfg["custom_api_model"],
+            "custom_api_key_set": bool(cfg["custom_api_key"]),
             "gemini_key_set": bool(cfg["gemini_api_key"]),
             "huggingface_token_set": bool(cfg["huggingface_token"]),
             "metadata_copy_enabled": str(cfg.get("metadata_copy_enabled", "true")).strip().lower() not in {"0", "false", "no", "off"}}
@@ -731,17 +743,19 @@ def save_ai_settings(body):
     cfg = load_ai_settings()
     previous_huggingface_token = str(cfg.get("huggingface_token", "")).strip()
     provider = str(body.get("provider", cfg["provider"]))
-    if provider not in {"hooks", "ollama", "gemini", "huggingface"}:
+    if provider not in {"hooks", "ollama", "gemini", "huggingface", "custom"}:
         raise ValueError("Unknown AI highlight provider.")
     cfg["provider"] = provider
     # Retain a true value for compatibility with older settings files and clients.
     cfg["metadata_copy_enabled"] = "true"
-    for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model"):
+    for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model",
+                "custom_api_base", "custom_api_model"):
         if key in body:
-            cfg[key] = str(body[key]).strip()[:500]
-    for key in ("gemini_api_key", "huggingface_token"):
-        if body.get(key): cfg[key] = str(body[key]).strip()[:1000]
+            cfg[key] = str(body[key]).strip()[:1000]
+    for key in ("gemini_api_key", "huggingface_token", "custom_api_key"):
+        if body.get(key): cfg[key] = str(body[key]).strip()[:2000]
     if body.get("clear_gemini_key"): cfg["gemini_api_key"] = ""
+    if body.get("clear_custom_api_key"): cfg["custom_api_key"] = ""
     if body.get("clear_huggingface_token"):
         cfg["huggingface_token"] = ""
         for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
@@ -756,15 +770,16 @@ def test_ai_settings(body):
     body = body if isinstance(body, dict) else {}
     cfg = load_ai_settings()
     provider = str(body.get("provider", cfg["provider"]))
-    if provider not in {"hooks", "ollama", "gemini", "huggingface"}:
+    if provider not in {"hooks", "ollama", "gemini", "huggingface", "custom"}:
         raise ValueError("Unknown AI highlight provider.")
     cfg["provider"] = provider
-    for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model"):
+    for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model",
+                "custom_api_base", "custom_api_model"):
         if key in body:
-            cfg[key] = str(body[key]).strip()[:500]
-    for key in ("gemini_api_key", "huggingface_token"):
-        if body.get(key):
             cfg[key] = str(body[key]).strip()[:1000]
+    for key in ("gemini_api_key", "huggingface_token", "custom_api_key"):
+        if body.get(key):
+            cfg[key] = str(body[key]).strip()[:2000]
     return test_provider(provider, cfg)
 
 # ------------------------------------------------------------------ hype words
@@ -1276,15 +1291,48 @@ def describe_file_lock(path, error):
         message += " Windows did not identify the holder; close the video player or Explorer preview and retry."
     return {"message": message, "file_lock": {"name": target.name, "holders": owners} if owners else None}
 
+PROCESSING_LOCK = threading.Lock()
+
+
 class Engine:
     def __init__(self, cfg, emit):
         self.cfg, self.emit = cfg, emit
+        # A creator worker may receive isolated folders; the normal single-stream
+        # workflow continues to use the app-wide folders.
+        self._out_dir_override = None
+        self._rec_dir_override = None
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.rec_dir.mkdir(parents=True, exist_ok=True)
         self.stop_flag = self.abort = False
         self.ai_cancel = threading.Event()
         # Captured on the first highlight-analysis pass and reused for this clip batch.
         self.ai_cfg_for_render = None
         self.procs = []
         self.seg_seconds = int(cfg["chunk_min"]) * 60
+
+    @property
+    def out_dir(self):
+        override = getattr(self, "_out_dir_override", None)
+        if override is not None:
+            return pathlib.Path(override)
+        cfg = getattr(self, "cfg", {})
+        return pathlib.Path(cfg.get("creator_out_dir") or OUT).expanduser().resolve()
+
+    @out_dir.setter
+    def out_dir(self, value):
+        self._out_dir_override = pathlib.Path(value).expanduser().resolve()
+
+    @property
+    def rec_dir(self):
+        override = getattr(self, "_rec_dir_override", None)
+        if override is not None:
+            return pathlib.Path(override)
+        cfg = getattr(self, "cfg", {})
+        return pathlib.Path(cfg.get("creator_rec_dir") or REC).expanduser().resolve()
+
+    @rec_dir.setter
+    def rec_dir(self, value):
+        self._rec_dir_override = pathlib.Path(value).expanduser().resolve()
 
     def log(self, msg):                      self.emit("log", msg)
     def status(self, text, phase="working", progress=None): self.emit("status", (phase, text, progress))
@@ -1311,6 +1359,148 @@ class Engine:
             raise
 
     # ---- transcription
+    def _custom_transcript_words(self, payload):
+        if isinstance(payload, dict):
+            raw_words = payload.get("words")
+            segments = payload.get("segments")
+            if not isinstance(segments, list):
+                segments = payload.get("transcription")
+            if isinstance(raw_words, list) and raw_words:
+                segments = None
+            else:
+                raw_words = None
+        elif isinstance(payload, list):
+            raw_words, segments = payload, None
+        else:
+            raw_words, segments = None, None
+
+        words = []
+
+        def append_word(start, end, value):
+            value = str(value or "").strip()
+            if not value:
+                return
+            try:
+                start, end = float(start), float(end)
+            except (TypeError, ValueError, OverflowError):
+                return
+            if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+                return
+            words.append((start, end, value))
+
+        def append_segment(segment):
+            if not isinstance(segment, dict):
+                return
+            segment_words = segment.get("words")
+            if isinstance(segment_words, list) and segment_words:
+                for item in segment_words:
+                    if isinstance(item, dict):
+                        append_word(item.get("start", item.get("start_time")),
+                                    item.get("end", item.get("end_time")),
+                                    item.get("word", item.get("text")))
+                    elif isinstance(item, (list, tuple)) and len(item) >= 3:
+                        append_word(item[0], item[1], item[2])
+                return
+            text = str(segment.get("text", segment.get("word", "")) or "").strip()
+            tokens = re.findall(r"\S+", text)
+            if not tokens:
+                return
+            offsets = segment.get("offsets", {})
+            if isinstance(offsets, dict) and ("from" in offsets or "to" in offsets):
+                start = float(offsets.get("from", 0) or 0) / 1000.0
+                end = float(offsets.get("to", 0) or 0) / 1000.0
+            elif "from" in segment or "to" in segment:
+                start = float(segment.get("from", 0) or 0) / 1000.0
+                end = float(segment.get("to", 0) or 0) / 1000.0
+            else:
+                start = segment.get("start", segment.get("start_time", 0))
+                end = segment.get("end", segment.get("end_time", start))
+                start, end = float(start or 0), float(end or 0)
+            if end <= start:
+                return
+            step = (end - start) / len(tokens)
+            for index, token in enumerate(tokens):
+                append_word(start + step * index, start + step * (index + 1), token)
+
+        if raw_words is not None:
+            for item in raw_words:
+                if isinstance(item, dict):
+                    append_word(item.get("start", item.get("start_time")),
+                                item.get("end", item.get("end_time")),
+                                item.get("word", item.get("text")))
+                elif isinstance(item, (list, tuple)) and len(item) >= 3:
+                    append_word(item[0], item[1], item[2])
+        elif isinstance(segments, list):
+            for segment in segments:
+                append_segment(segment)
+
+        words.sort(key=lambda item: (item[0], item[1]))
+        if not words:
+            raise RuntimeError(
+                "The selected transcriber returned no timestamped words. Return JSON with a words or segments array."
+            )
+        return words
+
+    def transcribe_custom(self, path):
+        template = str(self.cfg.get("transcriber_command", "")).strip()
+        if not template:
+            raise RuntimeError("Choose Bring your own transcriber and enter its command template in Speech settings.")
+        try:
+            parts = shlex.split(template, posix=(os.name != "nt"))
+        except ValueError as exc:
+            raise RuntimeError(f"Could not parse the custom transcriber command: {exc}") from exc
+        parts = [part[1:-1] if len(part) >= 2 and part[0] == part[-1] and part[0] in {"'", '"'} else part
+                 for part in parts]
+        if not parts:
+            raise RuntimeError("The custom transcriber command is empty.")
+        input_path = str(pathlib.Path(path).resolve())
+        language = str(self.cfg.get("transcriber_language", "auto") or "auto")
+        self.status("Running your custom transcriber...", "transcribing", 0)
+        with tempfile.TemporaryDirectory(prefix="streamsnip-transcriber-") as temp_dir:
+            output_path = str(pathlib.Path(temp_dir) / "transcript.json")
+            has_input = any("{input}" in part for part in parts)
+            args = [part.replace("{input}", input_path).replace("{output}", output_path)
+                    .replace("{language}", language) for part in parts]
+            if not has_input:
+                args.append(input_path)
+            self.log("Custom transcriber: launching configured command (no shell execution).")
+            process = popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding="utf-8", errors="replace")
+            started = time.monotonic()
+            try:
+                while True:
+                    try:
+                        stdout, _ = process.communicate(timeout=1)
+                        break
+                    except subprocess.TimeoutExpired:
+                        self.check()
+                        if time.monotonic() - started > 3600:
+                            raise RuntimeError("Custom transcriber exceeded the one-hour timeout.")
+                if process.returncode != 0:
+                    raise RuntimeError("Custom transcriber failed: " + (stdout or "no diagnostic output")[-700:])
+                output_file = pathlib.Path(output_path)
+                if not output_file.is_file():
+                    appended_json = pathlib.Path(output_path + ".json")
+                    alternate_json = output_file.with_suffix(".json")
+                    output_file = next((candidate for candidate in (appended_json, alternate_json)
+                                        if candidate.is_file()), output_file)
+                if output_file.is_file():
+                    payload = json.loads(output_file.read_text(encoding="utf-8-sig"))
+                else:
+                    payload = json.loads(stdout or "")
+            except Stopped:
+                terminate_process_tree(process, force=True)
+                raise
+            except BaseException:
+                if process.poll() is None:
+                    terminate_process_tree(process, force=True)
+                raise
+            finally:
+                _forget_child_process(process)
+        words = self._custom_transcript_words(payload)
+        self.log(f"Custom transcriber returned {len(words)} timestamped word(s).")
+        return words
+
     def get_model(self, name):
         global _model, _model_key
         device = preferred_speech_device()
@@ -1368,6 +1558,9 @@ class Engine:
 
     def transcribe(self, path):
         global _model, _model_key
+        if self.cfg.get("transcriber_provider") == "custom-command":
+            self.dur_audio = 0
+            return self.transcribe_custom(path)
         lang = "en" if self.cfg["model"].startswith("distil") else None
         audio = self.load_audio(path)
         src = audio if audio is not None else str(path)
@@ -1444,8 +1637,11 @@ class Engine:
             # This prevents ordinary moments from becoming clips when Gemini or
             # Ollama says the transcript has no viral payoff.
             self.ai_strict_no_clip = True
-            mode = {"ollama": "Ollama local model", "gemini": "Gemini cloud model", "huggingface": "Hugging Face hosted model"}.get(provider, provider.title())
-            self.log(f"Highlight analysis starting with {mode}; analyzing timestamped transcript windows.")
+            mode = {"ollama": "Ollama local model", "gemini": "Gemini cloud model",
+                    "huggingface": "Hugging Face hosted model",
+                    "custom": "custom OpenAI-compatible API"}.get(provider, provider.title())
+            ai_cfg["ai_window_minutes"] = int(self.cfg["chunk_min"])
+            self.log(f"Highlight analysis starting with {mode}; analyzing the full transcript in {ai_cfg['ai_window_minutes']}-minute windows.")
             self.status(f"Finding viral moments with {mode}...", "transcribing", 100)
             try:
                 ai_picks = select_moments(provider, words, n, ai_cfg, self.log, self.ai_cancel.is_set)
@@ -1494,7 +1690,7 @@ class Engine:
             extra_terms=cfg.get("profanity_filter_words", "")
         )
         out_w, out_h = output_size(cfg)
-        make_ass(words, start, end, OUT / f"{name}.ass", cfg)
+        make_ass(words, start, end, self.out_dir / f"{name}.ass", cfg)
         if cfg["layout"].startswith("Facecam") and cfg.get("output_format", "9:16") == "9:16":
             # Twitch-style portrait: facecam on the top 40% (1080x768), game on the bottom 60% (1080x1152)
             cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("cam_x", "cam_y", "cam_w", "cam_h"))
@@ -1528,10 +1724,10 @@ class Engine:
                "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
                *enc, "-pix_fmt", "yuv420p", "-af", audio_filter,
                "-c:a", "aac", "-b:a", "160k", "-r", "30", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", tmp]
-        r = run(cmd, cwd=OUT, capture_output=True, text=True)
-        (OUT / f"{name}.ass").unlink(missing_ok=True)
+        r = run(cmd, cwd=self.out_dir, capture_output=True, text=True)
+        (self.out_dir / f"{name}.ass").unlink(missing_ok=True)
         if r.returncode != 0:
-            (OUT / tmp).unlink(missing_ok=True)
+            (self.out_dir / tmp).unlink(missing_ok=True)
             raise RuntimeError((r.stderr or "ffmpeg failed").strip()[-400:])
         transcript = " ".join(
             str(word).strip() for word_start, _word_end, word in words
@@ -1547,7 +1743,7 @@ class Engine:
                 ai_cfg = load_ai_settings()
             # Reuse the exact provider selected for highlight detection; there is no separate copy provider.
             provider = str(ai_cfg.get("provider", "hooks")).strip().lower()
-            if transcript and provider in {"ollama", "gemini", "huggingface"}:
+            if transcript and provider in {"ollama", "gemini", "huggingface", "custom"}:
                 post_copy = generate_social_copy(transcript, tag, ai_cfg, log=self.log)
             elif transcript and provider == "hooks":
                 self.log("Hook words is selected; using concise transcript-based post copy for this clip.")
@@ -1569,11 +1765,11 @@ class Engine:
             if isinstance(post_copy.get("hashtags"), (list, tuple)):
                 post_copy["hashtags"] = [censor_profanity_text(tag, extra_terms=extra_terms)
                                           for tag in post_copy["hashtags"]]
-        final_video = OUT / f"{name}.mp4"
-        self.replace_output(OUT / tmp, final_video)
+        final_video = self.out_dir / f"{name}.mp4"
+        self.replace_output(self.out_dir / tmp, final_video)
         try:
             write_clip_metadata_files(
-                OUT, final_video.name, pathlib.Path(src).name, start, end,
+                self.out_dir, final_video.name, pathlib.Path(src).name, start, end,
                 transcript, tag, on_warning=self.log,
                 post_title=post_copy.get("title") if post_copy else None,
                 post_description=post_copy.get("description") if post_copy else None,
@@ -1585,8 +1781,23 @@ class Engine:
         self.emit("clip", final_video.name)
 
     def process(self, path):
+        if self.cfg.get("creator_id"):
+            self.status("Waiting for the shared transcription and AI-analysis slot...", "queued")
+        while not PROCESSING_LOCK.acquire(timeout=0.5):
+            self.check()
+        try:
+            self.check()
+            self._process(path)
+        finally:
+            PROCESSING_LOCK.release()
+
+    def _process(self, path):
         pth = pathlib.Path(path)
         stem = re.sub(r"[^A-Za-z0-9_-]", "_", pth.stem)[:40] or "stream"
+        creator_id = str(self.cfg.get("creator_id", "")).strip()
+        if creator_id:
+            source_kind = "vod" if self.cfg.get("mode") == "file" else "live"
+            stem = f"{creator_id[:8]}_{source_kind}_{stem}"
         self.status(f"Transcribing {pth.name}...", "transcribing", 0)
         self.log(f"Processing {pth.name}")
         raw_words = self.transcribe(path)
@@ -1606,14 +1817,16 @@ class Engine:
         else:
             self.log("Transcript words (0): no speech words detected.")
         self.status("Finding the hype moments...", "transcribing", 100)
-        peaks, dur = self.find_peaks(path, words)
+        # Score the original transcript so censoring never hides a high-energy or viral moment.
+        # The censored copy is still used for captions, audio muting, and public post metadata.
+        peaks, dur = self.find_peaks(path, raw_words)
         self.log(f"Heard {len(words)} words in {dur}s of video. Best moment score {getattr(self, 'best_score', 0):.1f} "
                  f"(clips need {self.cfg['min_score']}).")
         if not words:
             self.log("WARNING: no speech was transcribed - check the speech model / GPU messages above.")
         if not peaks:
             self.log("Chunk too short or silent - nothing to clip.")
-            if pth.parent == REC:
+            if pth.parent == self.rec_dir:
                 try:
                     pth.unlink()
                     self.log(f"Deleted {pth.name}: processing produced no clips.")
@@ -1622,11 +1835,11 @@ class Engine:
         stamp = time.strftime("%H%M%S")
         for i, (p, sc) in enumerate(peaks, 1):
             self.check()
-            start, end = clip_bounds(p, dur, self.cfg["pre"], self.cfg["post"], words)
+            start, end = clip_bounds(p, dur, self.cfg["pre"], self.cfg["post"], raw_words)
             base_name = f"{stem}_{stamp}_clip{i}"
             name = base_name
             suffix = 2
-            while (OUT / f"{name}.mp4").exists() or (OUT / f"{name}.tmp.mp4").exists():
+            while (self.out_dir / f"{name}.mp4").exists() or (self.out_dir / f"{name}.tmp.mp4").exists():
                 name = f"{base_name}_{suffix}"
                 suffix += 1
             self.status(f"Rendering clip {i} of {len(peaks)} (hype score {sc:.1f})...", "rendering",
@@ -1640,7 +1853,7 @@ class Engine:
             except Exception as e:
                 self.log(f"Render error: {e}")
         self.emit("chunk", "")
-        if self.cfg["delete_rec"] and pth.parent == REC:
+        if self.cfg["delete_rec"] and pth.parent == self.rec_dir:
             try: pth.unlink()
             except Exception: pass
 
@@ -1695,15 +1908,15 @@ class Engine:
         # The recording folder can disappear while StreamSnip AI is running (for example,
         # after a manual cleanup or an antivirus/cleanup tool removes an empty dir).
         # Recreate it immediately before opening the stream log and segment files.
-        ensure_runtime_dirs()
-        run_id = time.strftime("%m%d_%H%M%S")
-        pattern = str(REC / f"seg_{run_id}_%05d.ts")
-        slog_path = REC / f"streamlink_{run_id}.log"
+        self.rec_dir.mkdir(parents=True, exist_ok=True)
+        run_id = time.strftime("%m%d_%H%M%S") + "_" + re.sub(r"[^A-Za-z0-9_-]", "", str(self.cfg.get("creator_id", "")))[:24]
+        pattern = str(self.rec_dir / f"seg_{run_id}_%05d.ts")
+        slog_path = self.rec_dir / f"streamlink_{run_id}.log"
         try:
             slog = open(slog_path, "wb")
         except FileNotFoundError:
             # Handle a race where the folder vanished between mkdir and open.
-            ensure_runtime_dirs()
+            self.rec_dir.mkdir(parents=True, exist_ok=True)
             slog = open(slog_path, "wb")
         try:
             sl = popen(streamlink_cmd() + ["--stdout", url, STREAM_QUALITY], stdout=subprocess.PIPE, stderr=slog, env=streamlink_env())
@@ -1730,7 +1943,7 @@ class Engine:
         t0 = time.time(); last_beat = t0; last_growth = t0; last_total = -1; warned = False
         try:
             while not self.abort:
-                segs = sorted(glob.glob(str(REC / f"seg_{run_id}_*.ts")))
+                segs = sorted(glob.glob(str(self.rec_dir / f"seg_{run_id}_*.ts")))
                 recording = ff.poll() is None and not self.stop_flag
                 if self.stop_flag and not producers_stopped:
                     producers_stopped = True
@@ -1817,7 +2030,7 @@ class Engine:
                 terminate_process_tree(pr, force=True)
             try: slog.close()
             except Exception: pass
-            for fpath in glob.glob(str(REC / f"streamlink_{run_id}.log")):
+            for fpath in glob.glob(str(self.rec_dir / f"streamlink_{run_id}.log")):
                 try: os.remove(fpath)
                 except Exception: pass
 
@@ -1840,6 +2053,7 @@ class Engine:
 # ------------------------------------------------------------------ app core (state shared with the UI)
 CLIP_RE = re.compile(r"^[A-Za-z0-9_\-]+\.mp4$")
 LOCK_FILE_RE = re.compile(r"^[A-Za-z0-9_\-]+(?:\.tmp\.mp4|\.mp4|\.txt)$")
+VOD_EXTENSIONS = {".mp4", ".mkv", ".mov", ".ts", ".flv", ".webm", ".avi", ".m4v"}
 QUIT = threading.Event()
 _WINDOW_CLOSE_LOCK = threading.RLock()
 _WINDOW_CLOSE_TIMER = None
@@ -1863,6 +2077,11 @@ def schedule_window_close_shutdown(delay=3.0):
                 _WINDOW_CLOSE_TIMER = None
                 return
             _WINDOW_CLOSE_TIMER = None
+        try:
+            CORE.stop(True)
+            CORE.stop_all_creators()
+        except (NameError, AttributeError):
+            pass
         QUIT.set()
     timer = threading.Timer(delay, close_if_still_gone)
     timer.daemon = True
@@ -1903,9 +2122,362 @@ class Core:
         self.session = {"clips": 0, "chunks": 0, "started": None, "ended": None}
         self.settings = load_settings()
         apply_storage_paths(self.settings)
+        self.creators = self._load_creator_profiles()
+        self.creator_workers = {}
+        self.creator_engines = {}
+        self.creator_status = {}
+        self.creator_watchers = {}
+        self.creator_watch_events = {}
+        self.creator_vod_engines = {}
         if STORAGE_PATH_WARNING:
             save_settings(self.settings)
             self.push(STORAGE_PATH_WARNING)
+
+    def _creator_profiles_path(self):
+        return _data_root / "creators.json"
+
+    def _load_creator_profiles(self):
+        try:
+            raw = json.loads(self._creator_profiles_path().read_text(encoding="utf-8"))
+            if not isinstance(raw, list):
+                return {}
+            profiles = {}
+            for item in raw[:100]:
+                if not isinstance(item, dict):
+                    continue
+                creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(item.get("id", "")))[:48]
+                name = re.sub(r"[\r\n\x00-\x1f]", "", str(item.get("name", ""))).strip()[:80]
+                target = str(item.get("target", "")).strip()[:1000]
+                if creator_id and name and target:
+                    profiles[creator_id] = {"id": creator_id, "name": name, "target": target}
+            return profiles
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _save_creator_profiles(self):
+        atomic_json_write(self._creator_profiles_path(), list(self.creators.values()))
+
+    def _creator_paths(self, creator_id):
+        profile = getattr(self, "creators", {}).get(creator_id, {})
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(profile.get("name", "creator"))).strip("_")[:40] or "creator"
+        root = _data_root / "creators" / f"{slug}_{creator_id}"
+        return {
+            "root": root,
+            "live_clips": root / "live" / "clips",
+            "live_recordings": root / "live" / "recordings",
+            "vod_inbox": root / "recorded-vods" / "watch",
+            "vod_clips": root / "recorded-vods" / "clips",
+            "vod_processed": root / "recorded-vods" / "processed",
+            "vod_failed": root / "recorded-vods" / "failed",
+        }
+
+    def _ensure_creator_paths(self, creator_id):
+        paths = self._creator_paths(creator_id)
+        # Migrate folders created by the earlier ID-only layout without overwriting data.
+        legacy = _data_root / "creators" / creator_id
+        for old_name, new_key in (("clips", "live_clips"), ("recordings", "live_recordings")):
+            old_folder, new_folder = legacy / old_name, paths[new_key]
+            if old_folder.is_dir() and not new_folder.exists():
+                new_folder.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.replace(old_folder, new_folder)
+                except OSError:
+                    pass
+        for folder in paths.values():
+            folder.mkdir(parents=True, exist_ok=True)
+        return paths
+
+    def list_creators(self):
+        with self.lock:
+            result = []
+            for creator_id, profile in self.creators.items():
+                status = dict(self.creator_status.get(creator_id, {}))
+                paths = self._ensure_creator_paths(creator_id)
+                try:
+                    status["live_clips"] = sum(1 for item in paths["live_clips"].glob("*.mp4") if CLIP_RE.match(item.name))
+                    status["vod_clips"] = sum(1 for item in paths["vod_clips"].glob("*.mp4") if CLIP_RE.match(item.name))
+                    status["vod_pending"] = sum(1 for item in paths["vod_inbox"].iterdir() if item.is_file() and item.suffix.lower() in VOD_EXTENSIONS)
+                except OSError:
+                    status.setdefault("live_clips", 0)
+                    status.setdefault("vod_clips", 0)
+                    status.setdefault("vod_pending", 0)
+                watcher = getattr(self, "creator_watchers", {}).get(creator_id)
+                result.append({**profile, **status,
+                               "running": bool(self.creator_workers.get(creator_id) and self.creator_workers[creator_id].is_alive()),
+                               "watching_vods": bool(watcher and watcher.is_alive())})
+            return result
+
+    def add_creator(self, body):
+        name = re.sub(r"[\r\n\x00-\x1f]", "", str(body.get("name", ""))).strip()[:80]
+        target = normalize_stream_target(str(body.get("target", "")).strip()[:1000])
+        if not name:
+            raise ValueError("Give this creator a name.")
+        if not re.match(r"https?://", target):
+            raise ValueError("Enter a Twitch or YouTube stream URL.")
+        host = (urllib.parse.urlparse(target).hostname or "").lower()
+        if not (host == "twitch.tv" or host.endswith(".twitch.tv")
+                or host == "youtube.com" or host.endswith(".youtube.com")
+                or host == "youtu.be"):
+            raise ValueError("Use a Twitch or YouTube stream URL.")
+        if not streamlink_available():
+            raise ValueError("streamlink is not installed. Run: pip install streamlink")
+        with self.lock:
+            if len(self.creators) >= 100:
+                raise ValueError("Creator limit reached (100).")
+            creator_id = uuid.uuid4().hex[:12]
+            self.creators[creator_id] = {"id": creator_id, "name": name, "target": target}
+            self.creator_status[creator_id] = {"phase": "offline", "status": "Saved; not monitoring.", "clips": 0}
+            self._save_creator_profiles()
+        self.push(f"Added creator monitor: {name}.")
+        return {"creator": self.list_creators()[-1]}
+
+    def open_creator_folder(self, creator_id, folder_kind="live_clips"):
+        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
+        with self.lock:
+            if creator_id not in self.creators:
+                raise ValueError("Creator monitor not found.")
+        paths = self._ensure_creator_paths(creator_id)
+        folder = paths.get(str(folder_kind))
+        if folder is None:
+            raise ValueError("Unknown creator folder.")
+        open_folder(folder)
+        return {"ok": True}
+
+    def start_vod_watch(self, creator_id):
+        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
+        with self.lock:
+            if creator_id not in self.creators:
+                raise ValueError("Creator monitor not found.")
+            current = self.creator_watchers.get(creator_id)
+            if current and current.is_alive():
+                raise ValueError("This creator's VOD folder is already being watched.")
+            paths = self._ensure_creator_paths(creator_id)
+            stop_event = threading.Event()
+            self.creator_watch_events[creator_id] = stop_event
+            self.creator_status.setdefault(creator_id, {})["vod_status"] = "Watching recorded-VOD inbox..."
+            worker = threading.Thread(target=self._watch_vod_folder, args=(creator_id, stop_event),
+                                      daemon=True, name=f"vod-watch-{creator_id}")
+            self.creator_watchers[creator_id] = worker
+            worker.start()
+        self.push(f"Watching recorded-VOD folder for {self.creators[creator_id]['name']}: {paths['vod_inbox']}")
+        return {"ok": True}
+
+    def stop_vod_watch(self, creator_id):
+        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
+        with self.lock:
+            event = self.creator_watch_events.get(creator_id)
+            worker = self.creator_watchers.get(creator_id)
+            engine = self.creator_vod_engines.get(creator_id)
+            if not event or not worker or not worker.is_alive():
+                raise ValueError("This creator's VOD folder is not being watched.")
+            event.set()
+            if engine:
+                engine.stop(force=True)
+            self.creator_status.setdefault(creator_id, {})["vod_status"] = "Stopping VOD folder watcher..."
+        return {"ok": True}
+
+    def _watch_vod_folder(self, creator_id, stop_event):
+        paths = self._ensure_creator_paths(creator_id)
+        stable = {}
+        try:
+            while not stop_event.is_set():
+                try:
+                    candidates = sorted(p for p in paths["vod_inbox"].iterdir()
+                                        if p.is_file() and p.suffix.lower() in VOD_EXTENSIONS)
+                except OSError as exc:
+                    self.push(f"[{self.creators.get(creator_id, {}).get('name', creator_id)}] VOD folder error: {exc}")
+                    stop_event.wait(3)
+                    continue
+                ready = None
+                for item in candidates:
+                    try:
+                        stat = item.stat()
+                        fingerprint = (stat.st_size, stat.st_mtime_ns)
+                    except OSError:
+                        continue
+                    previous, count = stable.get(str(item), (None, 0))
+                    count = count + 1 if previous == fingerprint else 0
+                    stable[str(item)] = (fingerprint, count)
+                    if count >= 2 and stat.st_size > 0:
+                        ready = item
+                        break
+                if ready is None:
+                    stop_event.wait(2)
+                    continue
+                profile = self.creators.get(creator_id, {"name": creator_id})
+                self.creator_status.setdefault(creator_id, {})["vod_status"] = f"Processing {ready.name}"
+                cfg = clean_cfg({**self.settings, "mode": "file", "target": str(ready),
+                                 "creator_id": creator_id,
+                                 "creator_out_dir": str(paths["vod_clips"]),
+                                 "creator_rec_dir": str(paths["live_recordings"]),
+                                 "delete_rec": False})
+                engine = Engine(cfg, lambda kind, payload, cid=creator_id: self.emit_vod(cid, kind, payload))
+                with self.lock:
+                    self.creator_vod_engines[creator_id] = engine
+                try:
+                    engine.process(str(ready))
+                    if stop_event.is_set():
+                        break
+                    destination = paths["vod_processed"] / ready.name
+                    suffix = 2
+                    while destination.exists():
+                        destination = paths["vod_processed"] / f"{ready.stem}_{suffix}{ready.suffix}"
+                        suffix += 1
+                    ready.replace(destination)
+                    self.push(f"[{profile['name']}] Recorded VOD processed: {destination.name}")
+                    self.creator_status.setdefault(creator_id, {})["vod_status"] = "Watching recorded-VOD inbox..."
+                except Stopped:
+                    break
+                except Exception as exc:
+                    self.push(f"[{profile['name']}] VOD processing failed for {ready.name}: {exc}")
+                    try:
+                        destination = paths["vod_failed"] / ready.name
+                        suffix = 2
+                        while destination.exists():
+                            destination = paths["vod_failed"] / f"{ready.stem}_{suffix}{ready.suffix}"
+                            suffix += 1
+                        ready.replace(destination)
+                    except OSError:
+                        pass
+                    self.creator_status.setdefault(creator_id, {})["vod_status"] = f"Failed: {ready.name}"
+                finally:
+                    with self.lock:
+                        self.creator_vod_engines.pop(creator_id, None)
+                    stable.pop(str(ready), None)
+        finally:
+            self.creator_status.setdefault(creator_id, {})["vod_status"] = "VOD folder watcher stopped."
+            self.push(f"[{self.creators.get(creator_id, {}).get('name', creator_id)}] VOD folder watcher stopped.")
+
+    def remove_creator(self, creator_id):
+        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
+        with self.lock:
+            worker = self.creator_workers.get(creator_id)
+            watcher = getattr(self, "creator_watchers", {}).get(creator_id)
+            if worker and worker.is_alive():
+                raise ValueError("Stop this creator's live monitor before removing it.")
+            if watcher and watcher.is_alive():
+                raise ValueError("Stop this creator's VOD folder watcher before removing it.")
+            profile = self.creators.pop(creator_id, None)
+            self.creator_status.pop(creator_id, None)
+            self.creator_workers.pop(creator_id, None)
+            self.creator_engines.pop(creator_id, None)
+            if not profile:
+                raise ValueError("Creator monitor not found.")
+            self._save_creator_profiles()
+        self.push(f"Removed creator monitor: {profile['name']}. Its recordings and clips were kept.")
+        return {"ok": True}
+
+    def start_creator(self, creator_id):
+        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
+        with self.lock:
+            profile = self.creators.get(creator_id)
+            worker = self.creator_workers.get(creator_id)
+            if not profile:
+                raise ValueError("Creator monitor not found.")
+            if worker and worker.is_alive():
+                raise ValueError("This creator is already being monitored.")
+            active = sum(1 for thread in self.creator_workers.values() if thread.is_alive()) + int(self.running)
+            if active >= 2:
+                raise ValueError("Two creator monitors are already active. Stop one before starting another.")
+            paths = self._ensure_creator_paths(creator_id)
+            cfg = clean_cfg({**self.settings, "mode": "live", "target": profile["target"],
+                             "creator_id": creator_id,
+                             "creator_out_dir": str(paths["live_clips"]),
+                             "creator_rec_dir": str(paths["live_recordings"])})
+            engine = Engine(cfg, lambda kind, payload, cid=creator_id: self.emit_creator(cid, kind, payload))
+            self.creator_engines[creator_id] = engine
+            self.creator_status[creator_id] = {"phase": "waiting", "status": "Starting monitor...", "clips": 0}
+            thread = threading.Thread(target=engine.run, daemon=True, name=f"creator-{creator_id}")
+            self.creator_workers[creator_id] = thread
+            thread.start()
+        self.push(f"Started monitoring {profile['name']}.")
+        return {"ok": True}
+
+    def stop_creator(self, creator_id, force=False):
+        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
+        with self.lock:
+            engine = self.creator_engines.get(creator_id)
+            worker = self.creator_workers.get(creator_id)
+            if not engine or not worker or not worker.is_alive():
+                raise ValueError("This creator monitor is not running.")
+            engine.stop(force=bool(force))
+            self.creator_status[creator_id] = {"phase": "stopping", "status": "Stopping monitor...",
+                                               "clips": self.creator_status.get(creator_id, {}).get("clips", 0)}
+        return {"ok": True}
+
+    def stop_all_creators(self):
+        with self.lock:
+            active = [(creator_id, engine) for creator_id, engine in self.creator_engines.items()
+                      if self.creator_workers.get(creator_id) and self.creator_workers[creator_id].is_alive()]
+            for creator_id, engine in active:
+                engine.stop(force=True)
+                state = self.creator_status.setdefault(creator_id, {})
+                state["phase"], state["status"] = "stopping", "Stopping monitor..."
+            for creator_id, event in getattr(self, "creator_watch_events", {}).items():
+                if event:
+                    event.set()
+                engine = getattr(self, "creator_vod_engines", {}).get(creator_id)
+                if engine:
+                    engine.stop(force=True)
+        return len(active)
+
+    def emit_vod(self, creator_id, kind, payload):
+        with self.lock:
+            profile = self.creators.get(creator_id, {"name": creator_id})
+            state = self.creator_status.setdefault(creator_id, {})
+            if kind == "status":
+                state["vod_status"] = payload[1]
+                if len(payload) > 2:
+                    state["vod_progress"] = payload[2]
+            elif kind == "clip":
+                state["vod_clips_generated"] = int(state.get("vod_clips_generated", 0)) + 1
+            elif kind == "chunk":
+                state["vod_chunks"] = int(state.get("vod_chunks", 0)) + 1
+        if kind == "log":
+            self.push(f"[{profile['name']} · VOD] {payload}")
+        elif kind == "clip":
+            self.push(f"[{profile['name']} · VOD] Clip ready: {payload}")
+            if self.publisher:
+                try:
+                    clip_path = find_clip_path(payload)
+                    if clip_path:
+                        self.publisher.submit(clip_path)
+                except Exception as exc:
+                    self.push(f"[{profile['name']} · VOD] Auto-post error: {exc}")
+        elif kind == "file_lock":
+            self.push_file_lock(payload)
+
+    def emit_creator(self, creator_id, kind, payload):
+        with self.lock:
+            profile = self.creators.get(creator_id, {"name": creator_id})
+            state = self.creator_status.setdefault(creator_id, {"clips": 0})
+            if kind == "status":
+                state["phase"], state["status"] = payload[0], payload[1]
+                if len(payload) > 2:
+                    state["progress"] = payload[2]
+            elif kind == "clip":
+                state["clips"] = int(state.get("clips", 0)) + 1
+                state["last_clip"] = payload
+            elif kind == "chunk":
+                state["chunks"] = int(state.get("chunks", 0)) + 1
+            elif kind == "done":
+                state["phase"], state["status"] = "offline", "Monitor stopped."
+                state.pop("progress", None)
+        if kind == "log":
+            self.push(f"[{profile['name']}] {payload}")
+        elif kind == "clip":
+            self.push(f"[{profile['name']}] Clip ready: {payload}")
+            if self.publisher:
+                try:
+                    clip_path = find_clip_path(payload)
+                    if clip_path:
+                        self.publisher.submit(clip_path)
+                except Exception as exc:
+                    self.push(f"[{profile['name']}] Auto-post error: {exc}")
+        elif kind == "file_lock":
+            self.push_file_lock(payload)
+        elif kind == "done":
+            self.push(f"[{profile['name']}] Monitor stopped.")
 
     def _config_for(self, provider=None):
         return self.publishing.get("zernio", {})
@@ -2072,7 +2644,7 @@ class Core:
 
     def zernio_status(self):
         cfg = self._config_for("zernio")
-        return dict(self._provider_status("zernio"), auto_post=bool(cfg.get("auto_post")),
+        return dict(self._provider_status("zernio"), accounts=dict(cfg.get("accounts", {})) if isinstance(cfg.get("accounts"), dict) else {}, auto_post=bool(cfg.get("auto_post")),
                     schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
                     visibility=cfg.get("visibility", "public"),
                     instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""))
@@ -2084,6 +2656,7 @@ class Core:
                 visibility=cfg.get("visibility", "public"),
                 instagram_id=cfg.get("instagram_id", ""),
                 youtube_id=cfg.get("youtube_id", ""),
+                accounts=dict(cfg.get("accounts", {})) if isinstance(cfg.get("accounts"), dict) else {},
                 auto_post=bool(cfg.get("auto_post", False)))},
                 **self._provider_status("zernio")}
 
@@ -2097,6 +2670,19 @@ class Core:
             value = str(body.get(key, cfg.get(key, ""))).strip()
             if value: cfg[key] = value
             elif key in {"instagram_id", "youtube_id"}: cfg[key] = ""
+        if "account_ids" in body:
+            raw_accounts = body.get("account_ids")
+            if not isinstance(raw_accounts, dict):
+                raise ValueError("Connected account selection must be a platform-to-account map.")
+            supported = {"twitter", "instagram", "facebook", "linkedin", "tiktok", "youtube",
+                         "pinterest", "reddit", "bluesky", "threads", "googlebusiness"}
+            cfg["accounts"] = {
+                str(platform).strip().lower(): str(account_id).strip()
+                for platform, account_id in raw_accounts.items()
+                if str(platform).strip().lower() in supported and str(account_id).strip()
+            }
+            cfg["instagram_id"] = cfg["accounts"].get("instagram", "")
+            cfg["youtube_id"] = cfg["accounts"].get("youtube", "")
         cfg["auto_post"] = bool(body.get("auto_post", False))
         try: cfg["schedule_minutes"] = max(0, int(body.get("schedule_minutes", 0)))
         except (TypeError, ValueError): cfg["schedule_minutes"] = 0
@@ -2120,13 +2706,27 @@ class Core:
     def zernio_accounts(self):
         return self.publishing_accounts("zernio")
 
-    def publish_clips(self, names):
+    def publish_clips(self, names, caption_overrides=None, account_ids=None):
         provider = "zernio"
         cfg = self._config_for()
         if not cfg.get("api_key"): raise ValueError(f"Save and verify a {provider.title()} API key first.")
-        if not any(cfg.get(key) for key in ("instagram_id", "youtube_id")):
-            raise ValueError("Select at least one connected channel.")
-        valid = [n for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
+        selected_accounts = account_ids if isinstance(account_ids, dict) else cfg.get("accounts", {})
+        if not isinstance(selected_accounts, dict):
+            selected_accounts = {}
+        selected_accounts = {
+            str(platform).strip().lower(): str(account_id).strip()
+            for platform, account_id in selected_accounts.items()
+            if str(platform).strip().lower() in {"twitter", "instagram", "facebook", "linkedin", "tiktok",
+                                                  "youtube", "pinterest", "reddit", "bluesky", "threads",
+                                                  "googlebusiness"} and str(account_id).strip()
+        }
+        if not selected_accounts:
+            for platform in ("instagram", "youtube"):
+                if cfg.get(platform + "_id"):
+                    selected_accounts[platform] = str(cfg[platform + "_id"])
+        if not selected_accounts:
+            raise ValueError("Connect and select at least one Zernio social account in Settings.")
+        valid = [str(n) for n in names if CLIP_RE.fullmatch(str(n)) and find_clip_path(str(n))]
         if not valid: raise ValueError("No valid clips selected.")
         if not self._make_publisher(provider, False): raise ValueError(f"{provider.title()} posting is unavailable.")
         with self.lock:
@@ -2142,7 +2742,12 @@ class Core:
                         delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
                         with self.lock: self.posting["current"] = name
                         self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
-                        publisher.publish_one(OUT / name, cfg.get("instagram_id", ""), cfg.get("youtube_id", ""), delay)
+                        caption_override = (caption_overrides or {}).get(name) if isinstance(caption_overrides, dict) else None
+                        clip_path = find_clip_path(name)
+                        if not clip_path:
+                            raise FileNotFoundError(f"Clip is no longer available: {name}")
+                        publisher.publish_one(clip_path, schedule_minutes=delay,
+                                              accounts=selected_accounts, caption_override=caption_override)
                         with self.lock:
                             self.posting["completed"] += 1
                             self.posting["done"] += 1
@@ -2165,34 +2770,92 @@ class Core:
         self.push(f"{provider.title()}: queued {len(valid)} clip(s) for publishing.")
         return {"queued": len(valid)}
 
-_CLIP_CACHE = {"dir_mtime": None, "items": []}
+_CLIP_CACHE = {"signature": None, "items": []}
 
 def invalidate_clip_cache():
-    _CLIP_CACHE["dir_mtime"] = None
+    _CLIP_CACHE["signature"] = None
     _CLIP_CACHE["items"] = []
 
+def _clip_directories():
+    directories = [("main", "", "", OUT)]
+    core = globals().get("CORE")
+    if core is not None:
+        try:
+            with core.lock:
+                creators = [(creator_id, dict(profile)) for creator_id, profile in core.creators.items()]
+            for creator_id, profile in creators:
+                paths = core._creator_paths(creator_id)
+                name = str(profile.get("name", creator_id))
+                directories.append(("live", creator_id, name, paths["live_clips"]))
+                directories.append(("vod", creator_id, name, paths["vod_clips"]))
+        except Exception:
+            pass
+    return directories
+
 def _clip_index():
-    try: dir_mtime = OUT.stat().st_mtime_ns
-    except OSError: dir_mtime = None
-    if dir_mtime == _CLIP_CACHE["dir_mtime"]:
+    directories = _clip_directories()
+    signature = []
+    for source, creator_id, creator_name, folder in directories:
+        try:
+            stamp = folder.stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        signature.append((str(folder), stamp))
+    signature = tuple(signature)
+    if signature == _CLIP_CACHE["signature"]:
         return _CLIP_CACHE["items"]
     items = []
-    for p in OUT.glob("*.mp4"):
-        if not CLIP_RE.match(p.name):          # skips the *.tmp.mp4 files that are still rendering
+    for source, creator_id, creator_name, folder in directories:
+        try:
+            candidates = folder.glob("*.mp4")
+        except OSError:
             continue
-        try: st = p.stat()
-        except OSError: continue
-        items.append({"name": p.name, "mtime": st.st_mtime, "size_mb": round(st.st_size / 1048576, 1)})
-    items.sort(key=lambda x: x["mtime"], reverse=True)
-    _CLIP_CACHE["dir_mtime"] = dir_mtime
+        for path in candidates:
+            if not CLIP_RE.fullmatch(path.name):
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            items.append({
+                "name": path.name, "mtime": stat.st_mtime, "size_mb": round(stat.st_size / 1048576, 1),
+                "source": source, "creator_id": creator_id, "creator_name": creator_name,
+                "_path": str(path.resolve()),
+            })
+    items.sort(key=lambda item: item["mtime"], reverse=True)
+    _CLIP_CACHE["signature"] = signature
     _CLIP_CACHE["items"] = items
     return items
+
+def find_clip_path(name):
+    """Resolve a clip only from the main gallery or registered creator clip folders."""
+    name = str(name or "")
+    if not CLIP_RE.fullmatch(name):
+        return None
+    for item in _clip_index():
+        if item["name"] == name:
+            path = pathlib.Path(item["_path"])
+            return path if path.is_file() else None
+    return None
+
+def split_clip_post_copy(text):
+    """Split the public clip sidecar into editable title and description fields."""
+    value = str(text or "").strip()
+    if not value:
+        return "", ""
+    parts = value.split("\n\n", 1)
+    return parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
+
 
 def list_clips(limit=60, offset=0):
     items = [dict(item) for item in _clip_index()[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]]
     for item in items:
-        try: item["caption"] = (OUT / item["name"]).with_suffix(".txt").read_text(encoding="utf-8")
-        except Exception: item["caption"] = ""
+        clip_path = pathlib.Path(item.pop("_path"))
+        try:
+            item["caption"] = clip_path.with_suffix(".txt").read_text(encoding="utf-8")
+        except Exception:
+            item["caption"] = ""
+        item["title"], item["description"] = split_clip_post_copy(item["caption"])
     return items
 
 def reveal(path):
@@ -2334,8 +2997,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             end_window_lease(lease)
 
     def _serve_clip(self, name):
-        p = OUT / name
-        if not (CLIP_RE.match(name) or re.match(r"^[A-Za-z0-9_\-]+\.txt$", name)) or not p.is_file():
+        if CLIP_RE.fullmatch(name):
+            p = find_clip_path(name)
+        elif re.fullmatch(r"[A-Za-z0-9_\-]+\.txt", name):
+            clip_path = find_clip_path(pathlib.Path(name).stem + ".mp4")
+            p = clip_path.with_suffix(".txt") if clip_path else None
+        else:
+            p = None
+        if not p or not p.is_file():
             return self._send(404, {"error": "not found"})
         size = p.stat().st_size
         ctype = "video/mp4" if name.endswith(".mp4") else "text/plain; charset=utf-8"
@@ -2390,6 +3059,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         "ai": public_ai_settings()}
                 html = HTML.replace("__BOOT__", json.dumps(boot).replace("</", "<\\/")).replace("__TOKEN__", TOKEN).replace("__APP_VERSION__", APP_VERSION)
                 return self._send(200, html, "text/html; charset=utf-8")
+            if path == "/api/creators":
+                return self._send(200, {"creators": CORE.list_creators()})
             if path == "/api/state":
                 q = urllib.parse.parse_qs(u.query)
                 try: since = int(q.get("since", ["0"])[0])
@@ -2440,6 +3111,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 if path == "/api/start":
                     CORE.start(clean_cfg(body)); return self._send(200, {"ok": True})
+                if path == "/api/creators/add":
+                    return self._send(200, CORE.add_creator(body))
+                if path == "/api/creators/remove":
+                    return self._send(200, CORE.remove_creator(body.get("id")))
+                if path == "/api/creators/open":
+                    return self._send(200, CORE.open_creator_folder(body.get("id"), body.get("folder", "live_clips")))
+                if path == "/api/creators/watch-vods":
+                    return self._send(200, CORE.start_vod_watch(body.get("id")))
+                if path == "/api/creators/stop-vod-watch":
+                    return self._send(200, CORE.stop_vod_watch(body.get("id")))
+                if path == "/api/creators/start":
+                    return self._send(200, CORE.start_creator(body.get("id")))
+                if path == "/api/creators/stop":
+                    return self._send(200, CORE.stop_creator(body.get("id"), body.get("force", False)))
                 if path == "/api/settings":
                     cfg = clean_cfg(body)
                     if CORE.running and (cfg.get("rec_dir") != CORE.settings.get("rec_dir") or cfg.get("out_dir") != CORE.settings.get("out_dir")):
@@ -2471,9 +3156,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/publishing/publish":
                     names = body.get("names", [])
                     if body.get("all"):
-                        names = [p.name for p in OUT.glob("*.mp4") if CLIP_RE.match(p.name)]
+                        names = [item["name"] for item in _clip_index()]
                     elif not isinstance(names, list): names = []
-                    return self._send(200, CORE.publish_clips([str(n) for n in names]))
+                    return self._send(200, CORE.publish_clips([str(n) for n in names],
+                                                               account_ids=body.get("account_ids")))
+                if path == "/api/publishing/publish-one":
+                    name = str(body.get("name", ""))
+                    title = str(body.get("title", "")).strip()[:100]
+                    description = str(body.get("description", "")).strip()[:2200]
+                    if not title:
+                        raise ValueError("Add a post title before publishing.")
+                    caption = title + (("\n\n" + description) if description else "")
+                    return self._send(200, CORE.publish_clips([name], caption_overrides={name: caption},
+                                                               account_ids=body.get("account_ids")))
                 if path == "/api/ai/settings":
                     return self._send(200, save_ai_settings(body))
                 if path == "/api/ai/test":
@@ -2489,10 +3184,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/delete_many":
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
-                    valid = [str(n) for n in names if CLIP_RE.match(str(n)) and (OUT / str(n)).is_file()]
+                    valid = [str(n) for n in names if CLIP_RE.fullmatch(str(n)) and find_clip_path(str(n))]
                     if not valid: return self._send(400, {"error": "No valid clips selected."})
                     for name in valid:
-                        for target in (OUT / name, (OUT / name).with_suffix(".txt")):
+                        clip_path = find_clip_path(name)
+                        if not clip_path:
+                            continue
+                        for target in (clip_path, clip_path.with_suffix(".txt")):
                             try:
                                 target.unlink(missing_ok=True)
                             except OSError as exc:
@@ -2504,12 +3202,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, "deleted": len(valid)})
                 if path in ("/api/delete", "/api/reveal"):
                     name = str(body.get("name", ""))
-                    if not CLIP_RE.match(name) or not (OUT / name).is_file():
+                    clip_path = find_clip_path(name)
+                    if not clip_path:
                         return self._send(404, {"error": "Clip not found."})
                     if path == "/api/reveal":
-                        reveal(OUT / name)
+                        reveal(clip_path)
                     else:
-                        for target in (OUT / name, (OUT / name).with_suffix(".txt")):
+                        for target in (clip_path, clip_path.with_suffix(".txt")):
                             try:
                                 target.unlink(missing_ok=True)
                             except OSError as exc:
@@ -2534,6 +3233,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/update_components":
                     return self._send(200, update_components())
                 if path == "/api/quit":
+                    CORE.stop(True)
+                    CORE.stop_all_creators()
                     cancel_window_close_shutdown(); self._send(200, {"ok": True}); QUIT.set(); return
             except (ValueError, AIProviderError) as e:
                 return self._send(400, {"error": str(e)})
@@ -2788,6 +3489,7 @@ select.text option{background:#14161f}
 .empty .big{width:62px;height:62px;border-radius:20px;background:var(--grad);display:grid;place-items:center;margin-bottom:8px;box-shadow:0 12px 36px rgba(139,92,246,.4)}
 #log{font:12px/1.65 "Cascadia Mono",Consolas,monospace;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-height:100%}
 #log div{white-space:pre-wrap;word-break:break-word}#log .t{color:var(--mute);margin-right:10px}#log .err{color:var(--bad)}#log .okk{color:var(--ok)}
+.creator-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}.creator-item{border:1px solid var(--line);background:rgba(0,0,0,.2);border-radius:12px;padding:10px}.creator-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.creator-name{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.creator-state{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim)}.creator-state.live{color:var(--ok)}.creator-detail{font-size:11px;color:var(--mute);margin-top:4px;overflow-wrap:anywhere}.creator-actions{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}.creator-actions .btn{padding:6px 9px;font-size:11px}.z-account-picks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:8px 0}.z-account-pick{display:flex;align-items:center;gap:8px;min-width:0;padding:9px;border:1px solid var(--line);border-radius:10px;background:rgba(0,0,0,.16);font-size:12px}.z-account-pick input{accent-color:var(--a1)}.z-account-pick span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .log-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.log-title{display:flex;align-items:center;gap:9px;font-weight:700}.log-live{font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:var(--ok);border:1px solid rgba(52,211,153,.35);border-radius:999px;padding:3px 8px}.log-live.paused{color:var(--warn);border-color:rgba(251,191,36,.35)}.log-actions{display:flex;gap:7px}.log-actions .btn{padding:7px 10px;font-size:11px}
 .hw{display:flex;flex-direction:column;gap:12px;min-height:100%}
 .hw textarea{flex:1;min-height:260px;resize:none;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:16px;padding:14px 16px;color:var(--tx);font:13px/1.6 "Cascadia Mono",Consolas,monospace;outline:0}
@@ -2798,6 +3500,11 @@ details{background:var(--card);border:1px solid var(--line);border-radius:14px;p
 summary{cursor:pointer;color:var(--dim);font-weight:600}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;max-height:200px;overflow:auto}
 .chips span{background:rgba(255,255,255,.06);border-radius:8px;padding:2px 9px;font-size:12px;color:var(--dim)}
+/* primary live capture controls stay visible above the dashboard */
+.capture-top{padding:0 22px 12px}
+.capture-top .startbar{padding:0;max-width:1600px;margin:0 auto}
+.capture-top .go{min-height:54px}
+.capture-top .stopb{min-height:54px}
 /* start bar */
 .startbar{padding:14px 0 0;display:flex;gap:10px}
 .go{flex:1;padding:15px;font-size:16px;border-radius:15px;background:var(--grad);font-weight:700;color:#fff;box-shadow:0 10px 30px rgba(139,92,246,.4);transition:.2s;display:flex;align-items:center;justify-content:center;gap:10px}
@@ -2814,6 +3521,16 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 .player video{height:min(82vh,820px);aspect-ratio:9/16;border-radius:14px;background:#000;display:block}
 .pside{width:290px;display:flex;flex-direction:column;gap:12px;padding:6px 6px 2px}
 .pside h4{font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim)}
+.post-dialog{width:min(680px,calc(100vw - 28px));max-height:92vh;overflow:auto;background:#12141d;border:1px solid var(--line2);border-radius:20px;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.65)}
+.post-dialog h3{font-size:18px;margin-bottom:5px}.post-dialog .sub{font-size:12px;color:var(--dim);margin-bottom:16px}
+.post-dialog label{display:block;color:var(--dim);font-size:12px;margin:12px 0 6px}
+.post-dialog label.platform-pick{display:flex;align-items:center;margin:0}
+.post-dialog textarea{min-height:145px;resize:vertical;line-height:1.5}
+.platform-picks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:14px 0}
+.platform-pick{display:flex;align-items:center;gap:8px;padding:11px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.2);font-size:12px;color:var(--tx);cursor:pointer}
+.platform-pick:has(input:checked){border-color:var(--a1);background:rgba(139,92,246,.15)}
+.post-note{font-size:11px;color:var(--mute);line-height:1.5;margin:10px 0 16px}
+@media(max-width:650px){.platform-picks{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .pcap{white-space:pre-wrap;font:13px/1.55 inherit;font-family:inherit;color:var(--tx);background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:12px;padding:12px;flex:1;overflow:auto}
 .prow{display:flex;gap:8px;flex-wrap:wrap}
 #toasts{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;align-items:center;z-index:99;pointer-events:none}
@@ -2835,10 +3552,22 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
   <button class="btn ghost" id="btn-quit" title="Stop everything and close StreamSnip AI"><span data-ico="power"></span>Quit</button>
 </header>
 <div class="local-note">If buttons do not respond, disable your ad blocker for <b>127.0.0.1</b> / <b>localhost</b>.</div>
+<div class="capture-top">
+  <div class="startbar" id="startbar"><button class="go" id="btn-start"><span data-ico="bolt" data-s="20"></span><span id="go-label">Start recording &amp; clipping</span></button></div>
+  <div class="startbar" id="stopbar" hidden><button class="stopb" id="btn-stop">Stop &amp; finish clips</button><button class="stopb alt" id="btn-kill">Stop now</button></div>
+</div>
 
 <div class="main">
 <section class="left">
  <div class="scroll">
+  <div class="card creator-card">
+    <div class="ch"><span class="num">LIVE</span><h3>Creator monitors</h3></div>
+    <p class="hint" style="margin:0 0 10px">Track creators independently. Each creator gets separate recordings and clips. Up to two can monitor at once.</p>
+    <input id="creator-name" class="text" type="text" maxlength="80" placeholder="Creator name">
+    <div class="field"><input id="creator-target" class="text" type="url" spellcheck="false" placeholder="Twitch or YouTube live URL"><button class="btn ghost" id="creator-add">Add</button></div>
+    <p class="hint">Each creator has separate Live recordings/clips and a Recorded VOD inbox. Turn on Watch VOD folder, then drop full VOD files into that creator's inbox. VOD clips and processed originals stay separate from Live.</p>
+    <div id="creator-list" class="creator-list"><p class="hint">Loading creator monitors...</p></div>
+  </div>
   <div class="card">
     <div class="ch"><span class="num">1</span><h3>Source</h3></div>
     <div class="seg" data-key="mode"><button data-v="live">Live stream</button><button data-v="file">Video file / VOD</button></div>
@@ -2854,8 +3583,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <button type="button" class="ai-choice" data-ai-provider="ollama"><b>Ollama local AI</b><small>Free · private · local model</small></button>
       <button type="button" class="ai-choice" data-ai-provider="gemini"><b>Gemini API</b><small>Hosted · uses Google quota</small></button>
       <button type="button" class="ai-choice" data-ai-provider="huggingface"><b>Hugging Face</b><small>Hosted · may use provider credits</small></button>
+      <button type="button" class="ai-choice" data-ai-provider="custom"><b>Free / Custom API</b><small>OpenAI-compatible endpoint</small></button>
     </div>
-    <select id="ai-provider" class="text" hidden><option value="hooks">Built-in and custom hook words</option><option value="ollama">Ollama local AI</option><option value="huggingface">Hugging Face hosted model</option><option value="gemini">Gemini API</option></select>
+    <select id="ai-provider" class="text" hidden><option value="hooks">Built-in and custom hook words</option><option value="ollama">Ollama local AI</option><option value="huggingface">Hugging Face hosted model</option><option value="gemini">Gemini API</option><option value="custom">Free / custom OpenAI-compatible API</option></select>
     <div id="ollama-ai-fields" hidden>
       <div class="row"><label>Ollama address</label></div><input id="ollama-url" class="text" value="http://127.0.0.1:11434">
       <div class="row"><label>Installed Ollama model</label><button class="btn ghost" id="ai-detect-ollama">Detect models</button></div>
@@ -2864,8 +3594,17 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     </div>
     <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><div class="prow"><b id="gemini-key-state">Not saved</b><button type="button" class="btn ghost" id="gemini-key-clear">Clear saved key</button></div></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><div class="row"><label>Preferred Gemini model</label></div><input id="gemini-model" class="text" value="gemini-3.8-flash" placeholder="gemini-3.8-flash"><p class="hint">The app checks this model first, tries the other available Gemini models if needed, then falls back to Ollama. Model IDs can change; use one enabled for your API key.</p></div>
     <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="deepseek-ai/DeepSeek-V4.1-Flash:fastest"><div class="row"><label>Hugging Face access token</label><div class="prow"><b id="hf-token-state">Not saved</b><button type="button" class="btn ghost" id="hf-token-clear">Clear saved token</button></div></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads. Use a token with Inference Providers access and available provider credits.</p></div>
+    <div id="custom-ai-fields" hidden>
+      <div class="row"><label>OpenAI-compatible API base URL</label></div>
+      <input id="custom-api-base" class="text" type="url" value="https://api.openai.com/v1" placeholder="https://your-provider.example/v1">
+      <div class="row"><label>Model name</label></div>
+      <input id="custom-api-model" class="text" type="text" placeholder="Enter the exact model ID">
+      <div class="row"><label>API key (optional for local/free endpoints)</label><div class="prow"><b id="custom-api-key-state">Not saved</b><button type="button" class="btn ghost" id="custom-api-key-clear">Clear saved key</button></div></div>
+      <input id="custom-api-key" class="text" type="password" placeholder="Paste API key if your provider requires one">
+      <p class="hint">Works with OpenAI-compatible chat-completions APIs, including providers that offer free model tiers. Enter the provider's base URL, exact model ID, and key if required. Provider quotas, rate limits, and terms still apply.</p>
+    </div>
 
-    <p class="hint" style="margin-top:12px">Titles and descriptions are generated automatically for each clip using the same provider selected above for highlight detection. Hook words mode uses transcript-based copy because it does not include a text-generating model. Gemini, local Ollama, and Hugging Face follow the same creator-style format: catchy Title Case titles, fitting emojis, a quote-led caption with context, creator credit, and ready-to-post hashtags. Invalid or incomplete AI responses use the transcript fallback.</p>
+    <p class="hint" style="margin-top:12px">Titles and descriptions are generated automatically for each clip using the same provider selected above for highlight detection. Hook words mode uses transcript-based copy because it does not include a text-generating model. Gemini, local Ollama, Hugging Face, and custom compatible APIs follow the same creator-style format: catchy Title Case titles, fitting emojis, a quote-led caption with context, creator credit, and ready-to-post hashtags. Invalid or incomplete AI responses use the transcript fallback.</p>
     <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><button class="btn ghost" id="ai-test-provider">Test connection</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
   </div>
 
@@ -2877,7 +3616,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <p class="hint">0 = no limit — selects every non-overlapping moment above the viral-score floor. Weak segments can produce fewer or no clips.</p>
     <div class="two">
       <div><div class="row"><label>Clips / chunk (0 = no limit)</label><b id="v-cpc"></b></div><input type="range" id="r-cpc" min="0" max="10" step="1"></div>
-      <div><div class="row"><label>Chunk length</label><b id="v-chunk"></b></div><input type="range" id="r-chunk" min="1" max="30" step="1"></div>
+      <div><div class="row"><label>Analysis window</label><b id="v-chunk"></b></div><input type="range" id="r-chunk" min="3" max="15" step="1"><p class="hint">3 min = faster AI reviews; 15 min = deeper context. The full local video is still transcribed and analyzed.</p></div>
       <div><div class="row"><label>Before peak</label><b id="v-pre"></b></div><input type="range" id="r-pre" min="5" max="60" step="1"></div>
       <div><div class="row"><label>After peak</label><b id="v-post"></b></div><input type="range" id="r-post" min="5" max="60" step="1"></div>
     </div>
@@ -2918,9 +3657,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       </div>
       <p class="hint">Presets control the font and animation. Text/stroke colors, position, alignment, and size remain yours to tune.</p>
     </div>
-    <div class="subhead"><span>Profanity filter</span><label class="toggle compact"><span>Mute audio + mask captions</span><input type="checkbox" id="t-profanity"><i class="sl"></i></label></div>
+    <div class="subhead"><span>Profanity censor</span><label class="toggle compact"><span>Censor audio + captions</span><input type="checkbox" id="t-profanity"><i class="sl"></i></label></div>
     <textarea id="profanity-words" class="text" rows="3" spellcheck="false" placeholder="Add extra words or phrases, one per line"></textarea>
-    <p class="hint">Enabled by default. Detected English profanity is muted in the exported audio and shown as **** in captions and generated post text. Add extra words or phrases above. Speech recognition can miss words, so review every clip before publishing.</p>
+    <p class="hint">Censoring only changes the rendered audio, captions and generated post text. It never removes a clip, lowers its viral score, or blocks publishing. You can still publish clips containing profanity; turn censoring off before rendering when you want the original audio and words. Existing clips must be re-rendered to apply a changed setting. Speech recognition can miss words, so review before posting.</p>
   </div>
 
   <div class="card">
@@ -2940,8 +3679,19 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
       <button class="btn ghost" id="btn-cam" style="width:100%">Set facecam area on a frame</button>
       <p class="hint" id="cam-hint">Like Twitch: the facecam fills the top 40% of the clip and the game fills the bottom 60%.</p>
     </div>
-    <div class="row"><label>Speech model</label></div>
-    <select id="model" class="text"></select>
+    <div class="row"><label>Transcription engine</label></div>
+    <select id="transcriber-provider" class="text">
+      <option value="faster-whisper">Built-in faster-whisper · local, no API key</option>
+      <option value="custom-command">Bring your own transcriber · CLI / script</option>
+    </select>
+    <div id="faster-whisper-fields"><div class="row"><label>Speech model</label></div><select id="model" class="text"></select></div>
+    <div id="transcriber-custom-fields" hidden>
+      <div class="row"><label>Your transcriber command</label></div>
+      <input id="transcriber-command" class="text" type="text" spellcheck="false" placeholder='whisper-cli -f "{input}" -oj -of "{output}"'>
+      <div class="row"><label>Language placeholder</label></div>
+      <input id="transcriber-language" class="text" type="text" value="auto" maxlength="20" placeholder="auto">
+      <p class="hint">No StreamSnip API key is needed. Use your own local executable or script. Placeholders: {input}, {output}, {language}. Return JSON to {output} or stdout with timestamped words: {"words":[{"start":0.1,"end":0.5,"word":"hello"}]}. Segment JSON with start/end/text is also accepted. Your own transcriber handles any credentials it needs. Do not paste secrets in this command field; use environment variables or its secure local config.</p>
+    </div>
     <label class="toggle"><span>Delete the raw recording after clipping (saves disk space)</span><input type="checkbox" id="t-del"><i class="sl"></i></label>
     <div class="row"><label>Tag / credit</label></div>
     <input id="streamer-tag" class="text" type="text" maxlength="80" placeholder="Auto-detect from stream URL">
@@ -2975,10 +3725,9 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>API key</label><b id="z-key-state">Not saved</b></div>
     <input id="z-api" class="text" type="password" placeholder="Enter a new key to replace the saved key">
     <p class="hint">Credentials are stored locally in this app folder and never sent to the browser.</p>
-    <div class="two">
-      <div><div class="row"><label>Instagram</label></div><select id="z-ig" class="text"><option value="">Not selected</option></select></div>
-      <div><div class="row"><label>YouTube</label></div><select id="z-yt" class="text"><option value="">Not selected</option></select></div>
-    </div>
+    <div class="row"><label>Connected social accounts</label></div>
+    <div id="z-account-picks" class="z-account-picks"><p class="hint">Save your Zernio key, then identify connected accounts.</p></div>
+    <p class="hint">Choose one connected account per platform. StreamSnip can publish a clip to several selected platforms in one Zernio request.</p>
     <div class="two">
       <div><div class="row"><label>Schedule delay (minutes)</label></div><input id="z-delay" class="text" type="number" min="0" value="0"></div>
       <div><div class="row"><label>YouTube visibility</label></div><select id="z-vis" class="text"><option>public</option><option>unlisted</option><option>private</option></select></div>
@@ -2986,13 +3735,6 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <label class="toggle"><span>Auto-post new clips</span><input type="checkbox" id="z-auto"><i class="sl"></i></label>
     <div class="prow" style="margin-top:12px"><button class="btn ghost" id="z-check">Save &amp; identify channels</button><span class="msg" id="z-msg">Not connected</span></div>
   </div>
- </div>
- <div class="startbar" id="startbar">
-   <button class="go" id="btn-start"><span data-ico="bolt" data-s="20"></span><span id="go-label">Start clipping</span></button>
- </div>
- <div class="startbar" id="stopbar" hidden>
-   <button class="stopb" id="btn-stop">Stop &amp; finish clips</button>
-   <button class="stopb alt" id="btn-kill">Stop now</button>
  </div>
 </section>
 
@@ -3085,6 +3827,41 @@ async function api(path,body){
   if(!r.ok)throw new Error(j.error||("Request failed ("+r.status+")"));
   return j;
 }
+async function refreshCreators(){
+  const host=$("#creator-list");if(!host)return;
+  try{
+    const response=await fetch("/api/creators",{cache:"no-store"});
+    if(!response.ok)throw new Error("Could not load creator monitors");
+    const data=await response.json(),items=data.creators||[];
+    if(!items.length){host.replaceChildren(h("p",{class:"hint"},"No creator monitors yet. Add a Twitch or YouTube channel above."));return}
+    host.replaceChildren(...items.map(c=>{
+      const running=!!c.running,phase=c.phase||"offline";
+      const watching=!!c.watching_vods;
+      const actions=h("div",{class:"creator-actions"},
+        h("button",{class:"btn ghost",onclick:async()=>{try{await api(running?"/api/creators/stop":"/api/creators/start",{id:c.id});await refreshCreators()}catch(e){toast(e.message,"bad")}}},running?"Stop live":"Start live"),
+        h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/creators/open",{id:c.id,folder:"root"})}catch(e){toast(e.message,"bad")}}},"Creator folder"),
+        h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/creators/open",{id:c.id,folder:"live_clips"})}catch(e){toast(e.message,"bad")}}},"Live clips"),
+        h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/creators/open",{id:c.id,folder:"vod_inbox"})}catch(e){toast(e.message,"bad")}}},"VOD inbox"),
+        h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/creators/open",{id:c.id,folder:"vod_clips"})}catch(e){toast(e.message,"bad")}}},"VOD clips"),
+        h("button",{class:"btn "+(watching?"danger":"primary"),onclick:async()=>{try{await api(watching?"/api/creators/stop-vod-watch":"/api/creators/watch-vods",{id:c.id});await refreshCreators()}catch(e){toast(e.message,"bad")}}},watching?"Stop folder watch":"Watch VOD folder"),
+        h("button",{class:"btn ghost",onclick:async()=>{if(!(await confirmBox("Remove "+c.name+"?","Stop both monitors first. Existing recordings and clips are kept.","Remove")))return;try{await api("/api/creators/remove",{id:c.id});await refreshCreators()}catch(e){toast(e.message,"bad")}}},"Remove"));
+      return h("div",{class:"creator-item"},
+        h("div",{class:"creator-top"},h("div",{class:"creator-name"},c.name),h("span",{class:"creator-state "+(running?"live":"")},running?(phase==="recording"?"LIVE":phase):"OFFLINE")),
+        h("div",{class:"creator-detail"},c.status||c.target),
+        h("div",{class:"creator-detail"},"Live clips: "+(Number(c.live_clips)||0)+" · Recorded-VOD clips: "+(Number(c.vod_clips)||0)+" · VODs waiting: "+(Number(c.vod_pending)||0)),
+        h("div",{class:"creator-detail"},c.vod_status||"Recorded-VOD folder is not being watched."),
+        actions);
+    }));
+  }catch(e){host.replaceChildren(h("p",{class:"hint"},e.message))}
+}
+$("#creator-add").onclick=async()=>{
+  const name=$("#creator-name").value.trim(),target=$("#creator-target").value.trim();
+  if(!name||!target){toast("Enter a creator name and Twitch/YouTube URL.","bad");return}
+  const button=$("#creator-add");button.disabled=true;
+  try{await api("/api/creators/add",{name,target});$("#creator-name").value="";$("#creator-target").value="";await refreshCreators();toast("Creator monitor added.","ok")}
+  catch(e){toast(e.message,"bad")}
+  button.disabled=false;
+};
 const markWindowOpen=()=>api("/api/window/open").catch(()=>{});
 let windowLeaseController=null,windowLeaseActive=false;
 function startWindowLease(){if(windowLeaseActive)return;windowLeaseActive=true;windowLeaseController=new AbortController();const controller=windowLeaseController;(async()=>{while(windowLeaseActive&&controller===windowLeaseController){try{const r=await fetch("/api/window/lease",{headers:{"X-Token":TOKEN},cache:"no-store",signal:controller.signal});if(!r.ok)throw new Error("Window lease failed");const reader=r.body.getReader();while(windowLeaseActive){const part=await reader.read();if(part.done)break}}catch(e){}if(windowLeaseActive)await new Promise(resolve=>setTimeout(resolve,350))}})()}
@@ -3096,34 +3873,90 @@ $("#ai-provider").value=AI.provider||"hooks";
 $("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
 $("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.ollama_model||"Click Detect models"));
 $("#hf-model").value=AI.huggingface_model||"deepseek-ai/DeepSeek-V4.1-Flash:fastest";
+$("#custom-api-base").value=AI.custom_api_base||"https://api.openai.com/v1";
+$("#custom-api-model").value=AI.custom_api_model||"";
+$("#custom-api-key-state").textContent=AI.custom_api_key_set?"Saved locally":"Not saved";
+$("#custom-api-key-clear").disabled=!AI.custom_api_key_set;
 $("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";
 $("#gemini-model").value=AI.gemini_model||"gemini-3.8-flash";
 $("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";
 $("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set;
-function showAIFields(updateMessage=false){const p=$("#ai-provider").value;$("#ollama-ai-fields").hidden=p!=="ollama";$("#gemini-ai-fields").hidden=p!=="gemini";$("#hf-ai-fields").hidden=p!=="huggingface";$("#ai-test-provider").hidden=p==="hooks";if(updateMessage){const names={ollama:"Ollama",gemini:"Gemini",huggingface:"Hugging Face"};$("#ai-settings-msg").textContent=p==="hooks"?"Built-in hook detection selected":"Ready to test or save "+names[p]+" settings"}$$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")})}
+function showAIFields(updateMessage=false){
+  const p=$("#ai-provider").value;
+  $("#ollama-ai-fields").hidden=p!=="ollama";
+  $("#gemini-ai-fields").hidden=p!=="gemini";
+  $("#hf-ai-fields").hidden=p!=="huggingface";
+  $("#custom-ai-fields").hidden=p!=="custom";
+  $("#ai-test-provider").hidden=p==="hooks";
+  if(updateMessage){
+    const names={ollama:"Ollama",gemini:"Gemini",huggingface:"Hugging Face",custom:"custom OpenAI-compatible API"};
+    $("#ai-settings-msg").textContent=p==="hooks"?"Built-in hook detection selected":"Ready to test or save "+names[p]+" settings";
+  }
+  $$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")});
+}
 $("#ai-provider").onchange=()=>showAIFields(true);$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields(true)});showAIFields(true);
 $("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
-function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest"};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;return payload}
-function refreshAISecretState(){$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set}
-$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";refreshAISecretState();$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
-async function clearAISecret(kind){const gemini=kind==="gemini";const label=gemini?"Gemini API key":"Hugging Face token";if(!(await confirmBox("Clear saved "+label+"?","The credential will be removed from this computer. Add and save a new one before using this hosted provider again.","Clear credential")))return;const button=$(gemini?"#gemini-key-clear":"#hf-token-clear");button.disabled=true;try{const payload=aiSettingsPayload();payload[gemini?"clear_gemini_key":"clear_huggingface_token"]=true;const r=await api("/api/ai/settings",payload);Object.assign(AI,r);$(gemini?"#gemini-key":"#hf-token").value="";refreshAISecretState();$("#ai-settings-msg").textContent=label+" cleared from this computer";toast(label+" cleared","ok")}catch(e){refreshAISecretState();$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}}
-$("#gemini-key-clear").onclick=()=>clearAISecret("gemini");$("#hf-token-clear").onclick=()=>clearAISecret("huggingface");
+function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest",custom_api_base:$("#custom-api-base").value.trim(),custom_api_model:$("#custom-api-model").value.trim()};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;if($("#custom-api-key").value)payload.custom_api_key=$("#custom-api-key").value;return payload}
+function refreshAISecretState(){$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#custom-api-key-state").textContent=AI.custom_api_key_set?"Saved locally":"Not saved";$("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set;$("#custom-api-key-clear").disabled=!AI.custom_api_key_set}
+$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#custom-api-key").value="";refreshAISecretState();$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
+async function clearAISecret(kind){
+  const configs={
+    gemini:{label:"Gemini API key",button:"#gemini-key-clear",input:"#gemini-key",flag:"clear_gemini_key"},
+    huggingface:{label:"Hugging Face token",button:"#hf-token-clear",input:"#hf-token",flag:"clear_huggingface_token"},
+    custom:{label:"Custom API key",button:"#custom-api-key-clear",input:"#custom-api-key",flag:"clear_custom_api_key"}
+  };
+  const item=configs[kind];
+  if(!item)return;
+  if(!(await confirmBox("Clear saved "+item.label+"?","The credential will be removed from this computer. Add and save a new one before using this hosted provider again.","Clear credential")))return;
+  const button=$(item.button);button.disabled=true;
+  try{
+    const payload=aiSettingsPayload();payload[item.flag]=true;
+    const r=await api("/api/ai/settings",payload);Object.assign(AI,r);
+    $(item.input).value="";refreshAISecretState();
+    $("#ai-settings-msg").textContent=item.label+" cleared from this computer";toast(item.label+" cleared","ok");
+  }catch(e){refreshAISecretState();$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}
+}
+$("#gemini-key-clear").onclick=()=>clearAISecret("gemini");
+$("#hf-token-clear").onclick=()=>clearAISecret("huggingface");
+$("#custom-api-key-clear").onclick=()=>clearAISecret("custom");
 $("#ai-test-provider").onclick=async()=>{const b=$("#ai-test-provider");b.disabled=true;$("#ai-settings-msg").textContent="Testing connection...";try{const r=await api("/api/ai/test",aiSettingsPayload());$("#ai-settings-msg").textContent=r.message;toast(r.message,"ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
-function setSelectOptions(el,items,chosen){
-  el.replaceChildren(h("option",{value:""},"Not selected"));
-  items.forEach(a=>el.append(h("option",{value:a.id},a.name+" ("+a.platform+")")));
-  if(chosen&&!items.some(a=>String(a.id)===String(chosen)))el.append(h("option",{value:chosen},"Saved channel ("+chosen+")"));
-  if(chosen)el.value=chosen;
+function selectedZernioAccounts(){
+  const selected={};
+  $$("#z-account-picks input:checked").forEach(input=>{selected[input.dataset.platform]=input.value});
+  return selected;
 }
 async function loadPublishingAccounts(){
   if(Z.available===false){$("#z-msg").textContent="Posting adapter unavailable";$("#z-msg").classList.add("show");return}
   const provider=activeProvider;
   const r=await api("/api/publishing/accounts",{provider});
   if(provider!==activeProvider)return;
-  setSelectOptions($("#z-ig"),r.accounts.filter(a=>a.platform==="instagram"),Z.instagram_id);
-  setSelectOptions($("#z-yt"),r.accounts.filter(a=>a.platform==="youtube"),Z.youtube_id);
+  const saved=Object.assign({},Z.accounts||{});
+  if(!Object.keys(saved).length){
+    if(Z.instagram_id)saved.instagram=Z.instagram_id;
+    if(Z.youtube_id)saved.youtube=Z.youtube_id;
+  }
+  const host=$("#z-account-picks");host.replaceChildren();
+  const groups={};
+  r.accounts.forEach(account=>{
+    const platform=String(account.platform||"").toLowerCase();
+    if(!groups[platform])groups[platform]=[];
+    groups[platform].push(account);
+  });
+  const labels={twitter:"X / Twitter",instagram:"Instagram",facebook:"Facebook",linkedin:"LinkedIn",tiktok:"TikTok",youtube:"YouTube",pinterest:"Pinterest",reddit:"Reddit",bluesky:"Bluesky",threads:"Threads",googlebusiness:"Google Business"};
+  const defaults={};
+  Object.entries(groups).forEach(([platform,items])=>{
+    if(items.length)defaults[platform]=String(items[0].id);
+    items.forEach(account=>{
+      const input=h("input",{type:"radio",name:"z-account-"+platform,value:account.id,"data-platform":platform});
+      input.checked=String(saved[platform]||(!Object.keys(saved).length?defaults[platform]:""))===String(account.id);
+      host.append(h("label",{class:"z-account-pick"},input,h("span",{},(labels[platform]||platform)+" · "+(account.name||account.username||account.id))));
+    });
+  });
+  if(!Object.keys(saved).length)Z.accounts=defaults;
+  Z.connected_accounts=r.accounts;
+  if(!r.accounts.length)host.append(h("p",{class:"hint"},"No connected social accounts were found for this Zernio key."));
   accountsLoadedFor=provider;
-  $("#z-msg").textContent=r.accounts.length?"Connected channels identified":"No Instagram/YouTube channels found";
+  $("#z-msg").textContent=r.accounts.length?r.accounts.length+" connected account(s) identified":"No supported social accounts found";
   $("#z-msg").classList.add("show");
 }
 function toast(msg,kind){if($$(".toast").some(x=>x.textContent===msg))return;const t=h("div",{class:"toast "+(kind||"")},msg);$("#toasts").append(t);setTimeout(()=>{t.classList.add("out");setTimeout(()=>t.remove(),300)},3200)}
@@ -3183,6 +4016,18 @@ Object.entries(BOOT.colors).forEach(([name,css])=>{sw.append(h("button",{title:n
 function paintSw(){$$("button",sw).forEach(b=>b.classList.toggle("on",b.dataset.v===S.color))}paintSw();
 BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large-v3"?"distil-large-v3 (fast, English)":m==="large-v3-turbo"?"large-v3-turbo (fast, any language)":m==="medium"?"medium (balanced)":m==="large-v3"?"large-v3 (highest accuracy)":m==="small"?"small (light)":"base (lightest)")));
 $("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.target.value;scheduleSave()});
+$("#transcriber-provider").value=S.transcriber_provider||"faster-whisper";
+$("#transcriber-command").value=S.transcriber_command||"";
+$("#transcriber-language").value=S.transcriber_language||"auto";
+function updateTranscriberFields(){
+  const custom=$("#transcriber-provider").value==="custom-command";
+  $("#transcriber-custom-fields").hidden=!custom;
+  $("#faster-whisper-fields").hidden=custom;
+}
+$("#transcriber-provider").addEventListener("change",e=>{S.transcriber_provider=e.target.value;updateTranscriberFields();scheduleSave()});
+$("#transcriber-command").addEventListener("change",e=>{S.transcriber_command=e.target.value.slice(0,2000);scheduleSave()});
+$("#transcriber-language").addEventListener("change",e=>{S.transcriber_language=e.target.value.trim().slice(0,20)||"auto";scheduleSave()});
+updateTranscriberFields();
 $("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}function resetCropForFormat(){const r=({"9:16":9/16,"16:9":16/9,"1:1":1,"4:5":4/5}[S.output_format]||9/16),w=Math.min(100,100*r/(16/9));S.crop_w=+w.toFixed(1);S.crop_h=100;S.crop_x=+( (100-w)/2 ).toFixed(1);S.crop_y=0}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;resetCropForFormat();updateFormatUI();preview();scheduleSave()});updateFormatUI();
 $("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
 $("#t-del").checked=!!S.delete_rec;$("#t-del").addEventListener("change",e=>{S.delete_rec=e.target.checked;scheduleSave()});
@@ -3388,14 +4233,14 @@ $("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLo
 
 /* ---------- actions ---------- */
 function loadProviderForm(){const cfg=(P.providers&&P.providers.zernio)||{};Z=Object.assign({},cfg);$("#pub-provider").value="zernio";$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post}
-$("#pub-provider").onchange=async e=>{activeProvider="zernio";accountsLoadedFor="";loadProviderForm();["#z-ig","#z-yt"].forEach(id=>$(id).replaceChildren(h("option",{value:""},"Not selected")));if((P.providers.zernio||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
+$("#pub-provider").onchange=async e=>{activeProvider="zernio";accountsLoadedFor="";loadProviderForm();$("#z-account-picks").replaceChildren();if((P.providers.zernio||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
 $("#z-key-state").textContent=Z.api_key_set?"Saved locally":"Not saved";
 $("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";
 $("#z-check").onclick=async()=>{
   const b=$("#z-check");b.disabled=true;
   try{
     const payload={provider:"zernio",api_key:$("#z-api").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value};
-    if(accountsLoadedFor==="zernio"){payload.instagram_id=$("#z-ig").value;payload.youtube_id=$("#z-yt").value}
+    if(accountsLoadedFor==="zernio")payload.account_ids=selectedZernioAccounts();
     const r=await api("/api/publishing",payload);
     Object.assign(P,r);Object.assign(Z,(r.providers||{})[activeProvider]||{});$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadPublishingAccounts();toast(activeProvider+" settings saved locally","ok");
   }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
@@ -3510,20 +4355,107 @@ function updateRun(s){
   const stop=$("#btn-stop");stop.textContent=live?(s.stopping?"Wrapping up...":"Stop & finish clips"):"Cancel";stop.disabled=!!s.stopping&&live;
   $$(".left .scroll input,.left .scroll select,.left .scroll .seg button,.left .scroll .sw button").forEach(el=>{});
 }
+function openSocialPost(c){
+  const titleText=c.title||((c.caption||"").split("\n")[0]||c.name);
+  const descText=c.description||((c.caption||"").split("\n\n").slice(1).join("\n\n"));
+  const platforms=[
+    {id:"instagram",label:"Instagram",url:"https://www.instagram.com/create/select/"},
+    {id:"tiktok",label:"TikTok",url:"https://www.tiktok.com/upload"},
+    {id:"facebook",label:"Facebook",url:"https://www.facebook.com/reels/create/"},
+    {id:"youtube",label:"YouTube",url:"https://www.youtube.com/upload"}
+  ];
+  const title=h("input",{class:"text",type:"text",maxlength:"100"});
+  title.value=titleText;
+  const description=h("textarea",{class:"text"});
+  description.value=descText;
+  const directChecks={},manualChecks={};
+  const savedAccounts=Object.assign({},Z.accounts||{});
+  if(!Object.keys(savedAccounts).length){
+    if(Z.instagram_id)savedAccounts.instagram=Z.instagram_id;
+    if(Z.youtube_id)savedAccounts.youtube=Z.youtube_id;
+  }
+  const platformLabels={twitter:"X / Twitter",instagram:"Instagram",facebook:"Facebook",linkedin:"LinkedIn",tiktok:"TikTok",youtube:"YouTube",pinterest:"Pinterest",reddit:"Reddit",bluesky:"Bluesky",threads:"Threads",googlebusiness:"Google Business"};
+  const connected=Object.entries(savedAccounts);
+  const choices=h("div",{class:"platform-picks"},...connected.map(([id,accountId])=>{
+    const input=h("input",{type:"checkbox"});
+    input.checked=true;
+    directChecks[id]=input;
+    return h("label",{class:"platform-pick"},input,platformLabels[id]||id);
+  }));
+  const manualChoices=h("div",{class:"platform-picks"},...platforms.map(platform=>{
+    const input=h("input",{type:"checkbox"});input.checked=true;manualChecks[platform.id]=input;
+    return h("label",{class:"platform-pick"},input,platform.label);
+  }));
+  const selectedAccounts=()=>Object.fromEntries(connected.filter(([id])=>directChecks[id]&&directChecks[id].checked));
+  const close=()=>{overlay.remove();document.removeEventListener("keydown",onKey)};
+  const onKey=e=>{if(e.key==="Escape")close()};
+  const overlay=h("div",{class:"overlay",onclick:e=>{if(e.target===overlay)close()}});
+  const copyValue=(value,label)=>{
+    navigator.clipboard.writeText(value).then(
+      ()=>toast(label+" copied. Paste it into the platform form.","ok"),
+      ()=>toast("Clipboard access blocked; select and copy the text manually.","bad")
+    );
+  };
+  const copyTitle=h("button",{class:"btn ghost",onclick:()=>copyValue(title.value.trim(),"Title")},"Copy title");
+  const copyDescription=h("button",{class:"btn ghost",onclick:()=>copyValue(description.value.trim(),"Description")},"Copy description");
+  const publish=h("button",{class:"btn primary",disabled:!connected.length||!Z.api_key_set,onclick:async()=>{
+    const accounts=selectedAccounts();
+    if(!Object.keys(accounts).length){toast("Select at least one connected Zernio account","bad");return}
+    if(!title.value.trim()){toast("Add a post title first","bad");return}
+    publish.disabled=true;publish.textContent="Queueing publish...";
+    try{
+      const result=await api("/api/publishing/publish-one",{name:c.name,title:title.value.trim(),description:description.value.trim(),account_ids:accounts});
+      toast("Clip queued for direct publishing to "+Object.keys(accounts).join(", "), "ok");
+      close();
+    }catch(error){toast(error.message,"bad");publish.disabled=false;publish.textContent="Publish via Zernio"}
+  }},"Publish via Zernio");
+  const open=h("button",{class:"btn ghost",onclick:()=>{
+    const selected=platforms.filter(p=>manualChecks[p.id]&&manualChecks[p.id].checked);
+    if(!selected.length){toast("Select at least one platform","bad");return}
+    if(!title.value.trim()){toast("Add a post title first","bad");return}
+    let opened=0;
+    for(const platform of selected){
+      const tab=window.open(platform.url,"_blank");
+      if(tab)opened++;
+    }
+    if(opened<selected.length)toast("Some tabs were blocked. Allow pop-ups for StreamSnip AI and try again.","bad");
+    else toast("Opened "+opened+" platform page(s). Upload the clip, copy its title/description, and publish.","ok");
+    close();
+  }},"Open selected platforms");
+  const cancel=h("button",{class:"btn ghost",onclick:close},"Cancel");
+  overlay.append(h("div",{class:"post-dialog"},
+    h("h3",{},"Prepare social post"),
+    h("p",{class:"sub"},"Clip: "+c.name+" · Select one or more destinations"),
+    h("label",{},"Post title"),
+    title,
+    h("label",{},"Description and hashtags"),
+    description,
+    h("label",{},"Publish directly through your connected Zernio accounts"),
+    choices,
+    h("p",{class:"post-note"},connected.length?"Direct publishing uploads this clip and sends your edited caption to the selected connected accounts. Curse words do not block publishing; the clip uses whatever censoring was applied during rendering.":"Connect Zernio and select social accounts in Settings to publish directly."),
+    h("label",{},"Manual upload fallback"),
+    manualChoices,
+    h("p",{class:"post-note"},"Manual upload opens the selected native upload pages. Download the clip, attach it yourself, and paste the copied title and description; platform security prevents silent form filling or local-file attachment."),
+    h("div",{class:"prow",style:"justify-content:flex-end"},cancel,h("a",{class:"btn ghost",href:"/clips/"+encodeURIComponent(c.name),download:c.name},"Download clip"),copyTitle,copyDescription,publish,open)
+  ));
+  document.body.append(overlay);
+  document.addEventListener("keydown",onKey);
+}
 function clipCard(c){
   const v=h("video",{src:"/clips/"+encodeURIComponent(c.name)+"#t=0.1",loop:true,playsinline:true,preload:"metadata"});v.muted=true;
   const first=(c.caption||"").split("\n")[0]||c.name;
   const when=h("span",{class:"when","data-t":c.mtime},ago(c.mtime));
+  const origin=c.creator_name?c.creator_name+" · "+(c.source==="vod"?"Recorded VOD":"Live"):"Local recording";
   const pick=h("input",{class:"pick",type:"checkbox",title:"Select this clip for publishing"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>{pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);updateSelectedButton()};
   const copy=()=>{navigator.clipboard.writeText(c.caption||"").then(()=>toast("Caption copied","ok"),()=>toast("Couldn't copy","bad"))};
-  const post=()=>publishNames([c.name]);
+  const post=()=>openSocialPost(c);
   const del=async()=>{if(await confirmBox("Delete this clip?","This permanently removes the video and its caption file.","Delete")){try{await api("/api/delete",{name:c.name});toast("Clip deleted");poll(true)}catch(e){toast(e.message,"bad")}}};
   return h("div",{class:"clip","data-name":c.name,title:"Double-click this clip to select it for publishing",ondblclick:e=>{if(!e.target.closest("button,a,input"))toggleClipSelection(c.name)},onmouseenter:()=>{v.play().catch(()=>{})},onmouseleave:()=>v.pause()},
     h("div",{class:"thumb",onclick:()=>openClip(c)},v,h("div",{class:"pb"},ico("play",15))),
     h("div",{class:"cm"},h("div",{class:"cc",title:first},first),
-      h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB"),
+      h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB · "+origin),
         h("span",{class:"acts"},
-          h("button",{class:"ib post",title:"Publish this clip",onclick:post},"Post"),
+          h("button",{class:"ib post",title:"Prepare a post for Instagram, TikTok, Facebook, or YouTube",onclick:post},"Post"),
           h("button",{class:"ib",title:"Copy caption + hashtags",onclick:copy},ico("copy",15)),
           h("a",{class:"ib",title:"Download",href:"/clips/"+encodeURIComponent(c.name),download:c.name},ico("download",15)),
           h("button",{class:"ib",title:"Show in folder",onclick:()=>api("/api/reveal",{name:c.name}).catch(e=>toast(e.message,"bad"))},ico("folder",15)),
@@ -3548,7 +4480,9 @@ function renderClips(list,total=0){
 }
 async function publishNames(names){
   if(!names.length){toast("Select at least one clip first","bad");return}
-  try{const r=await api("/api/publishing/publish",{names});toast("Started uploading "+r.queued+" clip(s) to "+activeProvider,"ok");selectedClips.clear();$$('.pick').forEach(x=>x.checked=false);updateSelectedButton();}
+  const accounts=Object.assign({},Z.accounts||{});
+  if(!Object.keys(accounts).length){if(Z.instagram_id)accounts.instagram=Z.instagram_id;if(Z.youtube_id)accounts.youtube=Z.youtube_id}
+  try{const r=await api("/api/publishing/publish",{names,account_ids:accounts});toast("Started uploading "+r.queued+" clip(s) to "+Object.keys(accounts).join(", "),"ok");selectedClips.clear();$$('.pick').forEach(x=>x.checked=false);updateSelectedButton();}
   catch(e){toast(e.message,"bad")}
 }
 $("#btn-publish-selected").onclick=()=>publishNames([...selectedClips]);
@@ -3558,7 +4492,7 @@ $("#btn-delete-selected").onclick=async()=>{
   if(!(await confirmBox("Delete selected clips?","This permanently removes "+names.length+" video(s) and their caption files.","Delete")))return;
   try{const r=await api("/api/delete_many",{names});selectedClips.clear();toast("Deleted "+r.deleted+" clip(s)","ok");poll(true)}catch(e){toast(e.message,"bad")}
 };
-$("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This submits every finished clip in your clips folder to the selected channels. This may publish many videos.","Publish all")))return;try{const r=await api("/api/publishing/publish",{all:true});toast("Started uploading "+r.queued+" clip(s) to "+activeProvider,"ok")}catch(e){toast(e.message,"bad")}};
+$("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This submits every finished clip in your clips folder to the connected Zernio accounts. This may publish many videos.","Publish all")))return;const accounts=Object.assign({},Z.accounts||{});if(!Object.keys(accounts).length){if(Z.instagram_id)accounts.instagram=Z.instagram_id;if(Z.youtube_id)accounts.youtube=Z.youtube_id}try{const r=await api("/api/publishing/publish",{all:true,account_ids:accounts});toast("Started uploading "+r.queued+" clip(s) to "+Object.keys(accounts).join(", "),"ok")}catch(e){toast(e.message,"bad")}};
 $("#btn-clips-newer").onclick=()=>{clipOffset=Math.max(0,clipOffset-CLIP_PAGE_SIZE);poll()};
 $("#btn-clips-older").onclick=()=>{clipOffset+=CLIP_PAGE_SIZE;poll()};
 function openClip(c){
@@ -3584,6 +4518,7 @@ async function poll(){
   busy=false;
 }
 setInterval(poll,900);poll();
+refreshCreators();setInterval(refreshCreators,2500);
 </script>
 </body>
 </html>

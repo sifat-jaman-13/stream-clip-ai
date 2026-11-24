@@ -31,6 +31,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
 from post_metadata import DEFAULT_GEMINI_COPY_MODEL, build_transcript_fallback, generate_social_copy
+from browser_automation import BrowserAutomationManager, BrowserAutomationError
 APP_VERSION = "3.0.0"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
@@ -2681,6 +2682,10 @@ class Core:
         return {"ok": True, "message": message}
 
     def shutdown(self):
+        try:
+            BROWSER_AUTOMATION.stop()
+        except Exception:
+            pass
         with self.lock:
             engine = self.engine
             worker = self.worker
@@ -3011,6 +3016,7 @@ def grab_frame(mode, target):
     raise ValueError("Couldn't read a frame from that source.")
 
 CORE = Core()
+BROWSER_AUTOMATION = BrowserAutomationManager(_data_root / "browser-profiles")
 TOKEN = secrets.token_urlsafe(24)
 
 # ------------------------------------------------------------------ http server
@@ -3186,6 +3192,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, {"settings": CORE.settings, "ai": public_ai_settings(),
                                         "transcriber_models": MODELS, "layouts": LAYOUTS,
                                         "output_formats": list(OUTPUT_FORMATS.keys())})
+            if path == "/api/browser/status":
+                return self._send(200, BROWSER_AUTOMATION.status())
             if path == "/api/publishing/status":
                 # publishing_status exposes only credential-presence flags, never the API key.
                 return self._send(200, CORE.publishing_status())
@@ -3296,6 +3304,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
                     return self._send(200, CORE.publish_clips([str(n) for n in names]))
+                if path == "/api/browser/prepare":
+                    name = str(body.get("name", ""))
+                    clip_path = find_clip_path(name)
+                    if not clip_path:
+                        return self._send(404, {"error": "Clip not found."})
+                    result = BROWSER_AUTOMATION.prepare(
+                        video_path=clip_path,
+                        platform=str(body.get("platform", "")),
+                        title=str(body.get("title", "")),
+                        description=str(body.get("description", "")),
+                        browser=str(body.get("browser", "default")).lower(),
+                    )
+                    return self._send(200, result)
+                if path == "/api/browser/close":
+                    BROWSER_AUTOMATION.close()
+                    return self._send(200, {"ok": True})
                 if path == "/api/publishing":
                     return self._send(200, CORE.publishing_save(body))
                 if path == "/api/publishing/accounts":

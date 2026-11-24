@@ -30,6 +30,7 @@ const navGroups: { title: string; items: { to: string; label: string; icon: Luci
     title: "CONTENT",
     items: [
       { to: "/clips", label: "Clips", icon: Film },
+      { to: "/publish", label: "Publish", icon: Upload },
       { to: "/posted", label: "Published", icon: Video },
       { to: "/words", label: "Hype words", icon: Zap },
     ],
@@ -59,6 +60,7 @@ const pageTitles: Record<string, string> = {
   "/live": "Live Studio",
   "/layout": "Layout Studio",
   "/clips": "Clips",
+  "/publish": "Publish clips",
   "/posted": "Published",
   "/words": "Hype words",
   "/settings": "App settings",
@@ -123,19 +125,12 @@ const asNumber = (value: unknown, fallback: number) => Number.isFinite(Number(va
 const asBool = (value: unknown) => value === true || value === "true" || value === 1;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-const publishingPlatformNames: Record<string, string> = {
-  facebook: "Facebook",
-  youtube: "YouTube",
-  instagram: "Instagram",
-  tiktok: "TikTok",
-  twitter: "X / Twitter",
-  linkedin: "LinkedIn",
-  pinterest: "Pinterest",
-  reddit: "Reddit",
-  bluesky: "Bluesky",
-  threads: "Threads",
-  googlebusiness: "Google Business",
-};
+const manualPostingTargets = [
+  { id: "youtube", name: "YouTube", url: "https://www.youtube.com/upload" },
+  { id: "facebook", name: "Facebook", url: "https://www.facebook.com/reels/create/" },
+  { id: "instagram", name: "Instagram", url: "https://www.instagram.com/create/select/" },
+  { id: "tiktok", name: "TikTok", url: "https://www.tiktok.com/upload" },
+];
 
 function formatDate(value: number | string | null | undefined) {
   if (!value) return "N/A";
@@ -365,6 +360,7 @@ export default function App() {
             <Route path="/live" element={<LiveStudio workspace={workspace} />} />
             <Route path="/layout" element={<LayoutStudio workspace={workspace} />} />
             <Route path="/clips" element={<ClipLibrary key="clips" workspace={workspace} tab="clips" />} />
+            <Route path="/publish" element={<ClipLibrary key="publish" workspace={workspace} tab="publish" />} />
             <Route path="/posted" element={<ClipLibrary key="posted" workspace={workspace} tab="posted" />} />
             <Route path="/words" element={<WordsPage key={workspace.words.text} workspace={workspace} />} />
             <Route path="/settings" element={<SettingsPage workspace={workspace} section="general" themeId={themeId} onThemeChange={setThemeId} />} />
@@ -1338,18 +1334,16 @@ function ValueSlider({
 }
 
 
-function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | "posted" }) {
+function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | "publish" | "posted" }) {
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState(() => params.get("search") || "");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activeClip, setActiveClip] = useState<Clip | null>(null);
-  const [publishDialog, setPublishDialog] = useState<{ names: string[]; all: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const { state } = workspace;
 
   const setClipTab = workspace.setClipTab;
   useEffect(() => {
-    setClipTab(tab);
+    setClipTab(tab === "posted" ? "posted" : "clips");
   }, [tab, setClipTab]);
 
   const filtered = useMemo(() => state.clips.filter((clip) => {
@@ -1359,25 +1353,12 @@ function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | 
 
   const accountIds = workspace.publishing.providers?.zernio?.accounts || workspace.publishing.accounts || {};
 
-  const openPublishDialog = (names: string[], all = false) => {
-    if (!workspace.publishing.configured) {
-      notifyApp("error", "Publishing is not configured", "Save your Zernio API key in Settings → Publishing first.");
-      return;
-    }
-    if (!Object.keys(accountIds).length) {
-      notifyApp("error", "No publishing accounts connected", "Connect a social account in Settings → Publishing first.");
-      return;
-    }
-    setPublishDialog({ names, all });
-  };
-
   const doDelete = async (names: string[]) => {
     const label = names.length === 1 ? names[0] : names.length + " selected clips";
     if (!window.confirm("Permanently delete " + label + " and their TXT metadata sidecars? This cannot be undone.")) return;
     setBusy(true);
     try {
       for (const name of names) await apiPost("/api/delete", { name });
-      setSelected(new Set());
       setActiveClip(null);
       await workspace.refresh();
     } catch (reason) {
@@ -1387,13 +1368,6 @@ function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | 
     }
   };
 
-  const toggle = (name: string) => setSelected((current) => {
-    const next = new Set(current);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    return next;
-  });
-
   const pageSize = 60;
   const pageNumber = Math.floor(workspace.clipOffset / pageSize) + 1;
   const totalPages = Math.max(1, Math.ceil(state.clip_total / pageSize));
@@ -1401,13 +1375,10 @@ function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | 
   return (
     <>
       <PageHeading
-        eyebrow={tab === "clips" ? "CONTENT LIBRARY" : "PUBLISHING HISTORY"}
-        title={tab === "clips" ? "Clips" : "Published"}
-        description={tab === "clips" ? "Review the clips produced by your capture sessions, inspect metadata, and publish when ready." : "A clip appears here only after the publishing service confirms success or you explicitly record an external post."}
-        action={tab === "clips" ? <div className="clip-heading-actions"><Button variant="primary" onClick={() => {
-          if (!window.confirm("Publish every unposted clip in your library to the platforms you select next?")) return;
-          openPublishDialog([], true);
-        }} disabled={busy || state.clip_total === 0}><Upload size={14} /> Publish all clips</Button><Button onClick={() => void workspace.refresh()}><RefreshCw size={14} /> Refresh</Button></div> : <StatusPill tone="good">{state.posted_total} confirmed</StatusPill>}
+        eyebrow={tab === "clips" ? "CONTENT LIBRARY" : tab === "publish" ? "POST YOUR CLIPS" : "PUBLISHING HISTORY"}
+        title={tab === "clips" ? "Clips" : tab === "publish" ? "Post your clips" : "Published"}
+        description={tab === "clips" ? "Preview saved clips or delete them from your library." : tab === "publish" ? "Choose a clip, select the social platforms, and prepare its AI-generated post copy for review." : "Your publishing history, including confirmed Zernio posts and posts you mark as published."}
+        action={tab === "clips" || tab === "publish" ? <Button onClick={() => void workspace.refresh()}><RefreshCw size={14} /> Refresh</Button> : <StatusPill tone="good">{state.posted_total} confirmed</StatusPill>}
       />
 
       {workspace.state.posting.active ? (
@@ -1421,6 +1392,7 @@ function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | 
       <section className="library-toolbar-studio">
         <div className="library-tabs-studio">
           <Link to="/clips" className={tab === "clips" ? "active" : ""}>Clips <span>{Math.max(0, state.clip_total)}</span></Link>
+          <Link to="/publish" className={tab === "publish" ? "active" : ""}>Publish</Link>
           <Link to="/posted" className={tab === "posted" ? "active" : ""}>Published <span>{state.posted_total}</span></Link>
         </div>
         <form className="library-search" onSubmit={(event) => {
@@ -1433,25 +1405,15 @@ function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | 
         </form>
       </section>
 
-      {tab === "clips" && selected.size ? (
-        <div className="bulk-action-bar">
-          <strong>{selected.size} selected</strong>
-          <Button onClick={() => setSelected(new Set())}>Clear selection</Button>
-          <Button variant="primary" onClick={() => openPublishDialog([...selected])} disabled={busy}><Upload size={14} /> Publish selected</Button>
-          <Button variant="danger" onClick={() => void doDelete([...selected])} disabled={busy}><Trash2 size={14} /> Delete selected</Button>
-        </div>
-      ) : null}
 
       <section className="panel-card clip-table-card">
         {filtered.length ? (
           <div className="clip-table-heading">
-            <span className="clip-table-select">{tab === "clips" ? <input type="checkbox" aria-label="Select all visible clips" checked={filtered.every((clip) => selected.has(clip.name))} onChange={(event) => setSelected(event.target.checked ? new Set(filtered.map((clip) => clip.name)) : new Set())} /> : null}</span>
-            <span>VIDEO</span><span>CREATOR / SOURCE</span><span>FILE SIZE</span><span>{tab === "clips" ? "CREATED" : "PUBLISHED"}</span><span>STATUS</span><span />
+            <span>VIDEO</span><span>CREATOR / SOURCE</span><span>FILE SIZE</span><span>{tab === "posted" ? "PUBLISHED" : "CREATED"}</span><span>STATUS</span><span />
           </div>
         ) : null}
         {filtered.length ? filtered.map((clip) => (
           <div className="clip-table-row" key={clip.name}>
-            <span className="clip-table-select">{tab === "clips" ? <input type="checkbox" checked={selected.has(clip.name)} onChange={() => toggle(clip.name)} aria-label={"Select " + clip.name} /> : null}</span>
             <button className="clip-table-video" onClick={() => setActiveClip(clip)}>
               <span className="clip-table-thumb"><video src={"/clips/" + encodeURIComponent(clip.name)} preload="metadata" muted playsInline /></span>
               <span className="clip-table-title"><strong>{clip.title || clip.name.replace(/\.mp4$/i, "")}</strong><small>{clip.name}</small></span>
@@ -1461,16 +1423,17 @@ function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | 
             <span className="clip-table-date">{formatDate(tab === "posted" ? (clip.posted_at || clip.mtime) : clip.mtime)}</span>
             <span><StatusPill tone={tab === "posted" ? "good" : "neutral"}>{tab === "posted" ? "Published" : "Ready"}</StatusPill></span>
             <span className="clip-row-actions">
-              {tab === "clips" ? <button className="clip-row-publish" title="Publish this clip" aria-label={"Publish " + clip.name} onClick={() => setActiveClip(clip)}><Upload size={15} /></button> : null}
-              <button title="Open clip details" aria-label={"Open details for " + clip.name} onClick={() => setActiveClip(clip)}><MoreHorizontal size={17} /></button>
+              {tab === "clips" ? <button className="clip-row-publish" title="Delete clip" aria-label={"Delete " + clip.name} onClick={() => void doDelete([clip.name])}><Trash2 size={15} /></button> : null}
+              {tab === "publish" ? <button className="clip-row-publish" title="Prepare this clip for posting" aria-label={"Prepare post for " + clip.name} onClick={() => setActiveClip(clip)}><Upload size={14} /> Post</button> : null}
+              {tab === "posted" ? <button title="View published clip" aria-label={"Open details for " + clip.name} onClick={() => setActiveClip(clip)}><MoreHorizontal size={17} /></button> : null}
             </span>
           </div>
         )) : (
           <div className="clip-table-empty">
             <EmptyState
-              icon={tab === "posted" ? BadgeCheck : Film}
-              title={query ? "No matching clips" : tab === "posted" ? "Nothing published yet" : "No clips waiting for review"}
-              body={query ? "Try another search term." : tab === "posted" ? "Confirmed posts will appear here after Zernio succeeds or you record an external publication." : "Newly rendered clips will appear here with their title, description, and TXT metadata."}
+              icon={tab === "posted" ? BadgeCheck : tab === "publish" ? Upload : Film}
+              title={query ? "No matching clips" : tab === "posted" ? "Nothing published yet" : tab === "publish" ? "No clips ready to post" : "No saved clips yet"}
+              body={query ? "Try another search term." : tab === "posted" ? "Posts you confirm or send through Zernio will appear here." : tab === "publish" ? "Clips appear here when they are ready. Open one to choose manual platforms or optional Zernio Auto Posting." : "Your saved clips appear here. Open one to preview it or delete it."}
               action={tab === "clips" ? <Link to="/live" className="button button-primary"><Radio size={15} /> Open Live Studio</Link> : <Link to="/clips" className="button button-secondary">Browse clips</Link>}
             />
           </div>
@@ -1482,29 +1445,6 @@ function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | 
         <div><Button onClick={() => workspace.setClipOffset(Math.max(0, workspace.clipOffset - pageSize))} disabled={workspace.clipOffset <= 0}><ArrowRight className="icon-flip" size={14} /> Newer</Button><span>Page {pageNumber} of {totalPages}</span><Button onClick={() => workspace.setClipOffset(workspace.clipOffset + pageSize)} disabled={workspace.clipOffset + state.clips.length >= state.clip_total}>Older <ArrowRight size={14} /></Button></div>
       </div>
 
-      {publishDialog ? (
-        <PublishDestinationDialog
-          title={publishDialog.all ? "Publish all unposted clips" : publishDialog.names.length === 1 ? "Publish this clip" : "Publish selected clips"}
-          description={publishDialog.all ? "Every unposted clip in your library will be queued for the selected platforms." : publishDialog.names.length === 1 ? "Choose where this clip should be published." : publishDialog.names.length + " clips will be queued for the platforms you choose."}
-          accounts={accountIds}
-          busy={busy}
-          onClose={() => setPublishDialog(null)}
-          onPublish={async (platforms) => {
-            const targets = Object.fromEntries(Object.entries(accountIds).filter(([platform]) => platforms.includes(platform)));
-            if (!Object.keys(targets).length) throw new Error("Select at least one connected platform.");
-            setBusy(true);
-            try {
-              if (publishDialog.all) await apiPost("/api/publishing/publish", { all: true, account_ids: targets });
-              else await apiPost("/api/publishing/publish", { names: publishDialog.names, account_ids: targets });
-              await workspace.refresh();
-              setSelected(new Set());
-              setPublishDialog(null);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
-      ) : null}
       {activeClip ? (
         <ClipDetail
           clip={activeClip}
@@ -1536,69 +1476,11 @@ function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | 
   );
 }
 
-function PublishDestinationDialog({
-  title, description, accounts, busy, onClose, onPublish,
-}: {
-  title: string;
-  description: string;
-  accounts: Record<string, string>;
-  busy: boolean;
-  onClose: () => void;
-  onPublish: (platforms: string[]) => Promise<void>;
-}) {
-  const available = Object.keys(accounts).filter((platform) => Boolean(accounts[platform]));
-  const [selected, setSelected] = useState<string[]>(available);
-  const [error, setError] = useState("");
-  const allSelected = available.length > 0 && available.every((platform) => selected.includes(platform));
-
-  const toggle = (platform: string) => setSelected((current) =>
-    current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]
-  );
-
-  const submit = async () => {
-    setError("");
-    try {
-      await onPublish(selected);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not queue publishing.");
-    }
-  };
-
-  return (
-    <div className="modal-backdrop publish-destination-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section className="publish-destination-modal" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-heading">
-          <div><div className="eyebrow">PUBLISHING DESTINATIONS</div><h2>{title}</h2><p>{description}</p></div>
-          <button className="modal-close" onClick={onClose} disabled={busy} aria-label="Close publish dialog"><X size={18} /></button>
-        </div>
-        <div className="publish-destination-toolbar">
-          <span>{selected.length} of {available.length} platforms selected</span>
-          <button type="button" onClick={() => setSelected(allSelected ? [] : available)} disabled={busy}>{allSelected ? "Clear selection" : "Select all"}</button>
-        </div>
-        <div className="publish-destination-grid">
-          {available.map((platform) => (
-            <label className={"publish-destination-option " + (selected.includes(platform) ? "selected" : "")} key={platform}>
-              <input type="checkbox" checked={selected.includes(platform)} onChange={() => toggle(platform)} disabled={busy} />
-              <span><strong>{publishingPlatformNames[platform] || platform}</strong><small>Connected account</small></span>
-              {selected.includes(platform) ? <CheckCircle2 size={17} /> : null}
-            </label>
-          ))}
-        </div>
-        {error ? <p className="inline-feedback error">{error}</p> : null}
-        <div className="publish-destination-footer">
-          <Button onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="primary" onClick={() => void submit()} disabled={busy || selected.length === 0}><Upload size={14} /> {busy ? "Queueing…" : selected.length === available.length ? "Publish to all selected platforms" : "Publish to selected platforms"}</Button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function ClipDetail({
   clip, tab, accountIds, configured, onClose, onDelete, onSaveMetadata, onPublish, onRecordPosted, onReveal,
 }: {
   clip: Clip;
-  tab: "clips" | "posted";
+  tab: "clips" | "publish" | "posted";
   accountIds: Record<string, string>;
   configured: boolean;
   onClose: () => void;
@@ -1609,36 +1491,65 @@ function ClipDetail({
   onReveal: () => Promise<unknown>;
 }) {
   const [title, setTitle] = useState(clip.title || clip.name.replace(/\.mp4$/i, ""));
-  const [description, setDescription] = useState(clip.description || "");
+  const [description, setDescription] = useState(clip.description || clip.caption || "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(Object.keys(accountIds));
-  const selectedAccounts = Object.fromEntries(Object.entries(accountIds).filter(([platform]) => selectedPlatforms.includes(platform)));
-  const allPlatformsSelected = Object.keys(accountIds).length > 0 && Object.keys(accountIds).every((platform) => selectedPlatforms.includes(platform));
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
+  const [useZernio, setUseZernio] = useState(false);
+  const [browserChoice, setBrowserChoice] = useState("default");
+  const selectedAccounts = accountIds;
 
   const saveMetadata = async () => {
     setBusy(true);
     setMessage("");
     try {
       await onSaveMetadata(title.trim(), description.trim());
-      setMessage("TXT metadata saved beside the clip.");
+      setMessage("AI post copy saved beside the clip.");
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not save TXT metadata.");
+      setMessage(reason instanceof Error ? reason.message : "Could not save post copy.");
     } finally {
       setBusy(false);
     }
   };
 
-  const publish = async () => {
+  const copyPostField = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage(label + " copied. Paste it into the matching field on the platform.");
+    } catch {
+      setMessage("Clipboard access was blocked. Select and copy the text directly from this panel.");
+    }
+  };
+
+  const openManualPost = async () => {
+    if (selectedPlatforms.length !== 1) throw new Error("Choose one manual platform at a time. The browser stays on that upload so you can review it before preparing the next platform.");
+    await onSaveMetadata(title.trim(), description.trim());
+    const result = await apiPost<{ platform: string; file: string; file_selected: boolean; title_filled: boolean; description_filled: boolean; ready_for_review: boolean }>("/api/browser/prepare", {
+      name: clip.name,
+      platform: selectedPlatforms[0],
+      title: title.trim(),
+      description: (description.trim() || clip.caption || "").trim(),
+      browser: browserChoice,
+    });
+    const filled = [result.title_filled ? "title" : "title needs review", result.description_filled ? "description" : "description needs review"].join(" and ");
+    setMessage(result.file_selected
+      ? result.platform + " upload prepared for " + result.file + ". The video was selected automatically; " + filled + ". Review the platform page and press its final Publish button yourself."
+      : result.platform + " opened, but its upload control was not detected. Select the video manually, then review the metadata and publish yourself.");
+  };
+
+  const submitPost = async () => {
     setBusy(true);
     setMessage("");
     try {
-      if (!Object.keys(selectedAccounts).length) throw new Error("Select at least one connected platform first.");
-      await onSaveMetadata(title.trim(), description.trim());
-      await onPublish(title.trim(), description.trim(), selectedAccounts);
-      setMessage("Queued for " + Object.keys(selectedAccounts).map((platform) => publishingPlatformNames[platform] || platform).join(", ") + ". The Published list updates after confirmed success.");
+      if (!selectedPlatforms.length && !useZernio) throw new Error("Select one or more social platforms, or enable Zernio Auto Posting.");
+      if (selectedPlatforms.length) await openManualPost();
+      if (useZernio) {
+        if (!configured || !Object.keys(accountIds).length) throw new Error("Configure Zernio and connect at least one account in Settings → Publishing.");
+        await onPublish(title.trim(), description.trim(), selectedAccounts);
+        setMessage((selectedPlatforms.length ? "Manual upload pages opened. " : "") + "Zernio Auto Posting queued this clip. Review and completion are shown by the publishing status.");
+      }
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not publish this clip.");
+      setMessage(reason instanceof Error ? reason.message : "Could not prepare this post.");
     } finally {
       setBusy(false);
     }
@@ -1667,29 +1578,64 @@ function ClipDetail({
         <div className="clip-detail-grid">
           <div className="clip-detail-video"><video src={"/clips/" + encodeURIComponent(clip.name)} controls playsInline /></div>
           <div className="clip-detail-fields">
-            <label className="field-label">Title<input className="field-input" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} /></label>
-            <label className="field-label">Description<textarea className="field-input field-textarea" value={description} onChange={(event) => setDescription(event.target.value)} rows={7} maxLength={2200} /></label>
-            <div className="clip-detail-meta">
-              <span><strong>Creator</strong>{clip.creator_name || "Main workspace"}</span>
-              <span><strong>Created</strong>{formatDate(clip.mtime)}</span>
-              <span><strong>Size</strong>{clip.size_mb.toFixed(1)} MB</span>
-              <span><strong>Platform targets</strong>{Object.keys(accountIds).length || "Not configured"}</span>
-            </div>
             {tab === "clips" ? (
-              <div className="clip-publish-targets">
-                <div className="clip-publish-targets-heading"><strong>Publish destinations</strong><button type="button" onClick={() => setSelectedPlatforms(allPlatformsSelected ? [] : Object.keys(accountIds))} disabled={!Object.keys(accountIds).length || busy}>{allPlatformsSelected ? "Clear all" : "Select all"}</button></div>
-                {Object.keys(accountIds).length ? <div className="clip-publish-targets-options">{Object.entries(accountIds).map(([platform]) => <label key={platform}><input type="checkbox" checked={selectedPlatforms.includes(platform)} onChange={() => setSelectedPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform])} disabled={busy} /><span>{publishingPlatformNames[platform] || platform}</span></label>)}</div> : <p className="field-help">Connect Facebook, YouTube, Instagram, or TikTok in Settings → Publishing.</p>}
-              </div>
-            ) : null}
-            <div className="clip-detail-actions">
-              <Button onClick={() => void saveMetadata()} disabled={busy || !title.trim()}><Save size={14} /> Save TXT metadata</Button>
-              {tab === "clips" ? <Button variant="primary" onClick={() => void publish()} disabled={busy || !title.trim() || !configured || !Object.keys(selectedAccounts).length}><Upload size={14} /> Publish to {Object.keys(selectedAccounts).length === Object.keys(accountIds).length ? "all selected" : "selected"}</Button> : null}
-              <Button onClick={() => void onReveal()}><FolderOpen size={14} /> Show file</Button>
-              <a className="button button-secondary" href={"/clips/" + encodeURIComponent(clip.name.replace(/\.mp4$/i, "")) + ".txt"} target="_blank" rel="noreferrer"><FileText size={14} /> Open TXT metadata</a>
-              {tab === "clips" ? <Button onClick={() => void recordExternal()} disabled={busy}>Record external post</Button> : null}
-              <Button variant="danger" onClick={onDelete}><Trash2 size={14} /> Delete clip</Button>
-            </div>
-            <p className="muted-note">The TXT sidecar contains the generated post copy. Publishing is not marked complete when a request is merely queued; successful uploads are recorded by the backend.</p>
+              <>
+                <div className="clip-detail-meta">
+                  <span><strong>Creator</strong>{clip.creator_name || "Main workspace"}</span>
+                  <span><strong>Created</strong>{formatDate(clip.mtime)}</span>
+                  <span><strong>Size</strong>{clip.size_mb.toFixed(1)} MB</span>
+                </div>
+                <Button variant="danger" onClick={onDelete}><Trash2 size={14} /> Delete clip</Button>
+              </>
+            ) : (
+              <>
+                <label className="field-label">Title<input className="field-input" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} /></label>
+                <label className="field-label">Description / caption<textarea className="field-input field-textarea" value={description} onChange={(event) => setDescription(event.target.value)} rows={7} maxLength={2200} /></label>
+                <div className="clip-detail-meta">
+                  <span><strong>Creator</strong>{clip.creator_name || "Main workspace"}</span>
+                  <span><strong>Created</strong>{formatDate(clip.mtime)}</span>
+                  <span><strong>Size</strong>{clip.size_mb.toFixed(1)} MB</span>
+                </div>
+                {tab === "publish" ? (
+                  <div className="clip-publish-targets">
+                    <div className="clip-publish-targets-heading"><strong>Where do you want to post?</strong><span>Prepare one platform at a time</span></div>
+                    <div className="clip-publish-targets-options">
+                      {manualPostingTargets.map((target) => (
+                        <label key={target.id}>
+                          <input type="checkbox" checked={selectedPlatforms.includes(target.id)} onChange={() => setSelectedPlatforms((current) => current.includes(target.id) ? current.filter((item) => item !== target.id) : [...current, target.id])} disabled={busy} />
+                          <span>{target.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <label className="field-label">Browser for manual upload
+                      <select className="field-input" value={browserChoice} onChange={(event) => setBrowserChoice(event.target.value)} disabled={busy}>
+                        <option value="default">Windows default browser</option>
+                        <option value="chrome">Google Chrome</option>
+                        <option value="edge">Microsoft Edge</option>
+                        <option value="firefox">Mozilla Firefox</option>
+                      </select>
+                    </label>
+                    <div className="clip-publish-targets-heading"><strong>Zernio Auto Posting</strong><span>{Object.keys(accountIds).length} connected</span></div>
+                    <label className="zernio-destination-option">
+                      <input type="checkbox" checked={useZernio} onChange={(event) => setUseZernio(event.target.checked)} disabled={busy || !configured || !Object.keys(accountIds).length} />
+                      <span>Also send this clip through Zernio</span>
+                    </label>
+                    {!configured || !Object.keys(accountIds).length ? <p className="field-help">Optional: configure Zernio and connect accounts in <a href="/settings/publishing">Settings → Publishing</a>. Manual posting above does not need Zernio.</p> : <p className="field-help">Zernio uses only the accounts connected to your Zernio plan. This is separate from manual platform posting.</p>}
+                  </div>
+                ) : null}
+                <div className="clip-detail-actions">
+                  <Button onClick={() => void saveMetadata()} disabled={busy || !title.trim()}><Save size={14} /> Save post copy</Button>
+                  {tab === "publish" ? <Button onClick={() => void copyPostField(title.trim(), "Title")} disabled={!title.trim()}>Copy title</Button> : null}
+                  {tab === "publish" ? <Button onClick={() => void copyPostField(description.trim(), "Description / hashtags")} disabled={!description.trim()}>Copy caption</Button> : null}
+                  {tab === "publish" ? <Button variant="primary" onClick={() => void submitPost()} disabled={busy || !title.trim() || (!selectedPlatforms.length && !useZernio)}><Upload size={14} /> Post</Button> : null}
+                  {tab === "publish" ? <Button onClick={() => void recordExternal()} disabled={busy}>Mark as published</Button> : null}
+                  <Button onClick={() => void onReveal()}><FolderOpen size={14} /> Show video file</Button>
+                  <a className="button button-secondary" href={"/clips/" + encodeURIComponent(clip.name.replace(/\.mp4$/i, "")) + ".txt"} target="_blank" rel="noreferrer"><FileText size={14} /> Open AI post copy</a>
+                  <Button variant="danger" onClick={onDelete}><Trash2 size={14} /> Delete clip</Button>
+                </div>
+                <p className="muted-note">Manual Post uses the local browser automation profile to select the clip and fill supported fields. Sign in once in that dedicated browser profile. StreamSnip AI never presses the final Publish button. Prepare one manual platform at a time; Zernio remains a separate optional automated route.</p>
+              </>
+            )}
             {message ? <p className="inline-feedback">{message}</p> : null}
           </div>
         </div>

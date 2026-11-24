@@ -70,3 +70,7 @@ youtube_token.json
 *.key
 *.p12
 *.pfx
+
+# Persistent local browser sessions (contain social-account cookies)
+browser-profiles/
+tmp-browser-profile/

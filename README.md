@@ -213,3 +213,7 @@ This repository uses a **Proprietary Non-Commercial Use Licence**. It is source-
 ---
 
 Built by [Sifat Jaman / ScarZero](https://github.com/sifat-jaman-13).
+
+## Browser-assisted publishing
+
+See [docs/BROWSER_AUTOMATION.md](docs/BROWSER_AUTOMATION.md) for the local Chrome/Edge/Firefox upload-preparation workflow.

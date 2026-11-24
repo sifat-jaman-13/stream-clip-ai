@@ -20,7 +20,7 @@ StreamSnip AI supports a separate manual browser-preparation route alongside opt
 
 ## API
 
-- `GET /api/browser/status` reports the selected browser/profile state.
+- `GET /api/browser/status` reports whether Playwright is installed, whether an automation browser session is currently open, and the selected browser/profile state.
 - `POST /api/browser/prepare` accepts a clip library name, platform, title, description, and browser choice. The local session token is required.
 - `POST /api/browser/close` closes the dedicated browser context. The local session token is required.
 

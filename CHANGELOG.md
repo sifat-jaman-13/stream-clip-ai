@@ -352,3 +352,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 [1.2.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/sifat-jaman-13/stream-clip-ai/releases/tag/v1.2.3
+
+### Metadata and cross-browser QA — 24 November 2026
+
+- Reworked the transcript-only metadata fallback to remove common ASR fillers/repetitions, filter intro and subscribe boilerplate, rank complete specific moments, and avoid double-quoted transcript dumps in descriptions.
+- Added a clear review note and an activity-log warning when the available transcript is too unclear to produce reliable post copy. Existing clip sidecars are preserved; the new logic applies to newly rendered clips.
+- Clarified browser status: Playwright package availability is separate from whether an upload browser session is currently open.
+- Fresh validation: **144 backend tests passed**, Python compilation passed, React production build passed, frontend lint reported 0 warnings/errors, all 19 themes and 15 navigation routes passed browser QA, and Firefox/Chrome/Edge launch smoke tests passed.
+- No live recording, clip deletion, credential write, AI vendor request, or social post was triggered during this QA run.

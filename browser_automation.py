@@ -96,9 +96,15 @@ class BrowserAutomationManager:
         return result.get("value")
 
     def status(self) -> dict[str, Any]:
+        try:
+            from playwright.async_api import async_playwright  # noqa: F401
+            package_available = True
+        except ImportError:
+            package_available = False
         with self._state_lock:
             return {
-                "available": self._context is not None,
+                "available": package_available,
+                "session_active": self._context is not None,
                 "browser": self._browser or detect_default_browser(),
                 "prepared": dict(self._prepared) if self._prepared else None,
                 "profile_dir": str(self.profile_root),

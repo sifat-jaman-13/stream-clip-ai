@@ -486,62 +486,205 @@ def generate_social_copy(transcript, creator_credit, config, log=lambda _message
         raise
 
 
+def _fallback_clean_phrase(value):
+    """Remove obvious speech-recognition filler without rewriting the speaker's meaning."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"\b(?:uh+|um+|erm+|er+)\b", " ", text, flags=re.I)
+    text = re.sub(r"\b(?:you know|i mean)\b", " ", text, flags=re.I)
+    text = re.sub(r"\b([a-z][a-z'-]{1,})\s+\1\s+\1\b", r"\1", text, flags=re.I)
+    text = re.sub(r"\s+([,.!?;:])", r"\1", text)
+    return re.sub(r"\s{2,}", " ", text).strip(" ,;:-")
+
+
+_FALLBACK_STOP_WORDS = {
+    "a", "about", "after", "again", "all", "also", "am", "an", "and", "any", "are",
+    "as", "at", "be", "because", "been", "before", "being", "but", "by", "can",
+    "could", "did", "do", "does", "doing", "for", "from", "get", "got", "had",
+    "has", "have", "he", "her", "here", "him", "his", "how", "i", "if", "in",
+    "into", "is", "it", "it's", "its", "just", "like", "me", "more", "my", "of",
+    "off", "oh", "on", "one", "or", "our", "out", "over", "please", "right",
+    "same", "she", "so", "some", "that", "the", "their", "them", "then", "there",
+    "these", "they", "this", "those", "though", "through", "to", "today", "too",
+    "up", "us", "was", "we", "well", "were", "what", "when", "where", "which",
+    "who", "why", "will", "with", "would", "yeah", "yes", "you", "your",
+}
+_FALLBACK_BAD_ENDINGS = {
+    "a", "an", "and", "at", "because", "but", "for", "from", "if", "in", "of",
+    "on", "or", "so", "the", "then", "that", "to", "with",
+}
+
+
+def _fallback_topics(transcript):
+    """Pick concrete noun-like phrases already present in the transcript."""
+    text = str(transcript or "")
+    found = []
+    for match in re.finditer(
+        r"\b(?:a|an|the|this|that)\s+([a-z][a-z'-]*(?:\s+\d+)?)",
+        text,
+        flags=re.I,
+    ):
+        noun = match.group(1).strip().lower()
+        if noun in {"one", "thing", "stuff", "way", "time", "episode", "guys", "people", "like", "bit"}:
+            continue
+        phrase = match.group(0).lower()
+        if phrase not in found:
+            found.append(phrase)
+    for match in re.finditer(r"\bfor\s+([A-Z][a-z]{2,})\b", text):
+        phrase = match.group(1)
+        if phrase.lower() not in {"you", "the", "one", "today"} and phrase.lower() not in found:
+            found.append(phrase)
+    return found[:3]
+
+
+def _fallback_candidates(transcript):
+    """Split transcript into usable sentences/clauses and discard obvious channel boilerplate."""
+    candidates = []
+    for sentence in re.split(r"(?<=[.!?])\s+", str(transcript or "")):
+        sentence = _fallback_clean_phrase(sentence)
+        if not sentence:
+            continue
+        parts = [sentence]
+        if len(sentence.split()) > 12:
+            parts.extend(
+                _fallback_clean_phrase(part)
+                for part in re.split(r"\s+(?:and then|but then|and|but|so|because|while)\s+", sentence, flags=re.I)
+            )
+        for candidate in parts:
+            candidate = candidate.strip(" \t\r\n\"'“”‘’-—:;,")
+            words = re.findall(r"[a-z0-9']+", candidate.lower())
+            if len(words) < 3 or len(words) > 18:
+                continue
+            lower = candidate.lower()
+            if any(phrase in lower for phrase in (
+                "welcome back", "leave a like", "like and subscribe", "please subscribe",
+                "today's episode", "enjoy it", "don't forget to subscribe",
+            )):
+                continue
+            if words[-1] in _FALLBACK_BAD_ENDINGS:
+                continue
+            if candidate.casefold() not in {item.casefold() for item in candidates}:
+                candidates.append(candidate)
+    return candidates
+
+
+def _fallback_candidate_score(candidate):
+    words = re.findall(r"[a-z0-9']+", candidate.lower())
+    content = [word for word in words if len(word) > 2 and word not in _FALLBACK_STOP_WORDS]
+    if not content:
+        return -100
+    unique_content = set(content)
+    length_fit = max(0, 10 - abs(len(words) - 8))
+    noun_cues = len(re.findall(
+        r"\b(?:a|an|the|this|that|my|your|his|her|their|our)\s+[a-z][a-z'-]*",
+        candidate,
+        flags=re.I,
+    ))
+    generic_reaction = bool(re.match(
+        r"^(?:oh my god|what the|no way|come on|yeah|okay|alright|hello|wow)\b",
+        candidate,
+        flags=re.I,
+    ))
+    has_action = bool(re.search(
+        r"\b(?:ran|fell|rolled|dropped|crashed|hit|broke|lost|threw|took|made|bought|buy|"
+        r"drive|driving|started|trying|tried|fit|said|says|got|blowing|smashed|slipped)\b",
+        candidate,
+        flags=re.I,
+    ))
+    is_opening_question = bool(re.match(r"^(?:am i|are we|do you|did you|can i)\b", candidate, flags=re.I))
+    return (
+        len(content) * 3
+        + len(unique_content) * 2
+        + length_fit
+        + min(noun_cues, 3) * 2
+        + candidate.count("?") * 2
+        + candidate.count("!") * 2
+        + (5 if has_action else 0)
+        - (5 if generic_reaction and len(unique_content) < 3 else 0)
+        - (3 if is_opening_question else 0)
+    )
+
+
 def build_transcript_fallback(transcript, creator_credit=""):
-    """Create brief extractive copy; never paste an entire transcript into a post."""
+    """Create conservative transcript-based copy; never pretend a transcript is AI-written context."""
     text = re.sub(r"\s+", " ", str(transcript or "")).strip()
     if not text:
-        return {
-            "title": "A Highlight From the Stream",
-            "description": "No usable speech transcript was available for this clip.",
+        result = {
+            "title": "A Stream Moment Needs Review",
+            "description": "The speech transcript is too unclear to create reliable post copy. Review this clip before posting.",
             "hashtags": ["#clips"],
             "provider": "transcript fallback",
+            "needs_review": True,
         }
+        if creator_credit:
+            result["creator_credit"] = str(creator_credit)
+        return result
 
-    candidates = [
-        part.strip(" \t\r\n\"'“”‘’-—:;")
-        for part in re.split(r"(?<=[.!?])\s+", text)
-        if len(part.split()) >= 3
+    candidates = _fallback_candidates(text)
+    topics = _fallback_topics(text)
+    selected_line = max(candidates, key=_fallback_candidate_score) if candidates else ""
+    selected_words = [
+        word for word in re.findall(r"[a-z0-9']+", selected_line.lower())
+        if len(word) > 2 and word not in _FALLBACK_STOP_WORDS
     ]
-    if not candidates:
-        tokens = text.split()
-        candidates = [" ".join(tokens[i:i + 12]) for i in range(0, max(1, len(tokens) - 2), 5)]
+    short_complete_reaction = bool(re.fullmatch(
+        r"(?:that|this|it)\s+(?:was|is|looks|seems|sounds)\s+[a-z][a-z'-]+[.!?]",
+        selected_line,
+        flags=re.I,
+    ))
+    title_confident = bool(
+        selected_line
+        and (len(set(selected_words)) >= 3 or short_complete_reaction)
+        and not re.search(r"\b(?:more than|less than)\s+thanks\b", selected_line, flags=re.I)
+        and not any(term in selected_line.lower() for term in ("leave a like", "subscribe", "today's episode"))
+    )
 
-    def score(candidate):
-        words = candidate.split()
-        lower = candidate.lower()
-        event_score = sum(weight for term, weight in (
-            ("totaled", 22), ("ran over a cat", 22), ("i surrender", 18),
-            ("i've got nothing", 18), ("mine now", 18), ("just kill me", 16),
-            ("no way", 12), ("eight miles", 10), ("tracker", 9),
-            ("oh my god", 8), ("what the", 8), ("for fuck's sake", 8),
-            ("what happened", 8), ("who's shooting", 8), ("toilet", 12),
-        ) if term in lower)
-        expressive = candidate.count("!") * 3 + candidate.count("?") * 2
-        length_fit = 10 - abs(len(words) - 9)
-        return event_score + expressive + length_fit
-
-    selected_line = max(candidates, key=score)
-    quote = _fallback_sentence_case(selected_line[:140].strip())
-    title = _fallback_title_case(quote)
-    if len(title) > 90:
-        title = title[:87].rsplit(" ", 1)[0] + "..."
-    if len(title) < 12:
-        title = "A Standout Moment From the Stream"
-
-    other_lines = [line for line in candidates if line != selected_line]
-    if other_lines:
-        context = _fallback_sentence_case(max(other_lines, key=score)[:130].strip())
-        description = f"“{quote}”\n\n“{context}”"
+    if title_confident:
+        title_source = selected_line.strip().rstrip(" .,:;")
+        title = _fallback_title_case(title_source)
+        title = re.sub(r"\b(Gta|Npc|Usb|Bmw|Ceo|Ai)\b", lambda match: {
+            "Gta": "GTA", "Npc": "NPC", "Usb": "USB", "Bmw": "BMW", "Ceo": "CEO", "Ai": "AI"
+        }[match.group(1)], title)
+        if len(title) > 95:
+            title = title[:92].rsplit(" ", 1)[0].rstrip(" .,:;!?-") + "..."
+    elif topics:
+        title = _fallback_title_case("A Conversation About " + topics[0])
     else:
-        description = f"“{quote}”"
+        title = "A Stream Moment Needs Review"
+
+    if len(topics) >= 2:
+        description_context = f"The exchange also brings up {topics[0]} and {topics[1]}."
+    elif topics:
+        description_context = (
+            f"The transcript mentions {topics[0]}, but the surrounding wording is unclear. "
+            "Review the clip for the full context."
+        )
+    else:
+        description_context = (
+            "The available transcript does not provide enough clear context. "
+            "Review the clip before posting."
+        )
+
+    if title_confident:
+        quote = selected_line[:110].strip().rstrip(" .,:;!?")
+        punctuation = "?" if selected_line.rstrip().endswith("?") else "!" if selected_line.rstrip().endswith("!") else "."
+        description = f"“{quote}{punctuation}”\n\n{description_context}"
+    else:
+        description = description_context
+
+    lower_text = text.lower()
+    if any(term in lower_text for term in ("laugh", "laughing", "funny", "joke", "hilarious")):
+        hashtag = "#funny"
+    elif any(term in lower_text for term in ("game", "gaming", "gta", "mission", "lobby", "controller")):
+        hashtag = "#gaming"
+    else:
+        hashtag = "#clips"
 
     result = {
         "title": title,
         "description": _clean_description(description),
-        "hashtags": ["#funny"] if any(
-            term in text.lower() for term in ("laugh", "funny", "awkward", "mine now", "ran over a cat")
-        ) else ["#clips"],
+        "hashtags": [hashtag],
         "provider": "transcript fallback",
+        "needs_review": not title_confident or len(topics) < 2,
     }
     if creator_credit:
         result["creator_credit"] = str(creator_credit)

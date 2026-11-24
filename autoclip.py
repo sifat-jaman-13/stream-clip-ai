@@ -1801,6 +1801,8 @@ class Engine:
             )
             if transcript:
                 post_copy = build_transcript_fallback(transcript, tag)
+        if post_copy and post_copy.get("needs_review"):
+            self.log("Transcript copy is low-confidence. Review this clip's title and description before posting.")
         if post_copy and cfg.get("profanity_filter_enabled", True):
             post_copy = dict(post_copy)
             extra_terms = cfg.get("profanity_filter_words", "")

@@ -31,5 +31,14 @@ class BrowserAutomationTests(unittest.TestCase):
         with self.assertRaises(BrowserAutomationError):
             upload_url("unknown-social-site")
 
+    def test_status_distinguishes_installed_automation_from_an_open_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = BrowserAutomationManager(Path(directory) / "profiles")
+            status = manager.status()
+            self.assertIsInstance(status["available"], bool)
+            self.assertFalse(status["session_active"])
+            self.assertTrue(status["requires_final_publish_click"])
+            manager.stop()
+
 if __name__ == "__main__":
     unittest.main()

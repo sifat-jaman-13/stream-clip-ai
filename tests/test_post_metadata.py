@@ -239,7 +239,7 @@ class PostMetadataTests(unittest.TestCase):
         title = "The Car Rolls Down the Hill " + ("and everyone laughs " * 10)
         self.assertLessEqual(len(post_metadata._clean_title(title)), 100)
 
-    def test_transcript_fallback_is_short_title_cased_and_not_a_transcript_dump(self):
+    def test_transcript_fallback_is_specific_contextual_and_not_a_transcript_dump(self):
         transcript = (
             "WE'RE DRIVING TO THE MOTEL. OH MY GOD HE JUST RAN OVER A CAT! "
             "WHERE'S THE TOILET ONE? THIS IS THE NEXT COLLECTIBLE CARD AND WE HAVE TO FIND IT."
@@ -249,7 +249,50 @@ class PostMetadataTests(unittest.TestCase):
         self.assertLess(len(result["description"]), 250)
         self.assertNotIn(transcript, result["description"])
         self.assertNotIn("AI providers did not return", result["description"])
-        self.assertIn("Where's the toilet one?", result["description"])
+        self.assertIn("The exchange also brings up", result["description"])
+        self.assertEqual(result["description"].count("“"), 1)
+        self.assertFalse(result["needs_review"])
+
+    def test_transcript_fallback_prefers_a_specific_action_over_stream_intro(self):
+        transcript = (
+            "Welcome back to today's episode. "
+            "It makes me a coffee to keep. I'm going to have to buy a garage for it again."
+        )
+        result = post_metadata.build_transcript_fallback(transcript, "@zerkaa")
+        self.assertIn("Garage", result["title"])
+        self.assertNotIn("Welcome Back", result["title"])
+        self.assertIn("coffee", result["description"].lower())
+        self.assertIn("garage", result["description"].lower())
+
+    def test_unclear_asr_fallback_uses_safe_topic_title_and_marks_review(self):
+        transcript = "I can fit more than thanks to the bike bro. Is it like what matter?"
+        result = post_metadata.build_transcript_fallback(transcript, "@zerkaa")
+        self.assertEqual(result["title"], "A Conversation About the Bike")
+        self.assertTrue(result["needs_review"])
+        self.assertIn("wording is unclear", result["description"])
+
+    def test_stream_intro_and_call_to_action_do_not_become_post_copy(self):
+        transcript = (
+            "Endo endo all right absolute heat all right guys I'm you there for today's episode "
+            "if you enjoy it please leave a like on it subscribe"
+        )
+        result = post_metadata.build_transcript_fallback(transcript, "@zerkaa")
+        self.assertEqual(result["title"], "A Stream Moment Needs Review")
+        self.assertTrue(result["needs_review"])
+        self.assertNotIn("subscribe", result["description"].lower())
+
+    def test_transcript_fallback_description_does_not_create_a_second_quote(self):
+        transcript = "It makes me a coffee to keep. I'm going to have to buy a garage for it again."
+        result = post_metadata.build_transcript_fallback(transcript, "@zerkaa")
+        self.assertEqual(result["title"], "I'm Going to Have to Buy a Garage for It Again")
+        self.assertEqual(result["description"].count("“"), 1)
+        self.assertIn("a coffee", result["description"])
+        self.assertIn("a garage", result["description"])
+
+    def test_empty_or_unusable_transcript_explicitly_requests_review(self):
+        result = post_metadata.build_transcript_fallback("", "@zerkaa")
+        self.assertTrue(result["needs_review"])
+        self.assertIn("review this clip", result["description"].lower())
 
     def test_empty_transcript_is_rejected_before_provider_request(self):
         with patch.object(post_metadata, "_provider_response") as request, \

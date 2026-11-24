@@ -287,16 +287,17 @@ html[data-theme="odysseas"] .sidebar-engine small, html[data-theme="odysseas"] .
 .capture-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .capture-copy strong { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .capture-copy small { color: var(--muted); font-size: 10px; }
-.workflow-strip { display: flex; align-items: center; gap: 0; margin-top: 19px; padding: 11px 12px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 9px; }
-.workflow-stage { position: relative; display: flex; align-items: center; flex: 1; gap: 7px; min-width: 0; color: var(--muted); }
-.workflow-stage:not(:last-of-type)::after { content: ""; position: absolute; top: 50%; left: 26px; right: 8px; height: 1px; background: var(--line-strong); transform: translateY(-50%); }
-.workflow-stage > span { position: relative; z-index: 1; display: grid; flex: 0 0 22px; width: 22px; height: 22px; place-items: center; color: var(--muted); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 50%; font-size: 9px; font-weight: 700; }
-.workflow-stage strong { overflow: hidden; font-size: 10px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; gap: 0; margin-top: 19px; padding: 12px 8px 10px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 9px; }
+.workflow-stage { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 7px; min-width: 0; color: var(--muted); text-align: center; }
+.workflow-stage::after { content: none !important; }
+.workflow-stage > span { position: relative; z-index: 1; display: grid; flex: 0 0 23px; width: 23px; height: 23px; place-items: center; color: var(--muted); background: var(--surface-soft); border: 1px solid var(--line-strong); border-radius: 50%; font-size: 10px; font-weight: 700; line-height: 1; }
+.workflow-stage strong { display: block; position: static; z-index: auto; overflow: visible; max-width: 100%; padding: 0 2px; color: var(--muted); background: transparent; font-size: 10px; line-height: 1.3; font-weight: 550; text-decoration: none !important; text-decoration-line: none !important; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .workflow-stage.current { color: var(--accent); }
 .workflow-stage.current > span { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
-.workflow-stage.current strong { color: var(--ink); font-weight: 680; }
+.workflow-stage.current strong { color: var(--ink); font-weight: 680; text-decoration: none !important; }
 .workflow-stage.passed > span { color: var(--success); border-color: var(--success); }
-.workflow-strip > small { margin-left: 8px; color: var(--muted); font-size: 10px; }
+.workflow-stage.passed strong { color: var(--success); text-decoration: none !important; text-decoration-line: none !important; }
+.workflow-strip > small { grid-column: 1 / -1; margin: 7px 0 0; color: var(--muted); font-size: 10px; text-align: center; }
 .progress-line { display: grid; gap: 7px; margin-top: 15px; }
 .progress-line > div { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; }
 .progress-line b { color: var(--ink); font-variant-numeric: tabular-nums; }

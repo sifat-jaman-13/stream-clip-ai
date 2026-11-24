@@ -227,8 +227,22 @@ function ThemeOptions({
 }
 
 function FontOptions({ value, onChange }: { value: FontId; onChange: (value: FontId) => void }) {
+  useEffect(() => {
+    // Load the catalogue only when the user opens Appearance settings so every
+    // sample is a real font preview without downloading the whole catalogue at startup.
+    for (const font of fontPresets) {
+      const id = "streamsnip-font-preview-" + font.id;
+      if (document.getElementById(id)) continue;
+      const stylesheet = document.createElement("link");
+      stylesheet.id = id;
+      stylesheet.rel = "stylesheet";
+      stylesheet.href = font.stylesheet;
+      document.head.appendChild(stylesheet);
+    }
+  }, []);
+
   return (
-    <div className="font-options" aria-label="Application font choices">
+    <div className="font-options" role="group" aria-label="Application font choices">
       {fontPresets.map((font) => (
         <button
           type="button"

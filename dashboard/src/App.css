@@ -2115,3 +2115,30 @@ html[data-palette] .session-summary-grid strong { color: var(--ink); }
   .quit-app-button span { display: none; }
   .topbar-breadcrumb { min-width: 0; gap: 7px; font-size: 11px; }
 }
+
+/* User-selectable interface typography */
+.font-settings-card { min-width: 0; }
+.font-settings-icon {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: 0 0 auto;
+  color: var(--accent); border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface-soft); font-size: 17px; font-weight: 700; letter-spacing: -1px;
+}
+.font-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.font-option {
+  display: grid; align-content: start; gap: 8px; min-width: 0; min-height: 104px;
+  padding: 11px 12px; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 9px; background: var(--surface-soft); text-align: left;
+  transition: border-color .14s ease, background .14s ease, transform .14s ease;
+}
+.font-option:hover { border-color: var(--accent); background: var(--surface-hover); }
+.font-option:active { transform: translateY(1px); }
+.font-option.selected { border-color: var(--accent); background: var(--accent-soft); }
+.font-option-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.font-option-heading strong { min-width: 0; font-size: 12px; font-weight: 720; }
+.font-option-check { flex: 0 0 auto; color: var(--accent); }
+.font-option-sample { overflow: hidden; color: var(--ink); font-size: 22px; line-height: 1.2; letter-spacing: -.7px; white-space: nowrap; }
+.font-option small { color: var(--muted); font-size: 10px; line-height: 1.4; }
+@media (max-width: 520px) {
+  .font-options { grid-template-columns: minmax(0,1fr); }
+  .font-option { min-height: 88px; }
+}

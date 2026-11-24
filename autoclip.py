@@ -1,4 +1,4 @@
-r"""StreamSnip AI — a local-first Twitch, YouTube, and VOD clipper.
+r"""StreamSnip AI  -  a local-first Twitch, YouTube, and VOD clipper.
 
 The default workflow uses Streamlink, FFmpeg, faster-whisper, and hook-word
 scoring locally without requiring a cloud AI key. Ollama provides optional
@@ -22,6 +22,7 @@ configurable from the local UI.
 """
 import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64, uuid, shlex, tempfile
 import math
+import mimetypes
 import urllib.request
 from importlib import metadata as importlib_metadata
 import http.server, urllib.parse, webbrowser
@@ -31,6 +32,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            ollama_models, select_moments, test_provider)
 from post_metadata import DEFAULT_GEMINI_COPY_MODEL, build_transcript_fallback, generate_social_copy
 APP_VERSION = "3.0.0"
+MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
@@ -1135,17 +1137,23 @@ def has_nvenc():
     return _nvenc
 
 def _find_streamlink_exe():
-    exe = shutil.which("streamlink")
-    if exe:
-        return exe
-    # venv case: the Scripts/bin folder may not be on PATH (or sys.executable points at the base Python)
+    # Prefer the console script installed beside this interpreter. PATH can point
+    # at another Python installation (for example 3.14 while the app runs on 3.11).
+    # Mixing that executable with this process's PYTHONPATH causes SRE module
+    # mismatch errors inside Streamlink's Python runtime.
     dirs = [pathlib.Path(sys.prefix) / "Scripts", pathlib.Path(sys.prefix) / "bin",
             pathlib.Path(sys.executable).parent, pathlib.Path(sys.executable).parent / "Scripts"]
-    for d in dirs:
-        for n in ("streamlink.exe", "streamlink"):
-            if (d / n).is_file():
-                return str(d / n)
-    return None
+    seen = set()
+    for directory in dirs:
+        key = os.path.normcase(str(directory))
+        if key in seen:
+            continue
+        seen.add(key)
+        for name in ("streamlink.exe", "streamlink"):
+            candidate = directory / name
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which("streamlink")
 
 def streamlink_cmd():
     exe = _find_streamlink_exe()
@@ -1160,9 +1168,10 @@ def streamlink_cmd():
     return [sys.executable, "-c", "from streamlink_cli.main import main; main()"]
 
 def streamlink_env():
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([p for p in sys.path if p] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
-    return env
+    # Do not inject the app interpreter's sys.path into a standalone Streamlink
+    # executable found on PATH: it may belong to a different Python version.
+    # The current-interpreter fallback already inherits its own import paths.
+    return dict(os.environ)
 
 def streamlink_available():
     if _find_streamlink_exe():
@@ -2415,9 +2424,9 @@ class Core:
                 raise ValueError("Creator monitor not found.")
             if worker and worker.is_alive():
                 raise ValueError("This creator is already being monitored.")
-            active = sum(1 for thread in self.creator_workers.values() if thread.is_alive()) + int(self.running)
-            if active >= 2:
-                raise ValueError("Two creator monitors are already active. Stop one before starting another.")
+            active = sum(1 for thread in self.creator_workers.values() if thread.is_alive())
+            if active >= MAX_ACTIVE_CREATOR_MONITORS:
+                raise ValueError(f"All {MAX_ACTIVE_CREATOR_MONITORS} creator monitor slots are active. Stop one before starting another.")
             paths = self._ensure_creator_paths(creator_id)
             cfg = clean_cfg({**self.settings, "mode": "live", "target": profile["target"],
                              "creator_id": creator_id,
@@ -3104,18 +3113,64 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(403, {"error": "bad host"})
             u = urllib.parse.urlparse(self.path)
             path = u.path
+            if path == "/api/session":
+                origin = self.headers.get("Origin", "").strip()
+                if origin:
+                    try:
+                        origin_host = urllib.parse.urlsplit(origin).hostname or ""
+                    except ValueError:
+                        origin_host = ""
+                    if origin_host.lower().rstrip(".") not in ("127.0.0.1", "localhost", "::1"):
+                        return self._send(403, {"error": "forbidden"})
+                return self._send(200, {"token": TOKEN})
+            if path == "/dashboard":
+                self.send_response(302)
+                self.send_header("Location", "/dashboard/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if path.startswith("/dashboard/"):
+                dashboard_root = pathlib.Path(__file__).resolve().parent / "dashboard" / "dist"
+                if not dashboard_root.is_dir():
+                    return self._send(503, {"error": "React dashboard is not built yet. Run npm run build in dashboard/."})
+                relative = urllib.parse.unquote(path[len("/dashboard/"):])
+                root_resolved = dashboard_root.resolve()
+                requested = (root_resolved / relative).resolve() if relative else root_resolved / "index.html"
+                try:
+                    requested.relative_to(root_resolved)
+                except ValueError:
+                    return self._send(404, {"error": "not found"})
+                if requested.is_dir():
+                    requested = requested / "index.html"
+                if not requested.is_file():
+                    if pathlib.Path(relative).suffix:
+                        return self._send(404, {"error": "not found"})
+                    requested = root_resolved / "index.html"
+                if requested.name == "index.html":
+                    html = requested.read_text(encoding="utf-8-sig")
+                    html = html.replace('window.__STREAMSNIP_TOKEN__ = "";',
+                                        "window.__STREAMSNIP_TOKEN__ = " + json.dumps(TOKEN) + ";")
+                    return self._send(200, html, "text/html; charset=utf-8")
+                content_type = mimetypes.guess_type(requested.name)[0] or "application/octet-stream"
+                if content_type.startswith("text/") or content_type in ("application/javascript", "application/json"):
+                    content_type += "; charset=utf-8"
+                return self._send(200, requested.read_bytes(), content_type)
             if path == "/api/window/lease":
                 if not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
                     self.close_connection = True
                     return self._send(403, {"error": "forbidden"})
                 return self._serve_window_lease()
             if path == "/":
-                boot = {"settings": CORE.settings, "colors": {k: "#" + v[4:6] + v[2:4] + v[0:2] for k, v in CAPTION_COLORS.items()},
-                        "positions": CAPTION_POS, "models": MODELS, "layouts": LAYOUTS,
-                        "zernio": CORE.zernio_status(), "publishing": CORE.publishing_status(),
-                        "ai": public_ai_settings()}
-                html = HTML.replace("__BOOT__", json.dumps(boot).replace("</", "<\\/")).replace("__TOKEN__", TOKEN).replace("__APP_VERSION__", APP_VERSION)
-                return self._send(200, html, "text/html; charset=utf-8")
+                # The classic embedded dashboard is deprecated. Keep its implementation in the repository,
+                # but make the React Creator Studio the only default local interface.
+                dashboard_root = pathlib.Path(__file__).resolve().parent / "dashboard" / "dist"
+                if not (dashboard_root / "index.html").is_file():
+                    return self._send(503, {"error": "Creator Studio is not built yet. Run npm run build in dashboard/."})
+                self.send_response(302)
+                self.send_header("Location", "/dashboard/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if path == "/api/clips/names":
                 q = urllib.parse.parse_qs(u.query)
                 tab = q.get("tab", ["clips"])[0]
@@ -3126,6 +3181,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, {"names": names})
             if path == "/api/creators":
                 return self._send(200, {"creators": CORE.list_creators()})
+            if path == "/api/config":
+                # Public UI configuration only: never expose provider credentials.
+                return self._send(200, {"settings": CORE.settings, "ai": public_ai_settings(),
+                                        "transcriber_models": MODELS, "layouts": LAYOUTS,
+                                        "output_formats": list(OUTPUT_FORMATS.keys())})
+            if path == "/api/publishing/status":
+                # publishing_status exposes only credential-presence flags, never the API key.
+                return self._send(200, CORE.publishing_status())
             if path == "/api/state":
                 q = urllib.parse.parse_qs(u.query)
                 try: since = int(q.get("since", ["0"])[0])
@@ -3152,6 +3215,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         except Exception as e:
+            try:
+                request_path = urllib.parse.urlparse(getattr(self, "path", "")).path or "/unknown"
+                CORE.push(f"API SERVER ERROR [GET {request_path}]: {type(e).__name__}: {e}")
+            except Exception:
+                pass
             try: self._send(500, {"error": str(e)})
             except Exception: pass
 
@@ -3176,6 +3244,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not isinstance(body, dict): body = {}
             path = urllib.parse.urlparse(self.path).path
             try:
+                if path == "/api/client-log":
+                    level = str(body.get("level", "info")).lower()
+                    if level not in {"info", "error"}:
+                        level = "info"
+                    action = str(body.get("action", ""))[:120]
+                    if not re.fullmatch(r"/api/[A-Za-z0-9_./-]{1,100}", action):
+                        action = "/api/unknown"
+                    message = str(body.get("message", ""))[:400]
+                    message = re.sub(r"(?i)(api[ _-]?key|access[ _-]?token|token|password|secret)\s*[:=]\s*[^\s,;]+", r"\1=[REDACTED]", message)
+                    message = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", message)
+                    CORE.push(f"UI {level.upper()} [{action}]: {message or 'Action completed.'}")
+                    return self._send(200, {"ok": True})
                 if path == "/api/start":
                     CORE.start(clean_cfg(body)); return self._send(200, {"ok": True})
                 if path == "/api/creators/add":
@@ -3305,6 +3385,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if path == "/api/delete":
                         forget_posted_clips([name])
                     return self._send(200, {"ok": True})
+                if path == "/api/clip-metadata":
+                    name = str(body.get("name", ""))
+                    clip_path = find_clip_path(name)
+                    if not clip_path:
+                        raise ValueError("Clip not found.")
+                    title = re.sub(r"[\r\n]+", " ", str(body.get("title", ""))).strip()[:100]
+                    description = str(body.get("description", "")).replace("\x00", "").strip()[:2200]
+                    if not title:
+                        raise ValueError("Add a title before saving clip metadata.")
+                    sidecar = clip_path.with_suffix(".txt")
+                    if sidecar.is_symlink():
+                        raise ValueError("The metadata sidecar is a symbolic link and cannot be edited.")
+                    metadata = title + (("\n\n" + description) if description else "")
+                    sidecar.write_text(metadata, encoding="utf-8")
+                    CORE.push(f"Updated TXT metadata for {name}")
+                    return self._send(200, {"ok": True, "name": name, "caption": metadata})
                 if path == "/api/posted/mark":
                     name = str(body.get("name", ""))
                     posted = mark_clip_posted(name, body.get("platform", "manual"), body.get("accounts", []))
@@ -3328,11 +3424,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     CORE.stop_all_creators()
                     cancel_window_close_shutdown(); self._send(200, {"ok": True}); QUIT.set(); return
             except (ValueError, AIProviderError) as e:
+                CORE.push(f"API VALIDATION ERROR [POST {path}]: {e}")
                 return self._send(400, {"error": str(e)})
             self._send(404, {"error": "not found"})
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         except Exception as e:
+            try:
+                request_path = urllib.parse.urlparse(getattr(self, "path", "")).path or "/unknown"
+                CORE.push(f"API SERVER ERROR [POST {request_path}]: {type(e).__name__}: {e}")
+            except Exception:
+                pass
             try: self._send(500, {"error": str(e)})
             except Exception: pass
 
@@ -3400,7 +3502,9 @@ def main():
         flush=True,
     )
     if bind_host in ("127.0.0.1", "localhost", "::1"):
-        open_window(url)
+        dashboard_dist = pathlib.Path(__file__).resolve().parent / "dashboard" / "dist" / "index.html"
+        # Launch the new workspace by default; keep the classic interface at / for legacy controls.
+        open_window(url.rstrip("/") + "/dashboard/" if dashboard_dist.is_file() else url)
     try:
         while not QUIT.wait(0.5):
             pass
@@ -3603,6 +3707,61 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 .go:disabled{opacity:.6;transform:none}
 .stopb{flex:1;padding:15px;font-size:15px;border-radius:15px;background:#dc4452;font-weight:700;color:#fff;transition:.15s}.stopb:hover{background:#ec5a68}.stopb:disabled{opacity:.55}
 .stopb.alt{flex:none;background:var(--card2);border:1px solid var(--line);color:var(--tx);padding:15px 20px}.stopb.alt:hover{background:rgba(255,255,255,.12)}
+/* StreamSnip 4.x  -  refined commercial dashboard */
+:root{
+ --bg:#090d16;--card:#111827;--card2:#182235;--line:rgba(148,163,184,.14);--line2:rgba(148,163,184,.27);
+ --tx:#f1f5fb;--dim:#a6b2c5;--mute:#718096;--a1:#6d8cff;--a2:#28c7b7;
+ --ok:#35d6a0;--warn:#f6c66b;--bad:#fb7185;
+ --grad:linear-gradient(115deg,#5478ed,#27b8aa);
+}
+body{background:var(--bg);font-size:13px}
+body:before{background:radial-gradient(900px 520px at 8% -15%,rgba(84,120,237,.15),transparent 62%),radial-gradient(760px 420px at 100% 0,rgba(39,184,170,.09),transparent 62%)}
+header{padding:16px 26px;border-bottom:1px solid var(--line);background:rgba(9,13,22,.88);backdrop-filter:blur(18px)}
+.logo{font-size:17px;letter-spacing:-.35px}.mark{border-radius:10px;box-shadow:0 5px 18px rgba(84,120,237,.2)}
+.tag{font-size:12px;color:#8292aa}
+.local-note{padding:7px 26px 5px;color:#65748b}
+.capture-top{padding:8px 26px 16px}
+.capture-top .startbar{max-width:none}
+.go{background:linear-gradient(110deg,#5478ed,#3867d8);box-shadow:0 8px 22px rgba(55,99,214,.22);border-radius:12px;font-size:14px;min-height:48px}
+.go:hover{box-shadow:0 10px 26px rgba(55,99,214,.3)}
+.stopb{border-radius:12px;font-size:14px;min-height:48px}
+.main{grid-template-columns:minmax(330px,370px) minmax(0,1fr);gap:18px;padding:0 26px 24px}
+.left{min-height:0}.scroll{gap:0;padding-right:5px}
+.right{gap:12px}
+.card{background:linear-gradient(160deg,rgba(20,30,47,.96),rgba(15,23,37,.96));border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:11px;backdrop-filter:none;box-shadow:0 5px 18px rgba(0,0,0,.12)}
+.ai-card{border-color:rgba(109,140,255,.24);background:linear-gradient(155deg,rgba(25,37,61,.98),rgba(15,23,37,.98))}
+.ch{margin-bottom:11px;gap:9px}.ch h3{font-size:11px;letter-spacing:1.05px;color:#aab8cc}
+.num{background:rgba(109,140,255,.16);color:#a9bcff;border:1px solid rgba(109,140,255,.2);border-radius:6px}
+.creator-card{border-color:rgba(39,184,170,.3);background:linear-gradient(155deg,rgba(15,42,48,.75),rgba(15,23,37,.98))}
+.creator-card .num{background:rgba(39,184,170,.14);color:#62ddce;border-color:rgba(39,184,170,.25)}
+.text{background:#0b1321;border:1px solid rgba(148,163,184,.17);border-radius:9px;padding:10px 12px}
+.text:focus{border-color:#6d8cff;box-shadow:0 0 0 3px rgba(109,140,255,.13)}
+.btn{border-radius:9px;font-size:12px;padding:9px 12px}
+.btn.ghost{background:#1a2639;border-color:rgba(148,163,184,.16)}
+.btn.ghost:hover{background:#24334b;border-color:rgba(148,163,184,.3)}
+.seg{background:#0b1321;border-color:var(--line);border-radius:9px}
+.seg button{padding:7px 9px;font-size:12px}.seg button.on{background:#253653;box-shadow:none;color:#eaf0ff}
+.ai-choices{gap:7px}.ai-choice{background:#0d1727;border-radius:9px;padding:10px;border-color:rgba(148,163,184,.13)}
+.ai-choice.on{border-color:#6d8cff;background:rgba(109,140,255,.12);box-shadow:0 0 0 1px rgba(109,140,255,.12) inset}
+.row{margin:11px 0 7px}.row label{font-size:12px;color:#9eacc0}
+.hint{font-size:11.5px;line-height:1.55;color:#8190a6}
+.creator-item{background:#0c1725;border-color:rgba(148,163,184,.13);border-radius:10px;padding:11px}
+.creator-state{font-size:9px;letter-spacing:.8px}
+.hero{border-radius:14px;background:linear-gradient(120deg,#15233a,#111a2a);border-color:var(--line);padding:17px 19px}
+.ph{font-size:17px}.stats{gap:18px}.stat b{font-size:19px}
+.progress-wrap{border-radius:10px;background:#111b2b;border-color:var(--line)}
+.tabs{padding:4px;background:#0c1422;border:1px solid var(--line);border-radius:11px;width:max-content}
+.tab{padding:8px 13px;border-radius:8px;font-size:12px}.tab.on{background:#243552;color:#f3f6ff}
+.grid{gap:12px;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+.clip{background:#111b2a;border-color:var(--line);border-radius:12px}
+.clip:hover{border-color:rgba(109,140,255,.42);box-shadow:0 10px 28px rgba(0,0,0,.24)}
+.cm{padding:11px 12px}.cc{font-size:12px}
+.empty{border-radius:14px;background:rgba(17,27,42,.35)}
+#log{background:#0b1321;border-color:var(--line);border-radius:12px}
+.details,details{background:#111b2a;border-color:var(--line);border-radius:11px}
+@media(min-width:1500px){.main{grid-template-columns:390px minmax(0,1fr);gap:22px;padding-left:32px;padding-right:32px}.capture-top{padding-left:32px;padding-right:32px}.grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}}
+@media(max-width:1080px){.main{grid-template-columns:minmax(0,1fr);padding:0 16px 20px}.capture-top{padding-left:16px;padding-right:16px}header{padding:13px 16px}}
+@media(max-width:650px){header{flex-wrap:wrap}.tag{display:none}.stats{width:100%;justify-content:space-between}.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
 /* overlays */
 .overlay{position:fixed;inset:0;background:rgba(4,5,9,.78);backdrop-filter:blur(10px);display:grid;place-items:center;z-index:50;animation:fade .15s}
 @keyframes fade{from{opacity:0}}
@@ -3637,6 +3796,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
 <header>
   <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="StreamSnip AI" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>StreamSnip AI<span class="tag">by ScarZero &middot; live stream &rarr; viral Shorts</span></div>
   <div class="sp"></div>
+  <a class="btn ghost" href="/dashboard/" title="Open the React creator workspace">React dashboard</a>
   <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
   <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
   <button class="btn ghost" id="btn-about"><span data-ico="info"></span>About</button>
@@ -3653,7 +3813,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
  <div class="scroll">
   <div class="card creator-card">
     <div class="ch"><span class="num">LIVE</span><h3>Creator monitors</h3></div>
-    <p class="hint" style="margin:0 0 10px">Track creators independently. Each creator gets separate recordings and clips. Up to two can monitor at once.</p>
+    <p class="hint" style="margin:0 0 10px">Track up to 10 creators simultaneously. Each creator gets separate recordings and clips. Ten concurrent streams can be demanding on CPU, GPU, and network resources.</p>
     <input id="creator-name" class="text" type="text" maxlength="80" placeholder="Creator name">
     <div class="field"><input id="creator-target" class="text" type="url" spellcheck="false" placeholder="Twitch or YouTube live URL"><button class="btn ghost" id="creator-add">Add</button></div>
     <p class="hint">Each creator has separate Live recordings/clips and a Recorded VOD inbox. Turn on Watch VOD folder, then drop full VOD files into that creator's inbox. VOD clips and processed originals stay separate from Live.</p>
@@ -3704,7 +3864,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Min viral score</label><b id="v-sens"></b></div>
     <input type="range" id="r-sens" min="0" max="100" step="1">
     <div class="ends"><span>More clips</span><span>Only the best</span></div>
-    <p class="hint">0 = no limit — selects every non-overlapping moment above the viral-score floor. Weak segments can produce fewer or no clips.</p>
+    <p class="hint">0 = no limit  -  selects every non-overlapping moment above the viral-score floor. Weak segments can produce fewer or no clips.</p>
     <div class="two">
       <div><div class="row"><label>Clips / chunk (0 = no limit)</label><b id="v-cpc"></b></div><input type="range" id="r-cpc" min="0" max="10" step="1"></div>
       <div><div class="row"><label>Analysis window</label><b id="v-chunk"></b></div><input type="range" id="r-chunk" min="3" max="15" step="1"><p class="hint">3 min = faster AI reviews; 15 min = deeper context. The full local video is still transcribed and analyzed.</p></div>
@@ -3799,7 +3959,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600}
     <div class="row"><label>Output / clips folder</label></div>
     <div class="folder-pick"><input id="out-dir" class="text" type="text" placeholder="Default: app folder\out"><button class="btn ghost" id="out-dir-browse">Browse</button></div>
     <div class="row"><label>Processing hardware</label></div>
-    <select id="compute-device" class="text"><option value="gpu">Automatic — use NVIDIA GPU when available</option></select>
+    <select id="compute-device" class="text"><option value="gpu">Automatic  -  use NVIDIA GPU when available</option></select>
     <p class="hint">Speech uses CUDA when a supported NVIDIA GPU is detected; video recording and rendering use NVENC whenever FFmpeg provides it. CPU processing is used only when no supported GPU is detected. A GPU initialization failure is shown in Activity instead of silently switching to CPU.</p>
     <div class="row"><label>Live video bitrate target (kbps)</label><b>Full HD</b></div>
     <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
@@ -4077,7 +4237,7 @@ $("#compute-device").value=S.compute_device||"gpu";
 $("#compute-device").addEventListener("change",e=>{S.compute_device=e.target.value;scheduleSave()});
 $("#capture-bitrate").addEventListener("change",e=>{S.capture_bitrate_kbps=Math.max(6000,Math.min(50000,+e.target.value||6000));e.target.value=S.capture_bitrate_kbps;scheduleSave()});
 $("#btn-settings-save").onclick=async()=>{const b=$("#btn-settings-save");b.disabled=true;try{await api("/api/settings",S);toast("Settings saved","ok")}catch(e){toast(e.message,"bad")}b.disabled=false};
-$("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?" — "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
+$("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?"  -  "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
 $("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new StreamSnip AI version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
 $("#btn-update-components").onclick=async()=>{if(!(await confirmBox("Update components?","This updates Python packages and downloads the selected speech model. FFmpeg is bundled into the next installer build.","Update")))return;const b=$("#btn-update-components");b.disabled=true;$("#updates-msg").textContent="Updating...";try{const r=await api("/api/update_components");$("#updates-msg").textContent=r.message;toast("Components updated","ok")}catch(e){$("#updates-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
 function confirmBox(title,msg,ok){return new Promise(res=>{

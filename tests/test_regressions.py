@@ -232,20 +232,26 @@ class RegressionTests(unittest.TestCase):
                 core.push = MagicMock()
                 ids = [
                     core.add_creator({"name": f"Creator {i}", "target": f"https://twitch.tv/channel{i}"})["creator"]["id"]
-                    for i in range(3)
+                    for i in range(autoclip.MAX_ACTIVE_CREATOR_MONITORS + 1)
                 ]
                 with patch.object(autoclip, "Engine", FakeEngine):
                     try:
-                        core.start_creator(ids[0])
-                        core.start_creator(ids[1])
+                        for creator_id in ids[:-1]:
+                            core.start_creator(creator_id)
                         first = core.creator_engines[ids[0]].cfg
                         second = core.creator_engines[ids[1]].cfg
                         self.assertNotEqual(first["creator_out_dir"], second["creator_out_dir"])
                         self.assertNotEqual(first["creator_rec_dir"], second["creator_rec_dir"])
-                        with self.assertRaisesRegex(ValueError, "Two creator monitors"):
-                            core.start_creator(ids[2])
+                        self.assertEqual(
+                            sum(worker.is_alive() for worker in core.creator_workers.values()),
+                            autoclip.MAX_ACTIVE_CREATOR_MONITORS,
+                        )
+                        with self.assertRaisesRegex(
+                            ValueError, f"All {autoclip.MAX_ACTIVE_CREATOR_MONITORS} creator monitor slots"
+                        ):
+                            core.start_creator(ids[-1])
                     finally:
-                        for creator_id in ids[:2]:
+                        for creator_id in ids:
                             if creator_id in core.creator_engines:
                                 core.stop_creator(creator_id, force=True)
                         for worker in core.creator_workers.values():
@@ -1712,6 +1718,25 @@ class RegressionTests(unittest.TestCase):
             self.assertIn("****", metadata)
             self.assertNotIn("fucking", metadata)
             self.assertNotIn("bullshit", metadata)
+
+
+    def test_streamlink_prefers_the_current_python_install_over_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            local_scripts = root / "Scripts"
+            local_scripts.mkdir()
+            local_exe = local_scripts / "streamlink.exe"
+            local_exe.write_bytes(b"local entry point")
+            foreign_exe = str(root / "Python314" / "Scripts" / "streamlink.exe")
+            with patch.object(autoclip.sys, "prefix", str(root)), \
+                 patch.object(autoclip.sys, "executable", str(root / "python.exe")), \
+                 patch.object(autoclip.shutil, "which", return_value=foreign_exe):
+                self.assertEqual(autoclip._find_streamlink_exe(), str(local_exe))
+
+    def test_streamlink_environment_does_not_inject_foreign_python_paths(self):
+        with patch.dict(autoclip.os.environ, {"PYTHONPATH": r"C:\\Python314\\Lib"}, clear=False):
+            env = autoclip.streamlink_env()
+        self.assertEqual(env["PYTHONPATH"], r"C:\\Python314\\Lib")
 
 
 if __name__ == "__main__":

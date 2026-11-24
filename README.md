@@ -198,7 +198,7 @@ python -m pytest -q
 python -m py_compile autoclip.py ai_highlights.py post_metadata.py zernio_poster.py
 ~~~
 
-The browser UI is embedded in autoclip.py. To syntax-check its inline JavaScript, extract the final script block and run node --check on it. GitHub Actions runs the automated test matrix.
+The classic browser UI is embedded in autoclip.py. To syntax-check its inline JavaScript, extract the final script block and run node --check on it. The separate React dashboard preview lives in [dashboard/](dashboard/); follow [dashboard/README.md](dashboard/README.md) for its Vite development server and local API proxy. After npm run build, the Python HTTP handler serves the React dashboard at /dashboard/ while preserving the classic interface at /. GitHub Actions runs the automated test matrix.
 
 Do not run a real publish test against a creator's connected accounts unless you intend to create a public or scheduled post. Account-list and credential checks are safe read-only integration tests; publishing creates an external side effect.
 

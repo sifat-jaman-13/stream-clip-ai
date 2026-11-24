@@ -1496,7 +1496,6 @@ function ClipDetail({
   const [message, setMessage] = useState("");
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [useZernio, setUseZernio] = useState(false);
-  const [browserChoice, setBrowserChoice] = useState("default");
   const selectedAccounts = accountIds;
 
   const saveMetadata = async () => {
@@ -1524,17 +1523,13 @@ function ClipDetail({
   const openManualPost = async () => {
     if (selectedPlatforms.length !== 1) throw new Error("Choose one manual platform at a time. The browser stays on that upload so you can review it before preparing the next platform.");
     await onSaveMetadata(title.trim(), description.trim());
-    const result = await apiPost<{ platform: string; file: string; file_selected: boolean; title_filled: boolean; description_filled: boolean; ready_for_review: boolean }>("/api/browser/prepare", {
+    const result = await apiPost<{ platform: string; file: string; opened_in_default_browser: boolean; manual_video_selection_required: boolean }>("/api/browser/prepare", {
       name: clip.name,
       platform: selectedPlatforms[0],
       title: title.trim(),
       description: (description.trim() || clip.caption || "").trim(),
-      browser: browserChoice,
     });
-    const filled = [result.title_filled ? "title" : "title needs review", result.description_filled ? "description" : "description needs review"].join(" and ");
-    setMessage(result.file_selected
-      ? result.platform + " upload prepared for " + result.file + ". The video was selected automatically; " + filled + ". Review the platform page and press its final Publish button yourself."
-      : result.platform + " opened, but its upload control was not detected. Select the video manually, then review the metadata and publish yourself.");
+    setMessage(result.platform + " opened in your normal default browser. Select " + result.file + " on the upload page, then use Copy title and Copy caption here to fill the post. Review everything and publish yourself.");
   };
 
   const submitPost = async () => {
@@ -1607,14 +1602,6 @@ function ClipDetail({
                         </label>
                       ))}
                     </div>
-                    <label className="field-label">Browser for manual upload
-                      <select className="field-input" value={browserChoice} onChange={(event) => setBrowserChoice(event.target.value)} disabled={busy}>
-                        <option value="default">Windows default browser</option>
-                        <option value="chrome">Google Chrome</option>
-                        <option value="edge">Microsoft Edge</option>
-                        <option value="firefox">Mozilla Firefox</option>
-                      </select>
-                    </label>
                     <div className="clip-publish-targets-heading"><strong>Zernio Auto Posting</strong><span>{Object.keys(accountIds).length} connected</span></div>
                     <label className="zernio-destination-option">
                       <input type="checkbox" checked={useZernio} onChange={(event) => setUseZernio(event.target.checked)} disabled={busy || !configured || !Object.keys(accountIds).length} />
@@ -1633,7 +1620,7 @@ function ClipDetail({
                   <a className="button button-secondary" href={"/clips/" + encodeURIComponent(clip.name.replace(/\.mp4$/i, "")) + ".txt"} target="_blank" rel="noreferrer"><FileText size={14} /> Open AI post copy</a>
                   <Button variant="danger" onClick={onDelete}><Trash2 size={14} /> Delete clip</Button>
                 </div>
-                <p className="muted-note">Manual Post uses the local browser automation profile to select the clip and fill supported fields. Sign in once in that dedicated browser profile. StreamSnip AI never presses the final Publish button. Prepare one manual platform at a time; Zernio remains a separate optional automated route.</p>
+                <p className="muted-note">Manual Post opens the upload page in your normal default browser and keeps your existing login. Select the video yourself, then use Copy title and Copy caption to fill the post. StreamSnip AI never creates a browser profile or presses Publish. Zernio remains a separate optional automated route.</p>
               </>
             )}
             {message ? <p className="inline-feedback">{message}</p> : null}

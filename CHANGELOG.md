@@ -360,3 +360,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Clarified browser status: Playwright package availability is separate from whether an upload browser session is currently open.
 - Fresh validation: **144 backend tests passed**, Python compilation passed, React production build passed, frontend lint reported 0 warnings/errors, all 19 themes and 15 navigation routes passed browser QA, and Firefox/Chrome/Edge launch smoke tests passed.
 - No live recording, clip deletion, credential write, AI vendor request, or social post was triggered during this QA run.
+
+## Default-browser manual posting (24 Nov 2026)
+
+- Removed Playwright-based manual upload automation and all dedicated browser-profile creation.
+- Manual Post now opens the selected platform URL through the operating system's default browser, preserving the user's ordinary browser profile and sign-in.
+- Removed the browser picker and Playwright dependency. Video selection and metadata paste are manual; the final Publish click remains with the user.
+- Added regression tests proving legacy browser selections are ignored and no profile directory is created.

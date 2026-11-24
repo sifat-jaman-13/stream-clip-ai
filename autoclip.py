@@ -3018,7 +3018,7 @@ def grab_frame(mode, target):
     raise ValueError("Couldn't read a frame from that source.")
 
 CORE = Core()
-BROWSER_AUTOMATION = BrowserAutomationManager(_data_root / "browser-profiles")
+BROWSER_AUTOMATION = BrowserAutomationManager()
 TOKEN = secrets.token_urlsafe(24)
 
 # ------------------------------------------------------------------ http server

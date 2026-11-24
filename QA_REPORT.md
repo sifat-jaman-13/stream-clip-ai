@@ -133,3 +133,13 @@ The machine-readable details are in `end_to_end_qa.json`. These results validate
 - Existing sidecars were **not rewritten** because they only retain short transcript excerpts, not the full clip transcript. The improved fallback applies to newly rendered clips. Regenerate old sidecars only when a reliable full transcript or a configured text-generation provider is available.
 - Current local AI configuration remains **Hooks**; no Gemini API key is saved and the local Ollama endpoint is unavailable. Therefore the new fallback is deterministic transcript-based copy, not a claim of live Gemini-generated copy. The Gemini/Ollama/hosted metadata network path was not exercised in this pass.
 - No real YouTube, Instagram, Facebook, or TikTok upload was performed. Platform-specific upload fields still require live account/session testing. The final platform Publish button remains under the user's control.
+
+## Default-browser publishing correction (24 Nov 2026)
+
+- Removed Playwright from `requirements.txt` and uninstalled it from the local virtual environment.
+- Replaced the dedicated persistent-profile launcher with a system-default URL open via Python's standard `webbrowser` module.
+- Removed the browser picker and dedicated-profile wording from the Publish UI.
+- The upload page opens in the normal default browser; the user manually selects the clip and pastes title/caption using the existing Copy controls. No claim of automatic file selection or metadata fill is made.
+- Deleted the local `browser-profiles` directory created by the previous implementation/test.
+- Windows default-browser detection resolves to Firefox (default) on this PC. A live smoke test returned success opening `https://www.youtube.com/upload` through the system default handler; Firefox processes were present afterward. The YouTube account's signed-in state could not be independently inspected from the remote session.
+- Validation: 145 Python tests passed; dashboard production build passed; lint passed with 0 warnings and 0 errors.

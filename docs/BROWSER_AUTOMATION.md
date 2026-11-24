@@ -1,27 +1,27 @@
-# Local browser-assisted publishing
+# Manual posting in your default browser
 
-StreamSnip AI supports a separate manual browser-preparation route alongside optional Zernio publishing. The manual route uses Playwright and a dedicated persistent profile for Chrome, Edge, or Firefox. It does not reuse or take over the user's everyday browser profile.
+StreamSnip AI opens social upload pages in the operating system's normal default browser. It does not launch Playwright, create or manage browser profiles, read browser cookies, or try to take over an existing browser session.
 
-## Setup
+## How it works
 
-1. Install project dependencies with `python -m pip install -r requirements.txt`.
-2. For Firefox, install the Playwright Firefox runtime once with `python -m playwright install firefox`. Chrome and Edge use their installed stable browser channels.
-3. Open Publish, choose one manual platform, select the browser, and press Post.
-4. Sign in to the social account in the StreamSnip AI browser profile the first time. Later sessions reuse that profile.
+1. Open Publish and select one manual platform.
+2. Press Post. StreamSnip opens that platform's upload page through Windows' default URL handler. Your existing browser profile and login remain in use.
+3. Select the clip file on the platform's upload page.
+4. Use Copy title and Copy caption in StreamSnip to paste the saved post text into the platform.
+5. Review the video, account, visibility, title, description, and tags. Click Publish yourself.
 
-## Safety and current behavior
+Manual posting does not require Playwright, a browser extension, a separate sign-in, or a StreamSnip browser profile. It does require selecting the video and pasting the text manually because StreamSnip intentionally does not automate or control the user's everyday browser.
 
-- The local backend resolves the clip path from the app's clip library; the browser does not receive an arbitrary filesystem path from the page.
-- The browser selects the local clip when the platform exposes a file input and fills title/description fields when matching visible fields are found.
-- Platform upload pages change frequently. If an upload input or metadata field is not detected, complete that field manually in the opened browser page.
-- StreamSnip AI never clicks the final Publish/Post button. Review the preview, destination, visibility, title, description, and tags before publishing.
-- Prepare one manual platform at a time in the current UI. Zernio's automated queue remains a separate integration and is not required for manual posting.
-- Browser work is serialized on a dedicated worker thread because the local HTTP server handles requests concurrently and Playwright contexts are thread-affine.
+## Safety and behavior
+
+- The local backend resolves the clip path from the app's clip library before opening the platform URL.
+- Browser selection is not configurable: manual posting always uses the system default browser.
+- No dedicated browser profile directory is created or maintained.
+- StreamSnip AI never clicks the final Publish/Post button.
+- Zernio remains a separate optional automated publishing integration.
 
 ## API
 
-- `GET /api/browser/status` reports whether Playwright is installed, whether an automation browser session is currently open, and the selected browser/profile state.
-- `POST /api/browser/prepare` accepts a clip library name, platform, title, description, and browser choice. The local session token is required.
-- `POST /api/browser/close` closes the dedicated browser context. The local session token is required.
-
-This is a browser-assisted preparation workflow, not unattended publishing. Site-specific upload selectors must be regression-tested whenever a platform changes its composer UI.
+- `GET /api/browser/status` reports the system-default browser mode and explicitly reports `dedicated_profile: false`.
+- `POST /api/browser/prepare` accepts a clip library name, platform, title, and description. A legacy browser field is ignored for compatibility.
+- `POST /api/browser/close` clears the last preparation status; it does not close the user's browser.

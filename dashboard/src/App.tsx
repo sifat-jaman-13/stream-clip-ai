@@ -87,7 +87,7 @@ type ThemePreset = {
 };
 
 const themePresets: ThemePreset[] = [
-  { id: "dark", name: "Dark", description: "Charcoal · cyan · coral", mode: "dark", swatches: ["#282c34", "#9cdef2", "#111111", "#355a66", "#e06c75"] },
+  { id: "dark", name: "Odysseus", description: "Charcoal · ice cyan · muted coral", mode: "dark", swatches: ["#282c34", "#9cdef2", "#111111", "#355a66", "#e06c75"] },
   { id: "light", name: "Light", description: "Cool grey · slate · berry", mode: "light", swatches: ["#f3f5f7", "#26313a", "#ffffff", "#cbd3da", "#b34d5c"] },
   { id: "midnight", name: "Midnight", description: "Near-black · mist · red", mode: "dark", swatches: ["#0d1117", "#c9d1d9", "#161b22", "#30363d", "#f85149"] },
   { id: "cyberpunk", name: "Cyberpunk", description: "Indigo-black · aqua · magenta", mode: "dark", swatches: ["#10121a", "#9bdde0", "#171a26", "#514b78", "#d45aa8"] },
@@ -112,11 +112,39 @@ function getInitialTheme(): ThemeId {
   try {
     const saved = localStorage.getItem("streamsnip.theme");
     if (themePresets.some((theme) => theme.id === saved)) return saved as ThemeId;
-    if (saved === "studio" || saved === "light" || !saved) return "light";
+    if (saved === "studio" || saved === "light") return "light";
     if (saved === "graphite") return "dark";
     return "dark";
   } catch {
-    return "light";
+    return "dark";
+  }
+}
+
+type FontId = "google-sans" | "inter" | "roboto" | "space-grotesk" | "ibm-plex-sans" | "fira-code";
+
+type FontPreset = {
+  id: FontId;
+  name: string;
+  description: string;
+  family: string;
+  stylesheet: string;
+};
+
+const fontPresets: FontPreset[] = [
+  { id: "google-sans", name: "Google Sans Flex", description: "Google Sans · balanced variable UI type", family: '"Google Sans Flex", "Google Sans", sans-serif', stylesheet: "https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,100..1000&display=swap" },
+  { id: "inter", name: "Inter", description: "Neutral, crisp and highly readable", family: '"Inter", sans-serif', stylesheet: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" },
+  { id: "roboto", name: "Roboto", description: "Familiar, compact and practical", family: '"Roboto", sans-serif', stylesheet: "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" },
+  { id: "space-grotesk", name: "Space Grotesk", description: "Geometric with a little more character", family: '"Space Grotesk", sans-serif', stylesheet: "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" },
+  { id: "ibm-plex-sans", name: "IBM Plex Sans", description: "Technical, composed and easy on the eyes", family: '"IBM Plex Sans", sans-serif', stylesheet: "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" },
+  { id: "fira-code", name: "Fira Code · Odysseus", description: "The Odysseus typeface · monospaced", family: '"Fira Code", monospace', stylesheet: "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&display=swap" },
+];
+
+function getInitialFont(): FontId {
+  try {
+    const saved = localStorage.getItem("streamsnip.font");
+    return fontPresets.some((font) => font.id === saved) ? saved as FontId : "google-sans";
+  } catch {
+    return "google-sans";
   }
 }
 
@@ -198,6 +226,29 @@ function ThemeOptions({
   );
 }
 
+function FontOptions({ value, onChange }: { value: FontId; onChange: (value: FontId) => void }) {
+  return (
+    <div className="font-options" aria-label="Application font choices">
+      {fontPresets.map((font) => (
+        <button
+          type="button"
+          key={font.id}
+          className={"font-option " + (value === font.id ? "selected" : "")}
+          onClick={() => onChange(font.id)}
+          aria-pressed={value === font.id}
+        >
+          <span className="font-option-heading">
+            <strong>{font.name}</strong>
+            {value === font.id ? <CheckCircle2 size={16} className="font-option-check" /> : null}
+          </span>
+          <span className="font-option-sample" style={{ fontFamily: font.family }}>Aa Bb 0123</span>
+          <small>{font.description}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function StatusPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "good" | "warning" | "bad" | "neutral" }) {
   return <span className={"status-pill " + tone}><i />{children}</span>;
 }
@@ -225,8 +276,10 @@ export default function App() {
   const [quitting, setQuitting] = useState(false);
   const [quitError, setQuitError] = useState("");
   const [themeId, setThemeId] = useState<ThemeId>(getInitialTheme);
+  const [fontId, setFontId] = useState<FontId>(getInitialFont);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const selectedTheme = themePresets.find((theme) => theme.id === themeId) || themePresets[0];
+  const selectedFont = fontPresets.find((font) => font.id === fontId) || fontPresets[0];
   const activeTitle = pageTitles[location.pathname] || "Workspace";
 
   useEffect(() => {
@@ -236,6 +289,23 @@ export default function App() {
     try { localStorage.setItem("streamsnip.theme", selectedTheme.id); }
     catch { /* Theme remains active for this session if storage is unavailable. */ }
   }, [selectedTheme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--app-font-family", selectedFont.family);
+    root.dataset.font = selectedFont.id;
+    try { localStorage.setItem("streamsnip.font", selectedFont.id); }
+    catch { /* Font remains active for this session if storage is unavailable. */ }
+
+    let stylesheet = document.getElementById("streamsnip-user-font") as HTMLLinkElement | null;
+    if (!stylesheet) {
+      stylesheet = document.createElement("link");
+      stylesheet.id = "streamsnip-user-font";
+      stylesheet.rel = "stylesheet";
+      document.head.appendChild(stylesheet);
+    }
+    stylesheet.href = selectedFont.stylesheet;
+  }, [selectedFont]);
 
   const searchSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -363,11 +433,11 @@ export default function App() {
             <Route path="/publish" element={<ClipLibrary key="publish" workspace={workspace} tab="publish" />} />
             <Route path="/posted" element={<ClipLibrary key="posted" workspace={workspace} tab="posted" />} />
             <Route path="/words" element={<WordsPage key={workspace.words.text} workspace={workspace} />} />
-            <Route path="/settings" element={<SettingsPage workspace={workspace} section="general" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/settings/ai" element={<SettingsPage workspace={workspace} section="ai" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/settings/speech" element={<SettingsPage workspace={workspace} section="speech" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/settings/captions" element={<SettingsPage workspace={workspace} section="captions" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/settings/publishing" element={<SettingsPage workspace={workspace} section="publishing" themeId={themeId} onThemeChange={setThemeId} />} />
+            <Route path="/settings" element={<SettingsPage workspace={workspace} section="general" themeId={themeId} onThemeChange={setThemeId} fontId={fontId} onFontChange={setFontId} />} />
+            <Route path="/settings/ai" element={<SettingsPage workspace={workspace} section="ai" themeId={themeId} onThemeChange={setThemeId} fontId={fontId} onFontChange={setFontId} />} />
+            <Route path="/settings/speech" element={<SettingsPage workspace={workspace} section="speech" themeId={themeId} onThemeChange={setThemeId} fontId={fontId} onFontChange={setFontId} />} />
+            <Route path="/settings/captions" element={<SettingsPage workspace={workspace} section="captions" themeId={themeId} onThemeChange={setThemeId} fontId={fontId} onFontChange={setFontId} />} />
+            <Route path="/settings/publishing" element={<SettingsPage workspace={workspace} section="publishing" themeId={themeId} onThemeChange={setThemeId} fontId={fontId} onFontChange={setFontId} />} />
             <Route path="/activity" element={<ActivityPage workspace={workspace} />} />
             <Route path="/help" element={<HelpPage />} />
             <Route path="/about" element={<AboutPage />} />
@@ -1631,11 +1701,13 @@ function ClipDetail({
   );
 }
 
-function SettingsPage({ workspace, section, themeId, onThemeChange }: {
+function SettingsPage({ workspace, section, themeId, onThemeChange, fontId, onFontChange }: {
   workspace: Workspace;
   section: "general" | "ai" | "speech" | "captions" | "publishing";
   themeId: ThemeId;
   onThemeChange: (value: ThemeId) => void;
+  fontId: FontId;
+  onFontChange: (value: FontId) => void;
 }) {
   const headings = {
     general: ["GENERAL", "Application settings", "Local storage, performance, and application behavior."],
@@ -1663,7 +1735,7 @@ function SettingsPage({ workspace, section, themeId, onThemeChange }: {
           </div>
         </nav>
         <div className="settings-main">
-          {section === "general" ? <GeneralSettings workspace={workspace} themeId={themeId} onThemeChange={onThemeChange} /> : null}
+          {section === "general" ? <GeneralSettings workspace={workspace} themeId={themeId} onThemeChange={onThemeChange} fontId={fontId} onFontChange={onFontChange} /> : null}
           {section === "ai" ? <AISettingsPage workspace={workspace} /> : null}
           {section === "speech" ? <SpeechSettings workspace={workspace} /> : null}
           {section === "captions" ? <CaptionSettings workspace={workspace} /> : null}
@@ -1674,10 +1746,12 @@ function SettingsPage({ workspace, section, themeId, onThemeChange }: {
   );
 }
 
-function GeneralSettings({ workspace, themeId, onThemeChange }: {
+function GeneralSettings({ workspace, themeId, onThemeChange, fontId, onFontChange }: {
   workspace: Workspace;
   themeId: ThemeId;
   onThemeChange: (value: ThemeId) => void;
+  fontId: FontId;
+  onFontChange: (value: FontId) => void;
 }) {
   const settings = workspace.settings || {};
   const [browseBusy, setBrowseBusy] = useState("");
@@ -1703,6 +1777,15 @@ function GeneralSettings({ workspace, themeId, onThemeChange }: {
         </div>
         <ThemeOptions value={themeId} onChange={onThemeChange} />
         <p className="field-help">Themes change the workspace surfaces, contrast, and accent colour. They do not change your clips or capture settings.</p>
+      </section>
+
+      <section className="settings-section-card font-settings-card">
+        <div className="settings-section-heading">
+          <div><h3>Interface font</h3><p>Choose the typeface used throughout StreamSnip AI. Your choice is saved on this device.</p></div>
+          <span className="font-settings-icon" aria-hidden="true">Aa</span>
+        </div>
+        <FontOptions value={fontId} onChange={onFontChange} />
+        <p className="field-help">Google Sans Flex is the default. Fira Code is the font used by Odysseus. Fonts load from Google Fonts when selected; system fallbacks keep the app readable when offline.</p>
       </section>
 
       <section className="settings-section-card">

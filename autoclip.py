@@ -526,17 +526,39 @@ def apply_storage_paths(cfg):
             STORAGE_PATH_WARNING = (STORAGE_PATH_WARNING + " " + warning).strip()
 
 def streamer_credit(cfg):
-    """Use an explicit credit when supplied; otherwise infer common channel handles."""
+    """Prefer an explicit credit, then infer public Twitch/YouTube handles from the source URL."""
     override = re.sub(r"[\r\n{}\\]", "", str(cfg.get("streamer_tag", "")).strip())[:80]
     if override:
         return override
     target = str(cfg.get("target", "")).strip().strip('"')
-    m = re.search(r"(?:twitch\.tv)/([^/?#]+)", target, re.I)
-    if m and m.group(1).lower() not in {"videos", "directory", "search"}:
-        return "@" + re.sub(r"[\r\n{}\\]", "", m.group(1))
-    m = re.search(r"(?:youtube\.com)/@([^/?#]+)", target, re.I)
-    if m:
-        return "@" + re.sub(r"[\r\n{}\\]", "", m.group(1))
+    if not target:
+        return ""
+    candidate = target if "://" in target else "https://" + target.lstrip("/")
+    try:
+        parsed = urllib.parse.urlparse(candidate)
+        host = (parsed.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+    segments = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+    if host == "clips.twitch.tv":
+        return ""
+    if host == "twitch.tv" or host.endswith(".twitch.tv"):
+        handle = segments[0] if segments else ""
+        if handle.lower() in {"videos", "directory", "search", "clip", "downloads", "settings", "wallet", "subscriptions"}:
+            return ""
+        cleaned = re.sub(r"[^A-Za-z0-9_]", "", handle)[:80]
+        return "@" + cleaned if cleaned else ""
+    if host == "youtube.com" or host.endswith(".youtube.com"):
+        if not segments:
+            return ""
+        if segments[0].startswith("@"):
+            handle = segments[0][1:]
+        elif segments[0].lower() in {"c", "user"} and len(segments) > 1:
+            handle = segments[1]
+        else:
+            return ""
+        cleaned = re.sub(r"[^A-Za-z0-9_.-]", "", handle)[:80]
+        return "@" + cleaned if cleaned else ""
     return ""
 
 CLIP_HASHTAGS = "#shorts #fyp #streamer #funny #clips #viral"
@@ -745,7 +767,7 @@ def forget_posted_clips(names):
     invalidate_clip_cache()
 
 def load_ai_settings():
-    defaults = {"provider": "hooks", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
+    defaults = {"provider": "gemini", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
                 "gemini_model": DEFAULT_GEMINI_COPY_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
                 "custom_api_base": "https://api.openai.com/v1", "custom_api_model": "",
                 "custom_api_key": "", "gemini_api_key": "",
@@ -759,7 +781,7 @@ def load_ai_settings():
     # AI-written titles and descriptions are always enabled; ignore legacy opt-out values.
     defaults["metadata_copy_enabled"] = "true"
     if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface", "custom"}:
-        defaults["provider"] = "hooks"
+        defaults["provider"] = "gemini"
     if defaults["gemini_model"] in RETIRED_GEMINI_MODELS:
         defaults["gemini_model"] = DEFAULT_GEMINI_COPY_MODEL
     if defaults["huggingface_model"] == "Qwen/Qwen2.5-7B-Instruct-1M":
@@ -1787,7 +1809,7 @@ class Engine:
             if not isinstance(ai_cfg, dict):
                 ai_cfg = load_ai_settings()
             # Reuse the exact provider selected for highlight detection; there is no separate copy provider.
-            provider = str(ai_cfg.get("provider", "hooks")).strip().lower()
+            provider = str(ai_cfg.get("provider", "gemini")).strip().lower()
             if transcript and provider in {"ollama", "gemini", "huggingface", "custom"}:
                 post_copy = generate_social_copy(transcript, tag, ai_cfg, log=self.log)
             elif transcript and provider == "hooks":
@@ -3022,6 +3044,17 @@ BROWSER_AUTOMATION = BrowserAutomationManager()
 TOKEN = secrets.token_urlsafe(24)
 
 # ------------------------------------------------------------------ http server
+def parse_json_object(raw):
+    """Parse a JSON request body and reject malformed or non-object payloads."""
+    try:
+        body = json.loads(raw or b"{}")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise ValueError("JSON body must be an object")
+    return body
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = PRODUCT_NAME
     protocol_version = "HTTP/1.1"
@@ -3249,9 +3282,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if n > 400_000:
                 self.close_connection = True
                 return self._send(413, {"error": "too large"})
-            try: body = json.loads(self.rfile.read(n) or b"{}")
-            except ValueError: body = {}
-            if not isinstance(body, dict): body = {}
+            try:
+                body = parse_json_object(self.rfile.read(n))
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
             path = urllib.parse.urlparse(self.path).path
             try:
                 if path == "/api/client-log":
@@ -3506,20 +3540,54 @@ def main():
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         return
-    class QuietServer(http.server.ThreadingHTTPServer):
-        def handle_error(self, request, client_address):      # browser closed a connection: harmless, don't print a traceback
-            if isinstance(sys.exc_info()[1], (ConnectionError, BrokenPipeError, TimeoutError)):
-                return
-            super().handle_error(request, client_address)
+    try:
+        import uvicorn
+        from api_server import create_app
+    except ImportError as exc:
+        print(f"FastAPI server dependencies are missing: {exc}. Run: python -m pip install -r requirements.txt", file=sys.stderr)
+        return
     bind_host = os.environ.get("STREAMSNIP_BIND_HOST", "127.0.0.1")
     bind_port = int(os.environ.get("STREAMSNIP_PORT", "0"))
-    srv = QuietServer((bind_host, bind_port), Handler)
-    srv.daemon_threads = True
+    app = create_app(
+        Handler,
+        token=TOKEN,
+        quit_event=QUIT,
+        begin_window_lease=begin_window_lease,
+        end_window_lease=end_window_lease,
+        find_clip_path=find_clip_path,
+        clip_regex=CLIP_RE,
+        product_name=PRODUCT_NAME,
+        version=APP_VERSION,
+    )
+    server = uvicorn.Server(uvicorn.Config(
+        app,
+        host=bind_host,
+        port=bind_port,
+        log_level="warning",
+        access_log=False,
+        server_header=False,
+        lifespan="off",
+        workers=1,
+    ))
+    server_thread = threading.Thread(target=server.run, daemon=True, name="streamsnip-api")
+    server_thread.start()
+    startup_deadline = time.monotonic() + 15.0
+    while not server.started and server_thread.is_alive() and time.monotonic() < startup_deadline:
+        time.sleep(0.05)
+    if not server.started:
+        server.should_exit = True
+        server_thread.join(timeout=5)
+        raise RuntimeError("The local FastAPI server failed to start within 15 seconds.")
+    try:
+        bound_port = server.servers[0].sockets[0].getsockname()[1]
+    except (AttributeError, IndexError, OSError) as exc:
+        server.should_exit = True
+        server_thread.join(timeout=5)
+        raise RuntimeError("The local FastAPI server started but its bound port could not be read.") from exc
     public_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
     if ":" in public_host and not public_host.startswith("["):
         public_host = f"[{public_host}]"
-    url = f"http://{public_host}:{srv.server_address[1]}/"
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://{public_host}:{bound_port}/"
     print(
         f"{PRODUCT_NAME} by ScarZero is running at {url}\n"
         "IMPORTANT: Keep this terminal window OPEN while StreamSnip AI is running.\n"
@@ -3542,15 +3610,11 @@ def main():
         time.sleep(0.3)
     except KeyboardInterrupt:
         pass
-    try:
-        srv.shutdown()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        try:
-            srv.server_close()
-        except Exception:
-            pass
+    server.should_exit = True
+    server_thread.join(timeout=10)
+    if server_thread.is_alive():
+        server.force_exit = True
+        server_thread.join(timeout=2)
 
 
 HTML = r"""<!doctype html>
@@ -4145,8 +4209,8 @@ function startWindowLease(){if(windowLeaseActive)return;windowLeaseActive=true;w
 function stopWindowLease(){windowLeaseActive=false;if(windowLeaseController)windowLeaseController.abort();windowLeaseController=null}
 markWindowOpen();startWindowLease();window.addEventListener("pageshow",()=>{markWindowOpen();startWindowLease()});
 window.addEventListener("pagehide",()=>{stopWindowLease();if(appClosing)return;fetch("/api/window/closing",{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:"{}",keepalive:true}).catch(()=>{})});
-const AI=BOOT.ai||{provider:"hooks",ollama_url:"http://127.0.0.1:11434",ollama_model:""};
-$("#ai-provider").value=AI.provider||"hooks";
+const AI=BOOT.ai||{provider:"gemini",ollama_url:"http://127.0.0.1:11434",ollama_model:""};
+$("#ai-provider").value=AI.provider||"gemini";
 $("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
 $("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.ollama_model||"Click Detect models"));
 $("#hf-model").value=AI.huggingface_model||"deepseek-ai/DeepSeek-V4.1-Flash:fastest";

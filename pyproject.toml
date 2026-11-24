@@ -27,6 +27,8 @@ classifiers = [
 dependencies = [
   "numpy>=1.24",
   "faster-whisper==1.2.1",
+  "fastapi>=0.115,<1.0",
+  "uvicorn>=0.34,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +57,7 @@ Download = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 Security = "https://github.com/sifat-jaman-13/stream-clip-ai/security/policy"
 
 [tool.setuptools]
-py-modules = ["autoclip", "ai_highlights", "post_metadata", "zernio_poster"]
+py-modules = ["autoclip", "api_server", "ai_highlights", "post_metadata", "zernio_poster"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -835,7 +835,33 @@ class RegressionTests(unittest.TestCase):
             path = Path(directory) / "ai_settings.json"
             with patch.object(autoclip, "AI_SETTINGS_FILE", path):
                 settings = autoclip.load_ai_settings()
+        self.assertEqual(settings["provider"], "gemini")
         self.assertEqual(settings["gemini_model"], "gemini-3.1-flash-lite")
+
+    def test_ai_settings_preserve_an_explicit_saved_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            path.write_text('{"provider": "hooks"}', encoding="utf-8")
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                settings = autoclip.load_ai_settings()
+        self.assertEqual(settings["provider"], "hooks")
+
+    def test_streamer_credit_infers_supported_channel_handles(self):
+        for target, expected in (
+            ("https://www.twitch.tv/Ninja/live", "@Ninja"),
+            ("https://www.youtube.com/@MrBeast/streams", "@MrBeast"),
+            ("https://youtube.com/c/CreatorName", "@CreatorName"),
+            ("https://m.youtube.com/user/LegacyCreator", "@LegacyCreator"),
+        ):
+            with self.subTest(target=target):
+                self.assertEqual(
+                    autoclip.streamer_credit({"target": target, "streamer_tag": ""}),
+                    expected,
+                )
+        self.assertEqual(
+            autoclip.streamer_credit({"target": "https://twitch.tv/Ninja", "streamer_tag": "My channel"}),
+            "My channel",
+        )
 
     def test_ai_settings_preserve_explicit_gemini_31_flash_lite_selection(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1737,6 +1763,25 @@ class RegressionTests(unittest.TestCase):
         with patch.dict(autoclip.os.environ, {"PYTHONPATH": r"C:\\Python314\\Lib"}, clear=False):
             env = autoclip.streamlink_env()
         self.assertEqual(env["PYTHONPATH"], r"C:\\Python314\\Lib")
+
+
+    def test_api_json_body_parser_accepts_empty_object(self):
+        self.assertEqual(autoclip.parse_json_object(b""), {})
+        self.assertEqual(autoclip.parse_json_object(b'{"ok": true}'), {"ok": True})
+
+    def test_api_json_body_parser_rejects_malformed_json(self):
+        with self.assertRaisesRegex(ValueError, "invalid JSON body"):
+            autoclip.parse_json_object(b'{"settings":')
+
+    def test_api_json_body_parser_rejects_non_object_payloads(self):
+        for raw in (b"[]", b"null", b'"settings"', b"123"):
+            with self.subTest(raw=raw):
+                with self.assertRaisesRegex(ValueError, "JSON body must be an object"):
+                    autoclip.parse_json_object(raw)
+
+    def test_api_json_body_parser_rejects_invalid_utf8(self):
+        with self.assertRaisesRegex(ValueError, "invalid JSON body"):
+            autoclip.parse_json_object(b"\xff")
 
 
 if __name__ == "__main__":

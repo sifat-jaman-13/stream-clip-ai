@@ -1,2264 +1,1086 @@
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
-  Activity, AlertCircle, ArrowRight, BadgeCheck, Bot, Camera,
-  Check, CheckCircle2, ChevronDown, CircleHelp, Clapperboard, Clock3, Cpu, Download,
-  ExternalLink, FileText, Film, Folder, FolderOpen, Gauge, Home, Info, Layers,
-  Loader2, MonitorPlay, MoreHorizontal, Move, Play, Plus, Radio,
-  RefreshCw, Save, Search, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Square,
-  Palette, Trash2, Upload, Video, X, Zap,
-  type LucideIcon,
+  Activity, AlertCircle, ArrowRight, ArrowUpRight, BadgeCheck, Check, CheckCircle2,
+  ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clapperboard, CloudUpload, Cpu, Download,
+  ExternalLink, Eye, FileText, FileVideo, FolderOpen, HardDrive, Info, LayoutDashboard,
+  Menu, MoreHorizontal, Palette, Pause, Play, Plus, Radio,
+  RadioTower, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Square, Trash2,
+  Users, Video, WandSparkles, X, Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ButtonHTMLAttributes, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import {
-  Link, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams,
-} from "react-router-dom";
-import { apiPost, notifyApp } from "./api";
-import { useWorkspace } from "./workspace";
-import type { AppSettings, PublishingAccount, Workspace } from "./workspace";
+import type { LucideIcon } from "lucide-react";
+import { apiGet, apiPost } from "./api";
+import { useWorkspace, type AppSettings, type Workspace } from "./workspace";
 import type { Clip, Creator, LogEntry } from "./types";
+import "./App.css";
 
-const navGroups: { title: string; items: { to: string; label: string; icon: LucideIcon; end?: boolean }[] }[] = [
-  {
-    title: "WORKSPACE",
-    items: [
-      { to: "/", label: "Dashboard", icon: Home, end: true },
-      { to: "/live", label: "Live Studio", icon: Radio },
-      { to: "/layout", label: "Layout Studio", icon: Layers },
-    ],
-  },
-  {
-    title: "CONTENT",
-    items: [
-      { to: "/clips", label: "Clips", icon: Film },
-      { to: "/publish", label: "Publish", icon: Upload },
-      { to: "/posted", label: "Published", icon: Video },
-      { to: "/words", label: "Hype words", icon: Zap },
-    ],
-  },
-  {
-    title: "CONFIGURATION",
-    items: [
-      { to: "/settings/ai", label: "AI providers", icon: Bot },
-      { to: "/settings/speech", label: "Transcription", icon: Activity },
-      { to: "/settings/captions", label: "Captions", icon: FileText },
-      { to: "/settings/publishing", label: "Publishing", icon: Upload },
-      { to: "/settings", label: "App settings", icon: Settings, end: true },
-    ],
-  },
-  {
-    title: "SUPPORT",
-    items: [
-      { to: "/activity", label: "Activity", icon: Clock3 },
-      { to: "/help", label: "Help centre", icon: CircleHelp },
-      { to: "/about", label: "About", icon: Info },
-    ],
-  },
+type PageId = "overview" | "live" | "creators" | "clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
+type ThemeId = "odysseus" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseas";
+type FontId = "google-sans" | "inter" | "roboto" | "open-sans" | "montserrat" | "poppins" | "lato" | "nunito-sans" | "dm-sans" | "ibm-plex-sans" | "space-grotesk" | "fira-code" | "jetbrains-mono";
+type StudioSetupTab = "capture" | "ai" | "speech" | "captions";
+type RecordLike = Record<string, any>;
+type ToastDetail = { tone: "success" | "error" | "info"; title: string; message?: string };
+
+const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
+  { id: "odysseus", name: "Odysseus", description: "Graphite · arctic cyan · coral", colors: ["#282c34", "#111111", "#355a66", "#9cdef2", "#e06c75"] },
+  { id: "studio-light", name: "Studio Light", description: "YouTube Studio · clean neutral surfaces", colors: ["#ffffff", "#f5f5f5", "#0f0f0f", "#cc0000"] },
+  { id: "studio-dark", name: "Studio Dark", description: "YouTube Studio · low-light workspace", colors: ["#0f0f0f", "#212121", "#f1f1f1", "#ff0033"] },
+  { id: "github", name: "GitHub Dark", description: "Midnight · mist · signal red", colors: ["#0d1117", "#161b22", "#30363d", "#f85149"] },
+  { id: "nord", name: "Nord", description: "Arctic blue-gray · soft cyan", colors: ["#2e3440", "#3b4252", "#4c566a", "#88c0d0", "#bf616a"] },
+  { id: "odysseas", name: "Odysseus Paper", description: "Navy · chalk · signal orange", colors: ["#142838", "#edf0ec", "#fffefa", "#ef6a42"] },
 ];
 
-const pageTitles: Record<string, string> = {
-  "/": "Dashboard",
-  "/live": "Live Studio",
-  "/layout": "Layout Studio",
-  "/clips": "Clips",
-  "/publish": "Publish clips",
-  "/posted": "Published",
-  "/words": "Hype words",
-  "/settings": "App settings",
-  "/settings/ai": "AI providers",
-  "/settings/speech": "Transcription",
-  "/settings/captions": "Caption settings",
-  "/settings/publishing": "Publishing",
-  "/activity": "Activity",
-  "/help": "Help centre",
-  "/about": "About StreamSnip AI",
-};
-
-type ThemeId =
-  | "dark" | "light" | "midnight" | "cyberpunk" | "retrowave" | "forest"
-  | "ocean" | "ume" | "terminal" | "organs" | "gpt" | "claude"
-  | "cute" | "eclipse" | "porcelain" | "arcade" | "blueprint" | "monolith" | "yoyo";
-
-type ThemePreset = {
-  id: ThemeId;
-  name: string;
-  description: string;
-  mode: "light" | "dark";
-  swatches: [string, string, string, string, string];
-};
-
-const themePresets: ThemePreset[] = [
-  { id: "dark", name: "Dark", description: "Charcoal · cyan · coral", mode: "dark", swatches: ["#282c34", "#9cdef2", "#111111", "#355a66", "#e06c75"] },
-  { id: "light", name: "Light", description: "Cool grey · slate · berry", mode: "light", swatches: ["#f3f5f7", "#26313a", "#ffffff", "#cbd3da", "#b34d5c"] },
-  { id: "midnight", name: "Midnight", description: "Near-black · mist · red", mode: "dark", swatches: ["#0d1117", "#c9d1d9", "#161b22", "#30363d", "#f85149"] },
-  { id: "cyberpunk", name: "Cyberpunk", description: "Indigo-black · aqua · magenta", mode: "dark", swatches: ["#10121a", "#9bdde0", "#171a26", "#514b78", "#d45aa8"] },
-  { id: "retrowave", name: "Retrowave", description: "Night purple · neon pink", mode: "dark", swatches: ["#1a1a2e", "#e94560", "#16213e", "#533483", "#e94560"] },
-  { id: "forest", name: "Forest", description: "Pine · sage · leaf green", mode: "dark", swatches: ["#1b2a1b", "#a8d5a2", "#142414", "#3d6b3d", "#7cb871"] },
-  { id: "ocean", name: "Ocean", description: "Deep blue · sky · bright blue", mode: "dark", swatches: ["#0b1a2c", "#64d2ff", "#091422", "#1e5074", "#4facfe"] },
-  { id: "ume", name: "Ume", description: "Plum · soft pink · blossom", mode: "dark", swatches: ["#271d2b", "#f1d8e9", "#1d1721", "#66475f", "#d98bb7"] },
-  { id: "terminal", name: "Terminal", description: "Black-green · mint · phosphor", mode: "dark", swatches: ["#0b1110", "#b8e6c1", "#080d0c", "#28553a", "#6bd38b"] },
-  { id: "organs", name: "Organs", description: "Near-black · parchment · crimson", mode: "dark", swatches: ["#0a0406", "#efe1c8", "#15080a", "#3a1519", "#c83240"] },
-  { id: "gpt", name: "GPT", description: "Neutral charcoal · soft grey", mode: "dark", swatches: ["#212121", "#ececec", "#171717", "#424242", "#949494"] },
-  { id: "claude", name: "Claude", description: "Warm umber · ivory · terracotta", mode: "dark", swatches: ["#1f1e1b", "#f5f1e8", "#2b2926", "#514b43", "#d97757"] },
-  { id: "cute", name: "Cute", description: "Blush · berry · rose", mode: "light", swatches: ["#fff4f7", "#63394d", "#fffafd", "#edc7d5", "#d65f88"] },
-  { id: "eclipse", name: "Eclipse", description: "Graphite · warm white · teal", mode: "dark", swatches: ["#17191c", "#e8e4dc", "#0f1113", "#3c4248", "#46c2b3"] },
-  { id: "porcelain", name: "Porcelain", description: "Mist · slate · blue", mode: "light", swatches: ["#edf0f2", "#252a30", "#ffffff", "#c7cdd2", "#3478c9"] },
-  { id: "arcade", name: "Arcade", description: "Ink · arcade yellow · hot pink", mode: "dark", swatches: ["#15131d", "#f4e85c", "#0b1720", "#305f68", "#ff4f91"] },
-  { id: "blueprint", name: "Blueprint", description: "Navy · ice · signal gold", mode: "dark", swatches: ["#10263b", "#e8f1f5", "#091a29", "#48758d", "#e6b84a"] },
-  { id: "monolith", name: "Monolith", description: "Concrete · chalk · acid green", mode: "dark", swatches: ["#202020", "#d8d8d2", "#121212", "#50504b", "#b6e05c"] },
-  { id: "yoyo", name: "Yoyo", description: "Smoky violet · sage · copper", mode: "dark", swatches: ["#211f23", "#dfdbd7", "#141415", "#3e5146", "#e09d6c"] },
+const fontOptions: Array<{ id: FontId; name: string; family: string; kind: string }> = [
+  { id: "jetbrains-mono", name: "JetBrains Mono", family: '"JetBrains Mono", Consolas, monospace', kind: "Monospace" },
+  { id: "google-sans", name: "Google Sans", family: '"Google Sans Flex", "Google Sans", "Segoe UI", Arial, sans-serif', kind: "Sans serif" },
+  { id: "inter", name: "Inter", family: '"Inter", Arial, sans-serif', kind: "Sans serif" },
+  { id: "roboto", name: "Roboto", family: '"Roboto", Arial, sans-serif', kind: "Sans serif" },
+  { id: "open-sans", name: "Open Sans", family: '"Open Sans", Arial, sans-serif', kind: "Sans serif" },
+  { id: "montserrat", name: "Montserrat", family: '"Montserrat", Arial, sans-serif', kind: "Sans serif" },
+  { id: "poppins", name: "Poppins", family: '"Poppins", Arial, sans-serif', kind: "Sans serif" },
+  { id: "lato", name: "Lato", family: '"Lato", Arial, sans-serif', kind: "Sans serif" },
+  { id: "nunito-sans", name: "Nunito Sans", family: '"Nunito Sans", Arial, sans-serif', kind: "Sans serif" },
+  { id: "dm-sans", name: "DM Sans", family: '"DM Sans", Arial, sans-serif', kind: "Sans serif" },
+  { id: "ibm-plex-sans", name: "IBM Plex Sans", family: '"IBM Plex Sans", Arial, sans-serif', kind: "Sans serif" },
+  { id: "space-grotesk", name: "Space Grotesk", family: '"Space Grotesk", Arial, sans-serif', kind: "Sans serif" },
+  { id: "fira-code", name: "Fira Code", family: '"Fira Code", Consolas, monospace', kind: "Monospace" },
 ];
 
-function getInitialTheme(): ThemeId {
+const pageInfo: Record<PageId, { title: string; description: string }> = {
+  overview: { title: "Studio overview", description: "Your capture activity, creator sources, and clips in one place." },
+  live: { title: "Live Studio", description: "Choose a source and control capture from your local engine." },
+  creators: { title: "Creators", description: "Manage independent live monitors and recorded-VOD folders." },
+  clips: { title: "Clip library", description: "Review generated clips, edit metadata, and prepare a post." },
+  published: { title: "Published", description: "Clips recorded in your local posted registry." },
+  publishing: { title: "Publishing", description: "Connect Zernio or prepare a manual upload in your browser." },
+  words: { title: "Hype words", description: "Tune the phrase list used by the local highlight scorer." },
+  activity: { title: "Activity", description: "Recent engine events and actionable processing errors." },
+  settings: { title: "Settings", description: "Manage application storage and workspace appearance. Prepare sessions in Live Studio." },
+  help: { title: "Help", description: "How the local capture and clip workflow behaves." },
+  about: { title: "About StreamSnip AI", description: "Application details and project resources." },
+};
+
+const navGroups: Array<{ label: string; items: Array<{ id: PageId; label: string; icon: LucideIcon }> }> = [
+  { label: "Studio", items: [
+    { id: "overview", label: "Dashboard", icon: LayoutDashboard },
+    { id: "live", label: "Live Studio", icon: Radio },
+    { id: "creators", label: "Creators", icon: Users },
+  ] },
+  { label: "Content", items: [
+    { id: "clips", label: "Clip library", icon: Clapperboard },
+    { id: "published", label: "Published", icon: BadgeCheck },
+    { id: "words", label: "Hype words", icon: WandSparkles },
+  ] },
+  { label: "Manage", items: [
+    { id: "publishing", label: "Publishing", icon: CloudUpload },
+    { id: "settings", label: "Settings", icon: Settings },
+    { id: "activity", label: "Activity", icon: Activity },
+  ] },
+];
+
+const clipUrl = (name: string) => "/clips/" + encodeURIComponent(name);
+const num = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const count = (value: unknown) => new Intl.NumberFormat().format(num(value));
+const duration = (value: number) => {
+  const total = Math.max(0, Math.floor(value || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return hours ? hours + "h " + String(minutes).padStart(2, "0") + "m" : minutes + "m " + String(seconds).padStart(2, "0") + "s";
+};
+const dateLabel = (value?: number | string | null) => {
+  if (value === undefined || value === null || value === "") return "—";
+  const numeric = Number(value);
+  const date = new Date(Number.isFinite(numeric) ? numeric * 1000 : String(value));
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+};
+const sizeLabel = (value?: number) => {
+  const mb = num(value);
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb.toFixed(mb < 10 ? 1 : 0) + " MB";
+};
+const inferCreatorTag = (value: string) => {
+  const target = value.trim();
+  if (!target) return "";
+  let url: URL;
   try {
-    const saved = localStorage.getItem("streamsnip.theme");
-    if (themePresets.some((theme) => theme.id === saved)) return saved as ThemeId;
-    if (saved === "studio" || saved === "light" || !saved) return "light";
-    if (saved === "graphite") return "dark";
-    return "dark";
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(target) ? target : "https://" + target);
   } catch {
-    return "light";
+    return "";
   }
-}
-
-const asString = (value: unknown, fallback = "") => value === undefined || value === null ? fallback : String(value);
-const asNumber = (value: unknown, fallback: number) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-const asBool = (value: unknown) => value === true || value === "true" || value === 1;
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-
-const manualPostingTargets = [
-  { id: "youtube", name: "YouTube", url: "https://www.youtube.com/upload" },
-  { id: "facebook", name: "Facebook", url: "https://www.facebook.com/reels/create/" },
-  { id: "instagram", name: "Instagram", url: "https://www.instagram.com/create/select/" },
-  { id: "tiktok", name: "TikTok", url: "https://www.tiktok.com/upload" },
-];
-
-function formatDate(value: number | string | null | undefined) {
-  if (!value) return "N/A";
-  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
-  if (Number.isNaN(date.getTime())) return "N/A";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
-  }).format(date);
-}
-
-function formatDuration(totalSeconds: number) {
-  const safe = Math.max(0, Math.floor(totalSeconds || 0));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-  const seconds = safe % 60;
-  return hours
-    ? hours + ":" + String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0")
-    : minutes + ":" + String(seconds).padStart(2, "0");
-}
-
-function PageHeading({
-  title, description, action,
-}: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
-  return (
-    <div className="page-heading">
-      <div className="page-heading-copy">
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-      {action ? <div className="page-heading-action">{action}</div> : null}
-    </div>
-  );
-}
-
-function Button({
-  children, variant = "secondary", className = "", ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "danger" | "quiet" }) {
-  return <button className={"button button-" + variant + " " + className} {...props}>{children}</button>;
-}
-
-function ThemeOptions({
-  value, onChange, compact = false,
-}: { value: ThemeId; onChange: (value: ThemeId) => void; compact?: boolean }) {
-  return (
-    <div className={"theme-options " + (compact ? "compact" : "grid")}>
-      {themePresets.map((theme) => (
-        <button
-          type="button"
-          key={theme.id}
-          className={"theme-option " + (value === theme.id ? "selected" : "")}
-          onClick={() => onChange(theme.id)}
-          aria-pressed={value === theme.id}
-        >
-          <span className="theme-option-swatches" aria-hidden="true">
-            {theme.swatches.map((swatch, index) => <i key={index} style={{ backgroundColor: swatch }} />)}
-          </span>
-          <span className="theme-option-copy">
-            <strong>{theme.name}</strong>
-            <small>{theme.description}</small>
-          </span>
-          {value === theme.id ? <CheckCircle2 size={17} className="theme-option-check" /> : null}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function StatusPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "good" | "warning" | "bad" | "neutral" }) {
-  return <span className={"status-pill " + tone}><i />{children}</span>;
-}
-
-function MetricCard({
-  icon: Icon, label, value, note, tone,
-}: { icon: LucideIcon; label: string; value: string | number; note: string; tone: string }) {
-  return (
-    <article className="metric-card">
-      <div className={"metric-icon " + tone}><Icon size={18} /></div>
-      <div className="metric-copy">
-        <span>{label}</span>
-        <strong>{typeof value === "number" ? value.toLocaleString() : value}</strong>
-        <small>{note}</small>
-      </div>
-    </article>
-  );
-}
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const parts = url.pathname.split("/").filter(Boolean).map((part) => {
+    try { return decodeURIComponent(part); } catch { return part; }
+  });
+  if (host === "clips.twitch.tv") return "";
+  if (host === "twitch.tv" || host.endsWith(".twitch.tv")) {
+    const handle = parts[0] || "";
+    if (["videos", "directory", "search", "clip", "downloads", "settings"].includes(handle.toLowerCase())) return "";
+    const clean = handle.replace(/[^a-z0-9_]/gi, "").slice(0, 80);
+    return clean ? "@" + clean : "";
+  }
+  if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+    const first = parts[0] || "";
+    const handle = first.startsWith("@") ? first.slice(1) : ["c", "user"].includes(first.toLowerCase()) ? parts[1] || "" : "";
+    const clean = handle.replace(/[^a-z0-9_.-]/gi, "").slice(0, 80);
+    return clean ? "@" + clean : "";
+  }
+  return "";
+};
+const phaseLabel = (phase: string) => ({
+  idle: "Idle", waiting: "Connecting", recording: "Recording", stopping: "Stopping",
+  transcribing: "Transcribing", analyzing: "Finding highlights", rendering: "Rendering clips",
+  queued: "Queued", done: "Complete", error: "Error",
+} as Record<string, string>)[phase] || (phase ? phase.replace(/[_-]/g, " ") : "Idle");
+const initialTheme = (): ThemeId => {
+  try {
+    const saved = localStorage.getItem("streamsnip.theme") || "";
+    const aliases: Record<string, ThemeId> = {
+      light: "studio-light", studio: "studio-light", dark: "studio-dark",
+      midnight: "github", graphite: "github", odyssey: "odysseus", odysseas: "odysseas",
+    };
+    const resolved = aliases[saved] || saved;
+    if (themes.some((item) => item.id === resolved)) return resolved as ThemeId;
+  } catch { /* Local storage may be disabled. */ }
+  return "odysseus";
+};
+const initialFont = (): FontId => {
+  try {
+    const saved = localStorage.getItem("streamsnip.font") || "";
+    if (fontOptions.some((item) => item.id === saved)) return saved as FontId;
+  } catch { /* Local storage may be disabled. */ }
+  return "jetbrains-mono";
+};
+const toneFor = (phase: string, running = false): "neutral" | "success" | "warning" | "danger" | "live" => {
+  if (phase === "error") return "danger";
+  if (["waiting", "stopping", "transcribing", "analyzing", "rendering"].includes(phase)) return "warning";
+  return running || phase === "recording" ? "live" : "neutral";
+};
 
 export default function App() {
   const workspace = useWorkspace();
-  const location = useLocation();
-  const navigate = useNavigate();
+  const [page, setPage] = useState<PageId>("overview");
+  const [theme, setTheme] = useState<ThemeId>(initialTheme);
+  const [font, setFont] = useState<FontId>(initialFont);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
-  const [quitting, setQuitting] = useState(false);
-  const [quitError, setQuitError] = useState("");
-  const [themeId, setThemeId] = useState<ThemeId>(getInitialTheme);
-  const [themePickerOpen, setThemePickerOpen] = useState(false);
-  const selectedTheme = themePresets.find((theme) => theme.id === themeId) || themePresets[0];
-  const activeTitle = pageTitles[location.pathname] || "Workspace";
+  const [clipSearch, setClipSearch] = useState("");
+  const [selectedClip, setSelectedClip] = useState<Clip | null>(null);
+  const [publishClip, setPublishClip] = useState<Clip | null>(null);
+  const [bulkNames, setBulkNames] = useState<string[]>([]);
+  const [busy, setBusy] = useState("");
+  const [toast, setToast] = useState<ToastDetail | null>(null);
+  const [browserStatus, setBrowserStatus] = useState<RecordLike>({});
 
   useEffect(() => {
-    const root = document.documentElement;
-    root.dataset.theme = selectedTheme.mode;
-    root.dataset.palette = selectedTheme.id;
-    try { localStorage.setItem("streamsnip.theme", selectedTheme.id); }
-    catch { /* Theme remains active for this session if storage is unavailable. */ }
-  }, [selectedTheme]);
-
-  const searchSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    navigate("/clips?search=" + encodeURIComponent(globalSearch.trim()));
-  };
-
-  const quitApp = async () => {
-    if (!window.confirm("Quit StreamSnip AI? This stops the main capture and all creator monitors, then closes the local server.")) return;
-    setQuitting(true);
-    setQuitError("");
-    try {
-      await apiPost("/api/quit", {});
-    } catch (reason) {
-      setQuitting(false);
-      setQuitError(reason instanceof Error ? reason.message : "The app could not be shut down.");
-    }
-  };
-
-  return (
-    <div className="studio-shell">
-      <aside className="studio-sidebar">
-        <Link to="/" className="studio-brand">
-          <span className="studio-brand-mark"><Clapperboard size={21} /></span>
-          <span className="studio-brand-text"><strong>StreamSnip <em>AI</em></strong><small>CREATOR STUDIO</small></span>
-        </Link>
-
-        <div className="sidebar-workspace">
-          <span className="workspace-avatar">S</span>
-          <span><strong>Local workspace</strong><small>Personal instance</small></span>
-          <ChevronDown size={15} />
-        </div>
-
-        <nav className="studio-nav" aria-label="Main navigation">
-          {navGroups.map((group) => (
-            <div className="nav-group" key={group.title}>
-              <div className="nav-group-title">{group.title}</div>
-              {group.items.map(({ to, label, icon: Icon, end }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end={end}
-                  className={({ isActive }) => "nav-item " + (isActive ? "active" : "")}
-                >
-                  <Icon size={18} strokeWidth={1.9} />
-                  <span>{label}</span>
-                  {to === "/clips" && workspace.state.clip_total > 0 ? <small>{workspace.state.clip_total}</small> : null}
-                  {to === "/posted" && workspace.state.posted_total > 0 ? <small>{workspace.state.posted_total}</small> : null}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
-
-        <div className="sidebar-bottom">
-          <div className="engine-status-card">
-            <div className="engine-status-heading">
-              <span className={"engine-dot " + (workspace.connected ? "online" : "offline")} />
-              <strong>Processing engine</strong>
-              <span>{workspace.connected ? "Online" : "Offline"}</span>
-            </div>
-            <p>{workspace.connected ? "The local engine is responding." : "Waiting for the local Python engine."}</p>
-            <button onClick={() => void workspace.refresh()}><RefreshCw size={13} /> Refresh connection</button>
-          </div>
-          <div className="sidebar-user">
-            <span className="user-avatar">SJ</span>
-            <span><strong>Local user</strong><small>On this device only</small></span>
-            <MoreHorizontal size={17} />
-          </div>
-        </div>
-      </aside>
-
-      <main className="studio-main">
-        <header className="studio-topbar">
-          <div className="topbar-breadcrumb"><span>Studio</span><span>/</span><strong>{activeTitle}</strong></div>
-          <div className="topbar-right">
-            <form className="global-search" onSubmit={searchSubmit}>
-              <Search size={16} />
-              <input value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Search your clips" aria-label="Search clips" />
-              <kbd>↵</kbd>
-            </form>
-            <StatusPill tone={workspace.connected ? "good" : "warning"}>{workspace.connected ? "Engine online" : "Engine offline"}</StatusPill>
-            <div className="theme-control">
-              <button
-                type="button"
-                className="theme-toggle"
-                onClick={() => setThemePickerOpen((open) => !open)}
-                aria-expanded={themePickerOpen}
-                aria-controls="streamsnip-theme-menu"
-                aria-label="Choose workspace theme"
-                title="Choose workspace theme"
-              >
-                <Palette size={17} />
-                <span>{selectedTheme.name}</span>
-                <ChevronDown size={13} />
-              </button>
-              {themePickerOpen ? (
-                <div className="theme-picker-popover" id="streamsnip-theme-menu" role="dialog" aria-label="Choose a theme">
-                  <div className="theme-picker-popover-heading"><strong>Workspace appearance</strong><small>Your choice is saved on this device</small></div>
-                  <ThemeOptions value={themeId} onChange={(next) => { setThemeId(next); setThemePickerOpen(false); }} compact />
-                  <Link to="/settings" className="theme-picker-settings" onClick={() => setThemePickerOpen(false)}>Appearance settings <ArrowRight size={13} /></Link>
-                </div>
-              ) : null}
-            </div>
-            <Link to="/help" className="topbar-help" aria-label="Help centre"><CircleHelp size={18} /></Link>
-            <button type="button" className="quit-app-button" onClick={() => void quitApp()} disabled={quitting} title="Quit StreamSnip AI">
-              <Square size={13} fill="currentColor" /> <span>{quitting ? "Quitting…" : "Quit app"}</span>
-            </button>
-          </div>
-        </header>
-
-        {workspace.error ? (
-          <div className="connection-banner">
-            <AlertCircle size={17} />
-            <span>{workspace.error}</span>
-            <Button onClick={() => void workspace.refresh()}><RefreshCw size={14} /> Retry</Button>
-          </div>
-        ) : null}
-
-        <div className="studio-content">
-          <Routes>
-            <Route path="/" element={<Overview workspace={workspace} />} />
-            <Route path="/live" element={<LiveStudio workspace={workspace} />} />
-            <Route path="/layout" element={<LayoutStudio workspace={workspace} />} />
-            <Route path="/clips" element={<ClipLibrary key="clips" workspace={workspace} tab="clips" />} />
-            <Route path="/publish" element={<ClipLibrary key="publish" workspace={workspace} tab="publish" />} />
-            <Route path="/posted" element={<ClipLibrary key="posted" workspace={workspace} tab="posted" />} />
-            <Route path="/words" element={<WordsPage key={workspace.words.text} workspace={workspace} />} />
-            <Route path="/settings" element={<SettingsPage workspace={workspace} section="general" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/settings/ai" element={<SettingsPage workspace={workspace} section="ai" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/settings/speech" element={<SettingsPage workspace={workspace} section="speech" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/settings/captions" element={<SettingsPage workspace={workspace} section="captions" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/settings/publishing" element={<SettingsPage workspace={workspace} section="publishing" themeId={themeId} onThemeChange={setThemeId} />} />
-            <Route path="/activity" element={<ActivityPage workspace={workspace} />} />
-            <Route path="/help" element={<HelpPage />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="*" element={<Overview workspace={workspace} />} />
-          </Routes>
-          {quitError ? <div className="quit-error-banner" role="alert"><AlertCircle size={15} /> {quitError}</div> : null}
-      {quitting ? <div className="shutdown-screen" role="status"><div className="shutdown-card"><Loader2 className="spin" size={24} /><strong>StreamSnip AI is shutting down</strong><p>The capture engine and creator monitors are being stopped. You can close this tab when the server disconnects.</p></div></div> : null}
-      <footer className="studio-footer">
-            <span>StreamSnip AI <b>·</b> Local-first creator tools</span>
-            <span>Capture and rendering stay on this PC. Hosted AI providers receive transcript text only when selected.</span>
-          </footer>
-        </div>
-      </main>
-      <ToastViewport />
-    </div>
-  );
-}
-
-
-type ToastItem = { id: number; tone: "success" | "error" | "info"; title: string; message: string };
-
-function ToastViewport() {
-  const [items, setItems] = useState<ToastItem[]>([]);
-  const nextId = useRef(0);
-  const timers = useRef<number[]>([]);
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem("streamsnip.theme", theme); } catch { /* Local storage may be disabled. */ }
+  }, [theme]);
 
   useEffect(() => {
-    const receive = (event: Event) => {
-      const detail = (event as CustomEvent<{ tone: ToastItem["tone"]; title: string; message?: string }>).detail;
-      if (!detail) return;
-      const id = ++nextId.current;
-      setItems((current) => [...current.slice(-3), { id, tone: detail.tone, title: detail.title, message: detail.message || "" }]);
-      const timer = window.setTimeout(() => {
-        setItems((current) => current.filter((item) => item.id !== id));
-        timers.current = timers.current.filter((value) => value !== timer);
-      }, detail.tone === "error" ? 7000 : 4800);
-      timers.current.push(timer);
+    const selected = fontOptions.find((item) => item.id === font) || fontOptions[0];
+    document.documentElement.style.setProperty("--font-family", selected.family);
+    try { localStorage.setItem("streamsnip.font", font); } catch { /* Local storage may be disabled. */ }
+  }, [font]);
+
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<ToastDetail>).detail;
+      if (detail) setToast(detail);
     };
-    window.addEventListener("streamsnip:toast", receive);
-    return () => {
-      window.removeEventListener("streamsnip:toast", receive);
-      timers.current.forEach((timer) => window.clearTimeout(timer));
-      timers.current = [];
-    };
+    window.addEventListener("streamsnip:toast", listener);
+    return () => window.removeEventListener("streamsnip:toast", listener);
   }, []);
 
-  const dismiss = (id: number) => setItems((current) => current.filter((item) => item.id !== id));
-
-  return (
-    <div className="toast-viewport" aria-live="polite" aria-relevant="additions">
-      {items.map((item) => (
-        <div className={"toast-card " + item.tone} key={item.id} role={item.tone === "error" ? "alert" : "status"}>
-          <span className="toast-card-icon">{item.tone === "error" ? <AlertCircle size={17} /> : item.tone === "success" ? <CheckCircle2 size={17} /> : <Info size={17} />}</span>
-          <div className="toast-card-copy"><strong>{item.title}</strong>{item.message ? <small>{item.message}</small> : null}</div>
-          <button type="button" onClick={() => dismiss(item.id)} aria-label="Dismiss notification"><X size={15} /></button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const defaultDashboardOrder = ["welcome", "metrics", "pipeline", "monitors", "recent", "activity"];
-const defaultDashboardVisible: Record<string, boolean> = {
-  welcome: true, metrics: true, pipeline: true, monitors: true, recent: true, activity: true,
-};
-
-function Overview({ workspace }: { workspace: Workspace }) {
-  const { state, creators, logs } = workspace;
-  const [customizing, setCustomizing] = useState(false);
-  const [order, setOrder] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem("streamsnip.dashboard.layout");
-      const value = saved ? JSON.parse(saved) as { order?: string[] } : null;
-      if (Array.isArray(value?.order)) return [...defaultDashboardOrder.filter((id) => value.order!.includes(id)), ...value.order.filter((id) => !defaultDashboardOrder.includes(id))];
-    } catch {
-      // Use the default dashboard arrangement when browser storage is unavailable.
-    }
-    return defaultDashboardOrder;
-  });
-  const [visible, setVisible] = useState<Record<string, boolean>>(() => {
-    try {
-      const saved = localStorage.getItem("streamsnip.dashboard.layout");
-      const value = saved ? JSON.parse(saved) as { visible?: Record<string, boolean> } : null;
-      if (value?.visible) return { ...defaultDashboardVisible, ...value.visible };
-    } catch {
-      // Use the default panel visibility when browser storage is unavailable.
-    }
-    return defaultDashboardVisible;
-  });
-  const draggedId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), toast.tone === "error" ? 5200 : 3300);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("streamsnip.dashboard.layout", JSON.stringify({ order, visible }));
-    } catch {
-      // Layout remains editable for the current session if storage is unavailable.
-    }
-  }, [order, visible]);
+    let cancelled = false;
+    apiGet<RecordLike>("/api/browser/status").then((value) => { if (!cancelled) setBrowserStatus(value); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
-  const activeMonitors = creators.filter((creator) => creator.running).length;
-  const panelContent: Record<string, ReactNode> = {
-    welcome: (
-      <section className="welcome-panel">
-        <div className="welcome-content">
-          <div className="welcome-kicker"><span className="welcome-kicker-dot" /> STREAMSNIP AI STUDIO</div>
-          <h2>{state.running ? "Your clipping session is live." : "Make every stream moment count."}</h2>
-          <p>{state.status || "Capture live streams or VODs, score the moments, and turn the best parts into ready-to-publish clips."}</p>
-          <div className="welcome-actions">
-            <Link to="/live" className="button button-primary"><Radio size={16} /> {state.running ? "Open live session" : "Start a session"} <ArrowRight size={15} /></Link>
-            <Link to="/layout" className="welcome-secondary-link">Configure clip layouts <ArrowRight size={14} /></Link>
-          </div>
-        </div>
-        <div className="welcome-visual" aria-hidden="true">
-          <div className="welcome-visual-screen"><div className="visual-screen-top" /><div className="visual-screen-bottom"><span /><span /><span /><span /><span /></div><div className="visual-play"><Play size={19} fill="currentColor" /></div></div>
-          <span className="visual-tag visual-live"><i /> LIVE</span>
-          <span className="visual-tag visual-ai"><Sparkles size={12} /> AI SCORING</span>
-        </div>
-      </section>
-    ),
-    metrics: (
-      <section className="metric-grid">
-        <MetricCard icon={Radio} label="Active monitors" value={activeMonitors} note={creators.length + " creator profile" + (creators.length === 1 ? "" : "s") + " configured"} tone="red" />
-        <MetricCard icon={Film} label="Ready to review" value={state.clip_total} note="Unpublished clips in your library" tone="blue" />
-        <MetricCard icon={BadgeCheck} label="Published" value={state.posted_total} note="Confirmed in the Posted registry" tone="green" />
-        <MetricCard icon={Gauge} label="Session clips" value={state.session.clips} note={state.running ? "Generated in this session" : "Latest session count"} tone="amber" />
-      </section>
-    ),
-    pipeline: (
-      <section className="panel-card dashboard-pipeline">
-        <div className="panel-heading">
-          <div><div className="eyebrow">PROCESSING</div><h3>Live pipeline</h3></div>
-          <StatusPill tone={state.running ? "good" : "neutral"}>{state.running ? "Running" : "Idle"}</StatusPill>
-        </div>
-        <Pipeline state={state} compact />
-      </section>
-    ),
-    monitors: (
-      <section className="panel-card dashboard-monitors">
-        <div className="panel-heading">
-          <div><div className="eyebrow">YOUR CHANNELS</div><h3>Creator monitors</h3></div>
-          <Link to="/live" className="text-link">Manage monitors <ArrowRight size={14} /></Link>
-        </div>
-        {creators.length ? (
-          <div className="monitor-summary-list">
-            {creators.slice(0, 5).map((creator) => <CreatorSummary key={creator.id} creator={creator} />)}
-          </div>
-        ) : (
-          <EmptyState icon={Radio} title="No creator monitors" body="Add a Twitch or YouTube channel in Live Studio to monitor it independently." action={<Link to="/live" className="button button-secondary"><Plus size={15} /> Add a monitor</Link>} />
-        )}
-      </section>
-    ),
-    recent: (
-      <section className="panel-card dashboard-recent">
-        <div className="panel-heading">
-          <div><div className="eyebrow">LATEST OUTPUT</div><h3>Recently generated clips</h3></div>
-          <Link to="/clips" className="text-link">Open library <ArrowRight size={14} /></Link>
-        </div>
-        {state.clips.length ? (
-          <div className="recent-clip-list">
-            {state.clips.slice(0, 5).map((clip) => (
-              <Link key={clip.name} to="/clips" className="recent-clip-row">
-                <span className="recent-clip-icon"><Video size={17} /></span>
-                <span className="recent-clip-copy"><strong>{clip.title || clip.name}</strong><small>{clip.creator_name || "Stream capture"} · {formatDate(clip.mtime)}</small></span>
-                <span className="recent-clip-size">{clip.size_mb.toFixed(1)} MB</span>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <EmptyState icon={Clapperboard} title="Your clip library is ready" body="New clips will appear here as the engine transcribes and renders your stream." />
-        )}
-      </section>
-    ),
-    activity: (
-      <section className="panel-card dashboard-activity">
-        <div className="panel-heading">
-          <div><div className="eyebrow">ENGINE EVENTS</div><h3>Latest activity</h3></div>
-          <Link to="/activity" className="text-link">Full activity <ArrowRight size={14} /></Link>
-        </div>
-        {logs.length ? (
-          <div className="mini-activity-list">
-            {logs.slice(-5).reverse().map((entry) => <div key={entry.id} className="mini-activity-row"><time>{entry.t}</time><span>{entry.m}</span></div>)}
-          </div>
-        ) : <EmptyState icon={Activity} title="No events yet" body="Engine events will appear here when a capture or monitor is running." />}
-      </section>
-    ),
-  };
-
-  const labels: Record<string, string> = {
-    welcome: "Welcome panel", metrics: "Performance cards", pipeline: "Live pipeline",
-    monitors: "Creator monitors", recent: "Recent clips", activity: "Latest activity",
-  };
-
-  const reorder = (target: string) => {
-    const source = draggedId.current;
-    if (!source || source === target) return;
-    setOrder((current) => {
-      const next = current.filter((id) => id !== source);
-      const targetIndex = next.indexOf(target);
-      next.splice(targetIndex < 0 ? next.length : targetIndex, 0, source);
-      return next;
-    });
-    draggedId.current = null;
-  };
-
-  return (
-    <>
-      <PageHeading
-        eyebrow="YOUR CREATOR WORKSPACE"
-        title="Dashboard"
-        description="A live overview of capture, clip production, creator monitors, and publishing."
-        action={<Button variant="secondary" onClick={() => setCustomizing((value) => !value)}><SlidersHorizontal size={15} /> {customizing ? "Done arranging" : "Customize layout"}</Button>}
-      />
-      {customizing ? (
-        <section className="customize-strip">
-          <div><strong>Arrange your dashboard</strong><p>Drag any panel by its top edge to change its position. Hide the panels you do not need.</p></div>
-          <div className="customize-options">
-            {defaultDashboardOrder.map((id) => (
-              <label key={id}><input type="checkbox" checked={visible[id] !== false} onChange={(event) => setVisible((current) => ({ ...current, [id]: event.target.checked }))} />{labels[id]}</label>
-            ))}
-          </div>
-        </section>
-      ) : null}
-      <div className={"dashboard-grid " + (customizing ? "is-customizing" : "")}>
-        {order.filter((id) => panelContent[id] && visible[id] !== false).map((id) => (
-          <div
-            key={id}
-            className={"dashboard-block dashboard-block-" + id}
-            draggable={customizing}
-            onDragStart={() => { draggedId.current = id; }}
-            onDragOver={(event) => { if (customizing) event.preventDefault(); }}
-            onDrop={(event) => { event.preventDefault(); if (customizing) reorder(id); }}
-          >
-            {customizing ? <div className="dashboard-drag-handle"><Move size={13} /> Drag to rearrange <span>{labels[id]}</span></div> : null}
-            {panelContent[id]}
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function Pipeline({ state, compact = false }: { state: Workspace["state"]; compact?: boolean }) {
-  const stages = [
-    { title: "Capture", detail: "Record stream segments", key: "recording" },
-    { title: "Transcribe", detail: "Create timestamped speech", key: "transcribing" },
-    { title: "Analyze", detail: "Score transcript moments", key: "analyzing" },
-    { title: "Render", detail: "Compose vertical clips", key: "rendering" },
-  ];
-  const currentPhase = (state.phase || "").toLowerCase();
-  const currentIndex = currentPhase.includes("render") ? 3 : currentPhase.includes("anal") ? 2 : currentPhase.includes("transcrib") ? 1 : currentPhase.includes("record") || currentPhase.includes("wait") ? 0 : -1;
-  return (
-    <div className={"pipeline-wrap " + (compact ? "compact" : "")}>
-      <div className="pipeline-current">
-        <div><span className="eyebrow">ENGINE STATUS</span><strong>{state.status || "Waiting for a session"}</strong></div>
-        {state.running ? <span className="pipeline-live"><i /> PROCESSING</span> : <span className="pipeline-ready">READY</span>}
-      </div>
-      <div className="pipeline-stages">
-        {stages.map((stage, index) => (
-          <div key={stage.key} className={"pipeline-stage " + (index === currentIndex ? "current" : index < currentIndex ? "complete" : "")}>
-            <span className="pipeline-stage-number">{index < currentIndex ? <Check size={15} /> : "0" + (index + 1)}</span>
-            <span><strong>{stage.title}</strong><small>{stage.detail}</small></span>
-          </div>
-        ))}
-      </div>
-      <div className="pipeline-progress">
-        <div><span>Engine-reported progress</span><strong>{state.running ? state.progress + "%" : "N/A"}</strong></div>
-        <div className="progress-track"><span style={{ width: (state.running ? state.progress : 0) + "%" }} /></div>
-      </div>
-      {!compact ? (
-        <div className="pipeline-stats">
-          <span><strong>{state.session.chunks}</strong>chunks processed</span>
-          <span><strong>{state.session.clips}</strong>clips generated</span>
-          <span><strong>{formatDuration(state.session.elapsed)}</strong>session time</span>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function AIReviewPanel({ logs, threshold }: { logs: LogEntry[]; threshold: number }) {
-  const events = logs.filter((entry) => /score|candidate|threshold|viral|highlight|analysis/i.test(entry.m)).slice(-8).reverse();
-  return (
-    <section className="panel-card ai-review-card">
-      <div className="panel-heading">
-        <div><div className="eyebrow">AI HIGHLIGHT REVIEW</div><h3>Scoring and threshold events</h3><p>Only actual events reported by the local engine are shown here.</p></div>
-        <span className="ai-threshold-badge">Threshold · {threshold}/100</span>
-      </div>
-      {events.length ? (
-        <div className="ai-review-events">
-          {events.map((entry) => {
-            const message = entry.m.toLowerCase();
-            const tone = /reject|below threshold|discard/i.test(message) ? "rejected" : /accept|selected|above threshold|queued/i.test(message) ? "accepted" : "neutral";
-            const score = entry.m.match(/(?:score|rating)\s*[:=]?\s*(\d{1,3})\s*(?:\/\s*100|%|\b)/i);
-            return (
-              <div key={entry.id} className={"ai-review-event " + tone}>
-                <span className="ai-review-mark">{tone === "accepted" ? <Check size={14} /> : tone === "rejected" ? <X size={14} /> : <Sparkles size={14} />}</span>
-                <time>{entry.t}</time>
-                <p>{entry.m}</p>
-                {score ? <strong className="ai-review-score">{score[1]}/100</strong> : null}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="ai-review-empty">
-          <span><Bot size={20} /></span>
-          <strong>Waiting for scoring events</strong>
-          <p>The selected AI provider and threshold are active. Candidate-level scores will appear when the current engine reports them; no sample or simulated scores are shown.</p>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function CreatorSummary({ creator }: { creator: Creator }) {
-  return (
-    <div className="creator-summary">
-      <span className={"creator-avatar " + (creator.running ? "is-live" : "")}>{creator.name.slice(0, 1).toUpperCase()}</span>
-      <span className="creator-summary-copy"><strong>{creator.name}</strong><small>{creator.target}</small></span>
-      <StatusPill tone={creator.running ? "good" : "neutral"}>{creator.running ? "Monitoring" : "Idle"}</StatusPill>
-      <span className="creator-summary-count">{creator.live_clips || 0} clips</span>
-    </div>
-  );
-}
-
-function EmptyState({
-  icon: Icon, title, body, action,
-}: { icon: LucideIcon; title: string; body: string; action?: ReactNode }) {
-  return (
-    <div className="empty-state">
-      <span className="empty-state-icon"><Icon size={23} /></span>
-      <strong>{title}</strong>
-      <p>{body}</p>
-      {action ? <div className="empty-state-action">{action}</div> : null}
-    </div>
-  );
-}
-
-function LiveStudio({ workspace }: { workspace: Workspace }) {
-  const settings = workspace.settings || {};
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [creatorName, setCreatorName] = useState("");
-  const [creatorTarget, setCreatorTarget] = useState("");
-  const [activeLiveTab, setActiveLiveTab] = useState<"capture" | "monitoring">("capture");
-
-  const update = workspace.updateSettings;
-  const running = workspace.state.running;
-
-  const startSession = async () => {
-    if (!workspace.settings) return;
-    if (!asString(settings.target).trim()) {
-      setMessage("Enter a Twitch or YouTube stream URL, or choose a VOD file.");
-      return;
-    }
-    setBusy(true);
-    setMessage("");
-    try {
-      await workspace.saveSettings({ ...settings, mode: asString(settings.mode, "live"), target: asString(settings.target) });
-      await workspace.saveAI();
-      await apiPost("/api/start", { ...settings, mode: asString(settings.mode, "live"), target: asString(settings.target) });
-      await workspace.refresh();
-      setMessage("Start request accepted. The pipeline will report each real processing stage below.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not start clipping.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const stopSession = async (force: boolean) => {
-    setBusy(true);
-    setMessage("");
-    try {
-      await apiPost("/api/stop", { force });
-      await workspace.refresh();
-      setMessage(force ? "Immediate stop requested." : "Graceful stop requested. The engine will finish captured work.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not stop the session.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const browseVideo = async () => {
-    setBusy(true);
-    try {
-      const result = await apiPost<{ path: string }>("/api/browse");
-      if (result.path) update({ target: result.path, mode: "file" });
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not open the video picker.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addCreator = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!creatorName.trim() || !creatorTarget.trim()) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      await apiPost("/api/creators/add", { name: creatorName.trim(), target: creatorTarget.trim() });
-      setCreatorName("");
-      setCreatorTarget("");
-      await workspace.refresh();
-      setMessage("Creator monitor added.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not add the creator.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const creatorAction = async (path: string, creator: Creator, folder?: string) => {
-    setBusy(true);
-    setMessage("");
-    try {
-      await apiPost(path, folder ? { id: creator.id, folder } : { id: creator.id });
-      await workspace.refresh();
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Creator action failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const activeCreatorMonitors = workspace.creators.filter((creator) => creator.running).length;
-
-  const removeCreator = async (creator: Creator) => {
-    if (!window.confirm("Remove " + creator.name + " from the monitor list? Existing recordings and clips will be kept.")) return;
-    await creatorAction("/api/creators/remove", creator);
-  };
-
-  return (
-    <>
-      <PageHeading
-        eyebrow="LIVE PRODUCTION"
-        title="Live Studio"
-        description="Start a live capture or VOD job, monitor the actual pipeline, and manage creator sources."
-        action={<StatusPill tone={running ? "good" : "neutral"}>{running ? "Session running" : "Session idle"}</StatusPill>}
-      />
-
-      <div className="live-studio-tabs" role="tablist" aria-label="Live Studio sections">
-        <button type="button" role="tab" aria-selected={activeLiveTab === "capture"} className={activeLiveTab === "capture" ? "active" : ""} onClick={() => setActiveLiveTab("capture")}>
-          <Radio size={15} /> Live capture <span className="live-tab-meta">Session and pipeline</span>
-        </button>
-        <button type="button" role="tab" aria-selected={activeLiveTab === "monitoring"} className={activeLiveTab === "monitoring" ? "active" : ""} onClick={() => setActiveLiveTab("monitoring")}>
-          <Activity size={15} /> Monitoring <span className="live-tab-count">{activeCreatorMonitors}/10 active</span>
-        </button>
-      </div>
-
-      {activeLiveTab === "capture" ? (
-        <>
-        <div className="live-studio-grid live-control-grid">
-        <div className="live-studio-main">
-          <section className="panel-card session-launch-card">
-            <div className="panel-heading">
-              <div><h3>Capture source</h3><p>Use the main engine for a Twitch/YouTube live stream or a local video file.</p></div>
-              <div className="session-launch-icon"><Radio size={20} /></div>
-            </div>
-            <div className="source-mode-switch">
-              <button className={asString(settings.mode, "live") === "live" ? "selected" : ""} onClick={() => update({ mode: "live" })} disabled={running}><Radio size={15} /> Live stream</button>
-              <button className={asString(settings.mode) === "file" ? "selected" : ""} onClick={() => update({ mode: "file" })} disabled={running}><Film size={15} /> Video / VOD</button>
-            </div>
-            <label className="field-label">{asString(settings.mode, "live") === "live" ? "Twitch or YouTube URL" : "Video file path"}</label>
-            <div className="source-input-row">
-              <input
-                className="field-input"
-                value={asString(settings.target)}
-                onChange={(event) => update({ target: event.target.value })}
-                aria-label={asString(settings.mode, "live") === "live" ? "Twitch or YouTube stream URL" : "Local video file path"}
-                placeholder={asString(settings.mode, "live") === "live" ? "https://www.twitch.tv/channel" : "C:\\Videos\\recording.mp4"}
-                disabled={running}
-              />
-              {asString(settings.mode) === "file" ? <Button onClick={() => void browseVideo()} disabled={running || busy}><FolderOpen size={15} /> Browse</Button> : null}
-            </div>
-            <div className="source-note"><ShieldCheck size={15} /> {asString(settings.mode, "live") === "live" ? "If the stream is offline, the engine can wait for it to go live." : "Original VOD files are preserved; clips are written to the configured output folder."}</div>
-
-            <div className="session-options-grid">
-              <label>
-                <span>AI highlight engine</span>
-                <select className="field-select" value={workspace.ai.provider} onChange={(event) => workspace.updateAI({ provider: event.target.value })} disabled={running}>
-                  <option value="hooks">Hook words · offline</option>
-                  <option value="ollama">Ollama · local AI</option>
-                  <option value="gemini">Gemini API</option>
-                  <option value="huggingface">Hugging Face</option>
-                  <option value="custom">Custom OpenAI-compatible API</option>
-                </select>
-              </label>
-              <label>
-                <span>Viral score threshold</span>
-                <div className="inline-range"><input type="range" min="0" max="100" value={asNumber(settings.min_score, 70)} onChange={(event) => update({ min_score: Number(event.target.value) })} disabled={running} /><strong>{asNumber(settings.min_score, 70)}</strong></div>
-              </label>
-              <label>
-                <span>Analysis window</span>
-                <div className="inline-range"><input type="range" min="3" max="15" value={asNumber(settings.chunk_min, 3)} onChange={(event) => update({ chunk_min: Number(event.target.value) })} disabled={running} /><strong>{asNumber(settings.chunk_min, 3)} min</strong></div>
-              </label>
-              <label>
-                <span>Clips per chunk</span>
-                <div className="inline-range"><input type="range" min="0" max="10" value={asNumber(settings.clips_per_chunk, 2)} onChange={(event) => update({ clips_per_chunk: Number(event.target.value) })} disabled={running} /><strong>{asNumber(settings.clips_per_chunk, 2) === 0 ? "No limit" : asNumber(settings.clips_per_chunk, 2)}</strong></div>
-              </label>
-              <label>
-                <span>Pre-roll trim</span>
-                <div className="inline-range"><input type="range" min="3" max="90" value={asNumber(settings.pre, 20)} onChange={(event) => update({ pre: Number(event.target.value) })} disabled={running} /><strong>{asNumber(settings.pre, 20)}s</strong></div>
-              </label>
-              <label>
-                <span>Post-roll trim</span>
-                <div className="inline-range"><input type="range" min="3" max="90" value={asNumber(settings.post, 15)} onChange={(event) => update({ post: Number(event.target.value) })} disabled={running} /><strong>{asNumber(settings.post, 15)}s</strong></div>
-              </label>
-            </div>
-
-            <div className="session-primary-actions">
-              {!running ? (
-                <Button variant="primary" onClick={() => void startSession()} disabled={busy || !workspace.configLoaded || !asString(settings.target).trim()}><Play size={16} fill="currentColor" /> {busy ? "Starting…" : "Start clipping"}</Button>
-              ) : (
-                <>
-                  <Button variant="danger" onClick={() => void stopSession(false)} disabled={busy}><Square size={15} fill="currentColor" /> Stop gracefully</Button>
-                  <Button variant="secondary" onClick={() => void stopSession(true)} disabled={busy}><X size={15} /> Stop immediately</Button>
-                </>
-              )}
-              <span>{workspace.saving ? "Saving session settings…" : workspace.saveError || "Session settings save automatically."}</span>
-            </div>
-            {message ? <p className="inline-feedback" role="status">{message}</p> : null}
-          </section>
-
-        </div>
-
-        <aside className="live-studio-aside">
-          <section className="panel-card live-session-rail">
-            <div className="live-rail-header">
-              <span className="session-snapshot-icon"><Activity size={20} /></span>
-              <div className="live-rail-state-copy">
-                <small>SESSION STATUS</small>
-                <h3>{running ? "Capture is active" : "Ready to capture"}</h3>
-              </div>
-              <StatusPill tone={running ? "good" : "neutral"}>{running ? "Live" : "Idle"}</StatusPill>
-            </div>
-            <p className="live-rail-status">{workspace.state.status}</p>
-            <div className="session-summary-grid">
-              <div><span>Elapsed</span><strong>{formatDuration(workspace.state.session.elapsed)}</strong></div>
-              <div><span>Chunks</span><strong>{workspace.state.session.chunks}</strong></div>
-              <div><span>Clips created</span><strong>{workspace.state.session.clips}</strong></div>
-              <div><span>Progress</span><strong>{running ? workspace.state.progress + "%" : "N/A"}</strong></div>
-            </div>
-            <div className="live-rail-divider" />
-            <div className="live-rail-section-heading">
-              <strong>Current setup</strong>
-              <span>ACTIVE CONFIGURATION</span>
-            </div>
-            <dl className="live-rail-settings">
-              <div><dt>AI engine</dt><dd>{workspace.ai.provider === "hooks" ? "Hook words" : workspace.ai.provider}</dd></div>
-              <div><dt>Transcriber</dt><dd>{asString(settings.transcriber_provider, "faster-whisper")}</dd></div>
-              <div><dt>Speech model</dt><dd>{asString(settings.model, "distil-large-v3")}</dd></div>
-              <div><dt>Output layout</dt><dd>{asString(settings.layout, "Facecam + game (Twitch)")}</dd></div>
-              <div><dt>Video format</dt><dd>{asString(settings.output_format, "9:16")}</dd></div>
-            </dl>
-            <div className="live-rail-links">
-              <Link to="/settings/ai">AI settings <ArrowRight size={14} /></Link>
-              <Link to="/layout">Layout Studio <ArrowRight size={14} /></Link>
-            </div>
-          </section>
-        </aside>
-        </div>
-
-        <section className="panel-card pipeline-card pipeline-card-wide">
-          <div className="panel-heading">
-            <div><h3>Processing pipeline</h3><p>Stages update from the Python engine, not from a simulated timer.</p></div>
-            <Button onClick={() => void workspace.refresh()}><RefreshCw size={14} /> Refresh</Button>
-          </div>
-          <Pipeline state={workspace.state} />
-          <div className="pipeline-event-line">
-            <span><strong>{workspace.state.session.chunks}</strong> chunks</span>
-            <span><strong>{workspace.state.session.clips}</strong> clips generated</span>
-            <span><strong>{formatDuration(workspace.state.session.elapsed)}</strong> elapsed</span>
-            <span><strong>{workspace.state.posting.completed}/{workspace.state.posting.total}</strong> uploads done</span>
-          </div>
-          {workspace.state.posting.active ? (
-            <div className="upload-progress-card">
-              <div><strong>Publishing in progress</strong><span>{workspace.state.posting.current || "Preparing upload"} · {workspace.state.posting.completed}/{workspace.state.posting.total}</span></div>
-              <div className="progress-track"><span style={{ width: (workspace.state.posting.total ? workspace.state.posting.completed / workspace.state.posting.total * 100 : 0) + "%" }} /></div>
-              {workspace.state.posting.errors ? <small>{workspace.state.posting.errors} upload error(s) reported.</small> : null}
-            </div>
-          ) : null}
-        </section>
-        <AIReviewPanel logs={workspace.logs} threshold={asNumber(settings.min_score, 70)} />
-        </>
-      ) : (
-        <div className="live-studio-monitoring">
-          <section className="panel-card creator-management-card">
-            <div className="panel-heading">
-              <div><h3>Creator monitors</h3><p>Run up to 10 live creator monitors at the same time. Each creator keeps separate recordings, clips, and VOD inbox folders.</p></div>
-              <span className="count-badge">{activeCreatorMonitors} / 10 active | {workspace.creators.length} / 100 saved</span>
-            </div>
-            <div className="creator-capacity-note">{activeCreatorMonitors} of 10 live monitor slots are in use. High concurrent stream counts can increase CPU, GPU, memory, and network load.</div>
-            {workspace.creators.length ? (
-              <div className="creator-management-list">
-                {workspace.creators.map((creator) => (
-                  <article className="creator-management-item" key={creator.id}>
-                    <div className="creator-management-top">
-                      <span className={"creator-avatar large " + (creator.running ? "is-live" : "")}>{creator.name.slice(0, 1).toUpperCase()}</span>
-                      <div className="creator-management-copy"><strong>{creator.name}</strong><small>{creator.target}</small></div>
-                      <StatusPill tone={creator.running ? "good" : "neutral"}>{creator.running ? (creator.phase || "Monitoring") : "Idle"}</StatusPill>
-                    </div>
-                    <p className="creator-management-detail">{creator.status || creator.vod_status || "Monitor is ready."}</p>
-                    <div className="creator-counts">
-                      <span><strong>{creator.live_clips || 0}</strong>Live clips</span>
-                      <span><strong>{creator.vod_clips || 0}</strong>VOD clips</span>
-                      <span><strong>{creator.vod_pending || 0}</strong>VOD pending</span>
-                    </div>
-                    <div className="creator-management-actions">
-                      <Button variant={creator.running ? "danger" : "primary"} onClick={() => void creatorAction(creator.running ? "/api/creators/stop" : "/api/creators/start", creator)} disabled={busy || (!creator.running && activeCreatorMonitors >= 10)}>{creator.running ? <Square size={14} /> : <Play size={14} />}{creator.running ? "Stop monitor" : activeCreatorMonitors >= 10 ? "10/10 slots full" : "Start monitor"}</Button>
-                      <Button onClick={() => void creatorAction(creator.watching_vods ? "/api/creators/stop-vod-watch" : "/api/creators/watch-vods", creator)} disabled={busy}><Folder size={14} />{creator.watching_vods ? "Stop VOD watch" : "Watch VOD folder"}</Button>
-                      <div className="creator-management-folders">
-                        <Button onClick={() => void creatorAction("/api/creators/open", creator, "live_clips")}><FolderOpen size={14} /> Live clips</Button>
-                        <Button onClick={() => void creatorAction("/api/creators/open", creator, "vod_inbox")}><FolderOpen size={14} /> VOD inbox</Button>
-                      </div>
-                      <Button variant="quiet" onClick={() => void removeCreator(creator)} disabled={busy}><Trash2 size={14} /> Remove</Button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <EmptyState icon={Radio} title="No creator monitors configured" body="Add a creator below or use the main capture source above." />
-            )}
-            <form className="add-creator-form" onSubmit={(event) => void addCreator(event)}>
-              <div><strong>Add another creator</strong><small>Each source keeps its own clips and VOD folders.</small></div>
-              <input className="field-input" value={creatorName} onChange={(event) => setCreatorName(event.target.value)} maxLength={80} placeholder="Creator name" required />
-              <input className="field-input" value={creatorTarget} onChange={(event) => setCreatorTarget(event.target.value)} placeholder="Twitch or YouTube channel URL" required />
-              <Button variant="primary" disabled={busy || !creatorName.trim() || !creatorTarget.trim()}><Plus size={15} /> Add monitor</Button>
-            </form>
-          </section>
-        </div>
-      )}
-    </>
-  );
-}
-
-const layoutPresets: { key: string; label: string; icon: LucideIcon }[] = [
-  { key: "Facecam + game (Twitch)", label: "Facecam + game", icon: Camera },
-  { key: "Blur background", label: "Blur background", icon: Layers },
-  { key: "Fill (crop center)", label: "Fill", icon: MonitorPlay },
-  { key: "Selected crop", label: "Selected crop", icon: SlidersHorizontal },
-];
-
-type LayoutBox = { x: number; y: number; w: number; h: number };
-type LayoutDrag = {
-  type: "facecam" | "crop";
-  mode: "move" | "resize";
-  startX: number;
-  startY: number;
-  bounds: DOMRect;
-  initial: LayoutBox;
-};
-
-function LayoutCanvas({
-  settings, frame, onChange,
-}: { settings: AppSettings; frame: string; onChange: (patch: Partial<AppSettings>) => void }) {
-  const stage = useRef<HTMLDivElement>(null);
-  const drag = useRef<LayoutDrag | null>(null);
-  const layout = asString(settings.layout, "Facecam + game (Twitch)");
-  const isFacecam = layout.startsWith("Facecam");
-  const isSelected = layout.startsWith("Selected");
-  const camBox = {
-    x: asNumber(settings.cam_x, 70), y: asNumber(settings.cam_y, 4),
-    w: asNumber(settings.cam_w, 29), h: asNumber(settings.cam_h, 37),
-  };
-  const cropBox = {
-    x: asNumber(settings.crop_x, 34.2), y: asNumber(settings.crop_y, 0),
-    w: asNumber(settings.crop_w, 31.6), h: asNumber(settings.crop_h, 100),
-  };
-  const begin = (event: ReactPointerEvent<HTMLElement>, type: "facecam" | "crop", mode: "move" | "resize") => {
-    if (!stage.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-    drag.current = {
-      type, mode, startX: event.clientX, startY: event.clientY,
-      bounds: stage.current.getBoundingClientRect(),
-      initial: type === "facecam" ? camBox : cropBox,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-
-  const move = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const current = drag.current;
-    if (!current || !current.bounds.width || !current.bounds.height) return;
-    const dx = (event.clientX - current.startX) / current.bounds.width * 100;
-    const dy = (event.clientY - current.startY) / current.bounds.height * 100;
-    const box = { ...current.initial };
-    if (current.mode === "move") {
-      box.x = clamp(current.initial.x + dx, 0, 100 - box.w);
-      box.y = clamp(current.initial.y + dy, 0, 100 - box.h);
-    } else if (current.type === "facecam") {
-      const facecamHeightPerWidth = (16 / 9) / (1080 / 768);
-      let width = Math.max(10, current.initial.w + dx);
-      width = Math.min(width, 100 - box.x, (100 - box.y) / facecamHeightPerWidth);
-      box.w = width;
-      box.h = width * facecamHeightPerWidth;
-    } else {
-      const outputAspect = ({ "9:16": 9 / 16, "16:9": 16 / 9, "1:1": 1, "4:5": 4 / 5 } as Record<string, number>)[asString(settings.output_format, "9:16")] || 9 / 16;
-      const cropHeightPerWidth = (16 / 9) / outputAspect;
-      let width = Math.max(10, current.initial.w + dx);
-      width = Math.min(width, 100 - box.x, (100 - box.y) / cropHeightPerWidth);
-      box.w = width;
-      box.h = width * cropHeightPerWidth;
-    }
-    if (current.type === "facecam") {
-      onChange({ cam_x: +box.x.toFixed(1), cam_y: +box.y.toFixed(1), cam_w: +box.w.toFixed(1), cam_h: +box.h.toFixed(1) });
-    } else {
-      onChange({ crop_x: +box.x.toFixed(1), crop_y: +box.y.toFixed(1), crop_w: +box.w.toFixed(1), crop_h: +box.h.toFixed(1) });
-    }
-  };
-
-  const end = () => { drag.current = null; };
-
-  const gameWidth = Math.min(100, (1080 / 1152) / (16 / 9) * 100);
-  const gameLeft = (100 - gameWidth) * asNumber(settings.game_x, 50) / 100;
-
-  return (
-    <div
-      className="source-canvas"
-      ref={stage}
-      onPointerMove={move}
-      onPointerUp={end}
-      onPointerCancel={end}
-      style={frame ? { backgroundImage: "url(" + frame + ")" } : undefined}
-    >
-      {!frame ? (
-        <div className="source-canvas-placeholder">
-          <div className="placeholder-screen"><MonitorPlay size={37} /><span>16:9 SOURCE FRAME</span></div>
-          <p>Capture a frame from your current source to place the layout accurately.</p>
-        </div>
-      ) : <div className="source-image-caption">CAPTURED SOURCE · 16:9</div>}
-
-      {isFacecam ? (
-        <>
-          <div className="layout-game-box" style={{ left: gameLeft + "%", width: gameWidth + "%" }}>
-            <span>GAME AREA</span>
-          </div>
-          <div
-            className="layout-selection facecam-selection"
-            style={{ left: camBox.x + "%", top: camBox.y + "%", width: camBox.w + "%", height: camBox.h + "%" }}
-            onPointerDown={(event) => begin(event, "facecam", "move")}
-          >
-            <span className="selection-label">FACECAM · DRAG TO MOVE</span>
-            <span className="resize-handle" onPointerDown={(event) => begin(event, "facecam", "resize")} />
-          </div>
-        </>
-      ) : null}
-
-      {isSelected ? (
-        <div
-          className="layout-selection crop-selection"
-          style={{ left: cropBox.x + "%", top: cropBox.y + "%", width: cropBox.w + "%", height: cropBox.h + "%" }}
-          onPointerDown={(event) => begin(event, "crop", "move")}
-        >
-          <span className="selection-label">OUTPUT CROP · DRAG TO MOVE</span>
-          <span className="resize-handle" onPointerDown={(event) => begin(event, "crop", "resize")} />
-        </div>
-      ) : null}
-
-      {!isFacecam && !isSelected ? (
-        <div className="auto-layout-overlay">
-          <span>{layout.startsWith("Blur") ? "BLURRED BACKGROUND" : "CENTER-FILL CROP"}</span>
-          <p>This layout is calculated automatically by the rendering engine.</p>
-        </div>
-      ) : null}
-      <div className="canvas-dimensions">SOURCE CANVAS | 1920 x 1080 REFERENCE</div>
-    </div>
-  );
-}
-
-function LayoutStudio({ workspace }: { workspace: Workspace }) {
-  const [draftOverride, setDraftOverride] = useState<AppSettings | null>(null);
-  const draft = draftOverride ?? workspace.settings ?? {};
-  const [frame, setFrame] = useState("");
-  const [frameBusy, setFrameBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [presets, setPresets] = useState<{ name: string; settings: Partial<AppSettings> }[]>(() => {
-    try {
-      const saved = localStorage.getItem("streamsnip.layout.presets");
-      return saved ? JSON.parse(saved) as { name: string; settings: Partial<AppSettings> }[] : [];
-    } catch {
-      return [];
-    }
-  });
-  const [presetName, setPresetName] = useState("");
-
-  const patch = (changes: Partial<AppSettings>) => setDraftOverride((current) => ({ ...(current ?? workspace.settings ?? {}), ...changes }));
-  const layout = asString(draft.layout, "Facecam + game (Twitch)");
-  const format = asString(draft.output_format, "9:16");
-  const ratio = ({ "9:16": "9 / 16", "16:9": "16 / 9", "1:1": "1 / 1", "4:5": "4 / 5" } as Record<string, string>)[format] || "9 / 16";
-  const isFacecam = layout.startsWith("Facecam");
-  const isSelected = layout.startsWith("Selected");
-
-  const chooseFormat = (nextFormat: string) => {
-    const aspect = ({ "9:16": 9 / 16, "16:9": 16 / 9, "1:1": 1, "4:5": 4 / 5 } as Record<string, number>)[nextFormat] || 9 / 16;
-    const width = Math.min(100, 100 * aspect / (16 / 9));
-    patch({
-      output_format: nextFormat,
-      crop_w: +width.toFixed(1),
-      crop_h: 100,
-      crop_x: +((100 - width) / 2).toFixed(1),
-      crop_y: 0,
-    });
-  };
-
-  const captureFrame = async () => {
-    setFrameBusy(true);
-    setMessage("");
-    try {
-      const result = await apiPost<{ image: string }>("/api/frame", {
-        mode: asString(draft.mode, "live"),
-        target: asString(draft.target),
-      });
-      setFrame(result.image);
-      setMessage("Source frame captured. Drag the highlighted region to position it.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not capture a source frame.");
-    } finally {
-      setFrameBusy(false);
-    }
-  };
-
-  const saveLayout = async () => {
-    try {
-      await workspace.saveSettings(draft);
-      setMessage("Layout saved to your StreamSnip settings.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not save the layout.");
-    }
-  };
-
-  const savePreset = () => {
-    const name = presetName.trim() || window.prompt("Name this layout preset");
-    if (!name) return;
-    const values: Partial<AppSettings> = {};
-    ["layout", "output_format", "cam_x", "cam_y", "cam_w", "cam_h", "game_x", "crop_x", "crop_y", "crop_w", "crop_h"].forEach((key) => {
-      if (draft[key] !== undefined) values[key] = draft[key];
-    });
-    const next = [...presets.filter((item) => item.name !== name), { name, settings: values }];
-    setPresets(next);
-    setPresetName("");
-    try { localStorage.setItem("streamsnip.layout.presets", JSON.stringify(next)); } catch { /* browser storage is optional */ }
-    setMessage("Preset saved in this browser.");
-  };
-
-  const applyPreset = (preset: { name: string; settings: Partial<AppSettings> }) => {
-    patch(preset.settings);
-    setMessage("Loaded \"" + preset.name + "\". Save layout to apply it to new clips.");
-  };
-
-  const deletePreset = (name: string) => {
-    const next = presets.filter((item) => item.name !== name);
-    setPresets(next);
-    try { localStorage.setItem("streamsnip.layout.presets", JSON.stringify(next)); } catch { /* browser storage is optional */ }
-  };
-
-  return (
-    <>
-      <PageHeading
-        eyebrow="VIDEO COMPOSITION"
-        title="Layout Studio"
-        description="Design the source frame, facecam/game split, crop, and final output ratio before rendering clips."
-        action={<Button variant="primary" onClick={() => void saveLayout()}><Save size={15} /> Save layout</Button>}
-      />
-
-      <div className="layout-presets-bar">
-        <div><strong>Layout presets</strong><small>Choose a composition, then refine it on the canvas.</small></div>
-        <div className="layout-preset-buttons">
-          {layoutPresets.map(({ key, label, icon: Icon }) => (
-            <button key={key} className={layout === key ? "layout-preset selected" : "layout-preset"} onClick={() => patch({ layout: key })}><Icon size={17} /><span>{label}</span></button>
-          ))}
-        </div>
-      </div>
-
-      <div className="layout-editor-grid">
-        <section className="panel-card layout-canvas-card">
-          <div className="panel-heading">
-            <div><div className="eyebrow">SOURCE COMPOSITION</div><h3>Drag to position your frame</h3><p>{isFacecam ? "Move the pink facecam window. Resize it from the lower-right handle. The dashed area shows the gameplay crop." : isSelected ? "Move the crop window or resize it from the lower-right handle. Its aspect ratio follows the selected output format." : "This layout uses automatic scaling and does not require manual positioning."}</p></div>
-            <Button onClick={() => void captureFrame()} disabled={frameBusy || !asString(draft.target).trim()}><Camera size={15} />{frameBusy ? "Capturing…" : "Capture source frame"}</Button>
-          </div>
-          <LayoutCanvas settings={draft} frame={frame} onChange={patch} />
-          <div className="canvas-help"><span><i className="legend-pink" /> Facecam</span><span><i className="legend-blue" /> Gameplay source</span><span><Move size={13} /> Drag the selection to move</span></div>
-          {message ? <p className="inline-feedback">{message}</p> : null}
-        </section>
-
-        <aside className="layout-inspector">
-          <section className="panel-card inspector-card">
-            <div className="eyebrow">OUTPUT</div><h3>Frame settings</h3>
-            <label className="field-label">Video aspect ratio</label>
-            <select className="field-select" value={format} onChange={(event) => chooseFormat(event.target.value)}>
-              <option value="9:16">9:16 · Shorts / Reels / TikTok</option>
-              <option value="16:9">16:9 · YouTube landscape</option>
-              <option value="1:1">1:1 · Square</option>
-              <option value="4:5">4:5 · Instagram portrait</option>
-            </select>
-            <div className="output-size-note"><strong>{format}</strong><span>{format === "9:16" ? "1080 x 1920" : format === "16:9" ? "1920 x 1080" : format === "1:1" ? "1080 x 1080" : "1080 x 1350"}</span></div>
-            {isFacecam && format !== "9:16" ? <p className="warning-note"><AlertCircle size={14} /> The facecam + game render is designed for 9:16 output. Choose 9:16 to use the split composition.</p> : null}
-          </section>
-
-          <section className="panel-card inspector-card">
-            <div className="eyebrow">POSITION & SCALE</div><h3>{isFacecam ? "Facecam controls" : isSelected ? "Crop controls" : "Automatic layout"}</h3>
-            {isFacecam ? (
-              <>
-                <ValueSlider label="Horizontal position" value={asNumber(draft.cam_x, 70)} min={0} max={90} onChange={(value) => patch({ cam_x: value })} suffix="%" />
-                <ValueSlider label="Vertical position" value={asNumber(draft.cam_y, 4)} min={0} max={90} onChange={(value) => patch({ cam_y: value })} suffix="%" />
-                <ValueSlider label="Facecam width" value={asNumber(draft.cam_w, 29)} min={10} max={100} onChange={(value) => {
-                  const width = clamp(value, 10, 100 - asNumber(draft.cam_x, 70));
-                  patch({ cam_w: width, cam_h: +(width * ((16 / 9) / (1080 / 768))).toFixed(1) });
-                }} suffix="%" />
-                <ValueSlider label="Gameplay horizontal crop" value={asNumber(draft.game_x, 50)} min={0} max={100} onChange={(value) => patch({ game_x: value })} suffix="%" />
-              </>
-            ) : isSelected ? (
-              <>
-                <ValueSlider label="Crop horizontal position" value={asNumber(draft.crop_x, 34.2)} min={0} max={90} onChange={(value) => patch({ crop_x: value })} suffix="%" />
-                <ValueSlider label="Crop vertical position" value={asNumber(draft.crop_y, 0)} min={0} max={90} onChange={(value) => patch({ crop_y: value })} suffix="%" />
-                <ValueSlider label="Crop width" value={asNumber(draft.crop_w, 31.6)} min={10} max={100} onChange={(value) => {
-                  const aspect = ({ "9:16": 9 / 16, "16:9": 16 / 9, "1:1": 1, "4:5": 4 / 5 } as Record<string, number>)[format] || 9 / 16;
-                  const width = clamp(value, 10, 100 - asNumber(draft.crop_x, 34.2));
-                  patch({ crop_w: width, crop_h: +(Math.min(100, width * (16 / 9) / aspect)).toFixed(1) });
-                }} suffix="%" />
-              </>
-            ) : (
-              <p className="panel-description">The engine scales the entire source and either fills the output or places the source over a blurred background. Use Selected crop when you need to choose a specific frame region.</p>
-            )}
-            <Button className="full-width" onClick={() => {
-              if (isFacecam) patch({ cam_x: 70, cam_y: 4, cam_w: 29, cam_h: 37, game_x: 50 });
-              else patch({ crop_x: 34.2, crop_y: 0, crop_w: 31.6, crop_h: 100 });
-            }}>Reset positioning</Button>
-          </section>
-
-          <section className="panel-card inspector-card">
-            <div className="eyebrow">OUTPUT PREVIEW</div><h3>Rendered composition</h3>
-            <div className="rendered-preview" style={{ aspectRatio: ratio }}>
-              {isFacecam ? <><div className="render-preview-face"><Camera size={18} /><span>FACECAM</span></div><div className="render-preview-game"><MonitorPlay size={19} /><span>GAMEPLAY</span></div></> : (
-                <div className={"render-preview-auto " + (layout.startsWith("Blur") ? "blur-preview" : "fill-preview")}><Video size={23} /><span>{layout.startsWith("Blur") ? "Blur background" : layout.startsWith("Selected") ? "Selected crop" : "Fill frame"}</span></div>
-              )}
-              <div className="render-preview-caption">YOUR CAPTIONS</div>
-            </div>
-            <p className="panel-description">Illustrative preview of the selected render mode. The source canvas above controls the actual crop coordinates used by FFmpeg.</p>
-          </section>
-
-          <section className="panel-card inspector-card">
-            <div className="eyebrow">YOUR PRESETS</div><h3>Saved layouts</h3>
-            <div className="save-preset-row"><input className="field-input" aria-label="Preset name" value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="Preset name" /><Button onClick={savePreset}><Plus size={14} /> Save</Button></div>
-            {presets.length ? <div className="saved-preset-list">{presets.map((preset) => <div key={preset.name}><button onClick={() => applyPreset(preset)}>{preset.name}<ArrowRight size={13} /></button><button className="preset-delete" onClick={() => deletePreset(preset.name)} aria-label={"Delete " + preset.name}><X size={13} /></button></div>)}</div> : <p className="muted-note">No custom presets saved yet. Presets are stored in this browser; the active layout is saved in StreamSnip settings.</p>}
-          </section>
-        </aside>
-      </div>
-    </>
-  );
-}
-
-function ValueSlider({
-  label, value, min, max, suffix = "", onChange,
-}: { label: string; value: number; min: number; max: number; suffix?: string; onChange: (value: number) => void }) {
-  return (
-    <label className="value-slider">
-      <span>{label}<strong>{value.toFixed(1).replace(".0", "")}{suffix}</strong></span>
-      <input type="range" min={min} max={max} step="0.5" value={value} onChange={(event) => onChange(Number(event.target.value))} />
-    </label>
-  );
-}
-
-
-function ClipLibrary({ workspace, tab }: { workspace: Workspace; tab: "clips" | "publish" | "posted" }) {
-  const [params, setParams] = useSearchParams();
-  const [query, setQuery] = useState(() => params.get("search") || "");
-  const [activeClip, setActiveClip] = useState<Clip | null>(null);
-  const [busy, setBusy] = useState(false);
-  const { state } = workspace;
+  useEffect(() => {
+    if (!themeOpen) return;
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setThemeOpen(false); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [themeOpen]);
 
   const setClipTab = workspace.setClipTab;
-  useEffect(() => {
-    setClipTab(tab === "posted" ? "posted" : "clips");
-  }, [tab, setClipTab]);
+  const refreshWorkspace = workspace.refresh;
+  const navigate = useCallback((next: PageId) => {
+    setPage(next);
+    setMobileOpen(false);
+    setThemeOpen(false);
+    if (next === "clips") setClipTab("clips");
+    if (next === "published") setClipTab("posted");
+  }, [setClipTab]);
 
-  const filtered = useMemo(() => state.clips.filter((clip) => {
-    const haystack = [clip.title, clip.name, clip.description, clip.creator_name, clip.caption].join(" ").toLowerCase();
-    return !query.trim() || haystack.includes(query.trim().toLowerCase());
-  }), [state.clips, query]);
-
-  const accountIds = workspace.publishing.providers?.zernio?.accounts || workspace.publishing.accounts || {};
-
-  const doDelete = async (names: string[]) => {
-    const label = names.length === 1 ? names[0] : names.length + " selected clips";
-    if (!window.confirm("Permanently delete " + label + " and their TXT metadata sidecars? This cannot be undone.")) return;
-    setBusy(true);
+  const post = useCallback(async <T,>(key: string, path: string, body: RecordLike = {}): Promise<T | null> => {
+    setBusy(key);
     try {
-      for (const name of names) await apiPost("/api/delete", { name });
-      setActiveClip(null);
-      await workspace.refresh();
-    } catch (reason) {
-      notifyApp("error", "Delete failed", reason instanceof Error ? reason.message : "Could not delete the selected clips.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const pageSize = 60;
-  const pageNumber = Math.floor(workspace.clipOffset / pageSize) + 1;
-  const totalPages = Math.max(1, Math.ceil(state.clip_total / pageSize));
-
-  return (
-    <>
-      <PageHeading
-        eyebrow={tab === "clips" ? "CONTENT LIBRARY" : tab === "publish" ? "POST YOUR CLIPS" : "PUBLISHING HISTORY"}
-        title={tab === "clips" ? "Clips" : tab === "publish" ? "Post your clips" : "Published"}
-        description={tab === "clips" ? "Preview saved clips or delete them from your library." : tab === "publish" ? "Choose a clip, select the social platforms, and prepare its AI-generated post copy for review." : "Your publishing history, including confirmed Zernio posts and posts you mark as published."}
-        action={tab === "clips" || tab === "publish" ? <Button onClick={() => void workspace.refresh()}><RefreshCw size={14} /> Refresh</Button> : <StatusPill tone="good">{state.posted_total} confirmed</StatusPill>}
-      />
-
-      {workspace.state.posting.active ? (
-        <section className="upload-progress-card library-upload-progress">
-          <div><strong>Publishing batch in progress</strong><span>{workspace.state.posting.current || "Preparing upload"} · {workspace.state.posting.completed} of {workspace.state.posting.total} complete</span></div>
-          <div className="progress-track"><span style={{ width: (workspace.state.posting.total ? workspace.state.posting.completed / workspace.state.posting.total * 100 : 0) + "%" }} /></div>
-          {workspace.state.posting.errors ? <small>{workspace.state.posting.errors} upload error(s) have been reported.</small> : null}
-        </section>
-      ) : null}
-
-      <section className="library-toolbar-studio">
-        <div className="library-tabs-studio">
-          <Link to="/clips" className={tab === "clips" ? "active" : ""}>Clips <span>{Math.max(0, state.clip_total)}</span></Link>
-          <Link to="/publish" className={tab === "publish" ? "active" : ""}>Publish</Link>
-          <Link to="/posted" className={tab === "posted" ? "active" : ""}>Published <span>{state.posted_total}</span></Link>
-        </div>
-        <form className="library-search" onSubmit={(event) => {
-          event.preventDefault();
-          setParams(query.trim() ? { search: query.trim() } : {});
-        }}>
-          <Search size={16} />
-          <input aria-label="Search clips by title, creator, or metadata" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles, creators, metadata…" />
-          {query ? <button type="button" onClick={() => { setQuery(""); setParams({}); }} aria-label="Clear search"><X size={14} /></button> : null}
-        </form>
-      </section>
-
-
-      <section className="panel-card clip-table-card">
-        {filtered.length ? (
-          <div className="clip-table-heading">
-            <span>VIDEO</span><span>CREATOR / SOURCE</span><span>FILE SIZE</span><span>{tab === "posted" ? "PUBLISHED" : "CREATED"}</span><span>STATUS</span><span />
-          </div>
-        ) : null}
-        {filtered.length ? filtered.map((clip) => (
-          <div className="clip-table-row" key={clip.name}>
-            <button className="clip-table-video" onClick={() => setActiveClip(clip)}>
-              <span className="clip-table-thumb"><video src={"/clips/" + encodeURIComponent(clip.name)} preload="metadata" muted playsInline /></span>
-              <span className="clip-table-title"><strong>{clip.title || clip.name.replace(/\.mp4$/i, "")}</strong><small>{clip.name}</small></span>
-            </button>
-            <span className="clip-table-creator"><strong>{clip.creator_name || "Main workspace"}</strong><small>{clip.source || "Local capture"}</small></span>
-            <span className="clip-table-size">{clip.size_mb.toFixed(1)} MB</span>
-            <span className="clip-table-date">{formatDate(tab === "posted" ? (clip.posted_at || clip.mtime) : clip.mtime)}</span>
-            <span><StatusPill tone={tab === "posted" ? "good" : "neutral"}>{tab === "posted" ? "Published" : "Ready"}</StatusPill></span>
-            <span className="clip-row-actions">
-              {tab === "clips" ? <button className="clip-row-publish" title="Delete clip" aria-label={"Delete " + clip.name} onClick={() => void doDelete([clip.name])}><Trash2 size={15} /></button> : null}
-              {tab === "publish" ? <button className="clip-row-publish" title="Prepare this clip for posting" aria-label={"Prepare post for " + clip.name} onClick={() => setActiveClip(clip)}><Upload size={14} /> Post</button> : null}
-              {tab === "posted" ? <button title="View published clip" aria-label={"Open details for " + clip.name} onClick={() => setActiveClip(clip)}><MoreHorizontal size={17} /></button> : null}
-            </span>
-          </div>
-        )) : (
-          <div className="clip-table-empty">
-            <EmptyState
-              icon={tab === "posted" ? BadgeCheck : tab === "publish" ? Upload : Film}
-              title={query ? "No matching clips" : tab === "posted" ? "Nothing published yet" : tab === "publish" ? "No clips ready to post" : "No saved clips yet"}
-              body={query ? "Try another search term." : tab === "posted" ? "Posts you confirm or send through Zernio will appear here." : tab === "publish" ? "Clips appear here when they are ready. Open one to choose manual platforms or optional Zernio Auto Posting." : "Your saved clips appear here. Open one to preview it or delete it."}
-              action={tab === "clips" ? <Link to="/live" className="button button-primary"><Radio size={15} /> Open Live Studio</Link> : <Link to="/clips" className="button button-secondary">Browse clips</Link>}
-            />
-          </div>
-        )}
-      </section>
-
-      <div className="library-pagination">
-        <span>Showing {state.clip_total ? Math.min(workspace.clipOffset + 1, state.clip_total) : 0}–{Math.min(workspace.clipOffset + state.clips.length, state.clip_total)} of {state.clip_total}</span>
-        <div><Button onClick={() => workspace.setClipOffset(Math.max(0, workspace.clipOffset - pageSize))} disabled={workspace.clipOffset <= 0}><ArrowRight className="icon-flip" size={14} /> Newer</Button><span>Page {pageNumber} of {totalPages}</span><Button onClick={() => workspace.setClipOffset(workspace.clipOffset + pageSize)} disabled={workspace.clipOffset + state.clips.length >= state.clip_total}>Older <ArrowRight size={14} /></Button></div>
-      </div>
-
-      {activeClip ? (
-        <ClipDetail
-          clip={activeClip}
-          tab={tab}
-          accountIds={accountIds}
-          configured={!!workspace.publishing.configured}
-          onClose={() => setActiveClip(null)}
-          onDelete={() => void doDelete([activeClip.name])}
-          onSaveMetadata={async (title, description) => {
-            await apiPost("/api/clip-metadata", { name: activeClip.name, title, description });
-            await workspace.refresh();
-          }}
-          onPublish={async (title, description, selectedAccounts) => {
-            if (!workspace.publishing.configured) throw new Error("Configure Zernio in Settings → Publishing first.");
-            if (!Object.keys(selectedAccounts).length) throw new Error("Select at least one platform before publishing.");
-            await apiPost("/api/publishing/publish-one", { name: activeClip.name, title, description, account_ids: selectedAccounts });
-            await workspace.refresh();
-          }}
-          onRecordPosted={async (platform) => {
-            await apiPost("/api/posted/mark", { name: activeClip.name, platform, accounts: Object.keys(accountIds) });
-            await workspace.refresh();
-            setActiveClip(null);
-          }}
-          onReveal={async () => apiPost("/api/reveal", { name: activeClip.name })}
-        />
-      ) : null}
-      {busy ? <div className="busy-shade"><Loader2 className="spin" size={18} /> Processing request…</div> : null}
-    </>
-  );
-}
-
-function ClipDetail({
-  clip, tab, accountIds, configured, onClose, onDelete, onSaveMetadata, onPublish, onRecordPosted, onReveal,
-}: {
-  clip: Clip;
-  tab: "clips" | "publish" | "posted";
-  accountIds: Record<string, string>;
-  configured: boolean;
-  onClose: () => void;
-  onDelete: () => void;
-  onSaveMetadata: (title: string, description: string) => Promise<void>;
-  onPublish: (title: string, description: string, selectedAccounts: Record<string, string>) => Promise<void>;
-  onRecordPosted: (platform: string) => Promise<void>;
-  onReveal: () => Promise<unknown>;
-}) {
-  const [title, setTitle] = useState(clip.title || clip.name.replace(/\.mp4$/i, ""));
-  const [description, setDescription] = useState(clip.description || clip.caption || "");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
-  const [useZernio, setUseZernio] = useState(false);
-  const selectedAccounts = accountIds;
-
-  const saveMetadata = async () => {
-    setBusy(true);
-    setMessage("");
-    try {
-      await onSaveMetadata(title.trim(), description.trim());
-      setMessage("AI post copy saved beside the clip.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not save post copy.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const copyPostField = async (value: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setMessage(label + " copied. Paste it into the matching field on the platform.");
+      const result = await apiPost<T>(path, body);
+      await refreshWorkspace();
+      return result;
     } catch {
-      setMessage("Clipboard access was blocked. Select and copy the text directly from this panel.");
-    }
-  };
+      return null;
+    } finally { setBusy(""); }
+  }, [refreshWorkspace]);
 
-  const openManualPost = async () => {
-    if (selectedPlatforms.length !== 1) throw new Error("Choose one manual platform at a time. The browser stays on that upload so you can review it before preparing the next platform.");
-    await onSaveMetadata(title.trim(), description.trim());
-    const result = await apiPost<{ platform: string; file: string; opened_in_default_browser: boolean; manual_video_selection_required: boolean }>("/api/browser/prepare", {
-      name: clip.name,
-      platform: selectedPlatforms[0],
-      title: title.trim(),
-      description: (description.trim() || clip.caption || "").trim(),
-    });
-    setMessage(result.platform + " opened in your normal default browser. Select " + result.file + " on the upload page, then use Copy title and Copy caption here to fill the post. Review everything and publish yourself.");
+  const openForPublishing = (clip: Clip) => {
+    setPublishClip(clip);
+    setBulkNames([]);
+    navigate("publishing");
   };
-
-  const submitPost = async () => {
-    setBusy(true);
-    setMessage("");
-    try {
-      if (!selectedPlatforms.length && !useZernio) throw new Error("Select one or more social platforms, or enable Zernio Auto Posting.");
-      if (selectedPlatforms.length) await openManualPost();
-      if (useZernio) {
-        if (!configured || !Object.keys(accountIds).length) throw new Error("Configure Zernio and connect at least one account in Settings → Publishing.");
-        await onPublish(title.trim(), description.trim(), selectedAccounts);
-        setMessage((selectedPlatforms.length ? "Manual upload pages opened. " : "") + "Zernio Auto Posting queued this clip. Review and completion are shown by the publishing status.");
-      }
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not prepare this post.");
-    } finally {
-      setBusy(false);
-    }
+  const openBulkPublishing = (names: string[]) => {
+    setPublishClip(null);
+    setBulkNames(names);
+    navigate("publishing");
   };
-
-  const recordExternal = async () => {
-    const platform = window.prompt("Which platform did you publish this clip to?", "YouTube");
-    if (!platform?.trim()) return;
-    setBusy(true);
-    try {
-      await onRecordPosted(platform.trim());
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not record the external post.");
-    } finally {
-      setBusy(false);
-    }
+  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setClipSearch(globalSearch.trim());
+    navigate("clips");
   };
+  const connected = workspace.connected;
+  const running = workspace.state.running;
+  const title = pageInfo[page].title;
+  const selectedTheme = themes.find((item) => item.id === theme) || themes[0];
 
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="clip-detail-modal" role="dialog" aria-modal="true" aria-label="Clip details">
-        <div className="modal-heading">
-          <div><div className="eyebrow">CLIP DETAILS</div><h2>{clip.title || clip.name}</h2></div>
-          <button className="modal-close" onClick={onClose} aria-label="Close details"><X size={18} /></button>
+  return <div className="app-shell">
+    <Sidebar page={page} navigate={navigate} connected={connected} running={running} mobileOpen={mobileOpen} close={() => setMobileOpen(false)} />
+    {mobileOpen ? <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} /> : null}
+    <div className="main-shell">
+      <header className="topbar">
+        <div className="topbar-start">
+          <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu size={19} /></button>
+          <div className="breadcrumbs"><span>StreamSnip AI</span><span className="crumb-divider">/</span><strong>{title}</strong></div>
         </div>
-        <div className="clip-detail-grid">
-          <div className="clip-detail-video"><video src={"/clips/" + encodeURIComponent(clip.name)} controls playsInline /></div>
-          <div className="clip-detail-fields">
-            {tab === "clips" ? (
-              <>
-                <div className="clip-detail-meta">
-                  <span><strong>Creator</strong>{clip.creator_name || "Main workspace"}</span>
-                  <span><strong>Created</strong>{formatDate(clip.mtime)}</span>
-                  <span><strong>Size</strong>{clip.size_mb.toFixed(1)} MB</span>
-                </div>
-                <Button variant="danger" onClick={onDelete}><Trash2 size={14} /> Delete clip</Button>
-              </>
-            ) : (
-              <>
-                <label className="field-label">Title<input className="field-input" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={100} /></label>
-                <label className="field-label">Description / caption<textarea className="field-input field-textarea" value={description} onChange={(event) => setDescription(event.target.value)} rows={7} maxLength={2200} /></label>
-                <div className="clip-detail-meta">
-                  <span><strong>Creator</strong>{clip.creator_name || "Main workspace"}</span>
-                  <span><strong>Created</strong>{formatDate(clip.mtime)}</span>
-                  <span><strong>Size</strong>{clip.size_mb.toFixed(1)} MB</span>
-                </div>
-                {tab === "publish" ? (
-                  <div className="clip-publish-targets">
-                    <div className="clip-publish-targets-heading"><strong>Where do you want to post?</strong><span>Prepare one platform at a time</span></div>
-                    <div className="clip-publish-targets-options">
-                      {manualPostingTargets.map((target) => (
-                        <label key={target.id}>
-                          <input type="checkbox" checked={selectedPlatforms.includes(target.id)} onChange={() => setSelectedPlatforms((current) => current.includes(target.id) ? current.filter((item) => item !== target.id) : [...current, target.id])} disabled={busy} />
-                          <span>{target.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <div className="clip-publish-targets-heading"><strong>Zernio Auto Posting</strong><span>{Object.keys(accountIds).length} connected</span></div>
-                    <label className="zernio-destination-option">
-                      <input type="checkbox" checked={useZernio} onChange={(event) => setUseZernio(event.target.checked)} disabled={busy || !configured || !Object.keys(accountIds).length} />
-                      <span>Also send this clip through Zernio</span>
-                    </label>
-                    {!configured || !Object.keys(accountIds).length ? <p className="field-help">Optional: configure Zernio and connect accounts in <a href="/settings/publishing">Settings → Publishing</a>. Manual posting above does not need Zernio.</p> : <p className="field-help">Zernio uses only the accounts connected to your Zernio plan. This is separate from manual platform posting.</p>}
-                  </div>
-                ) : null}
-                <div className="clip-detail-actions">
-                  <Button onClick={() => void saveMetadata()} disabled={busy || !title.trim()}><Save size={14} /> Save post copy</Button>
-                  {tab === "publish" ? <Button onClick={() => void copyPostField(title.trim(), "Title")} disabled={!title.trim()}>Copy title</Button> : null}
-                  {tab === "publish" ? <Button onClick={() => void copyPostField(description.trim(), "Description / hashtags")} disabled={!description.trim()}>Copy caption</Button> : null}
-                  {tab === "publish" ? <Button variant="primary" onClick={() => void submitPost()} disabled={busy || !title.trim() || (!selectedPlatforms.length && !useZernio)}><Upload size={14} /> Post</Button> : null}
-                  {tab === "publish" ? <Button onClick={() => void recordExternal()} disabled={busy}>Mark as published</Button> : null}
-                  <Button onClick={() => void onReveal()}><FolderOpen size={14} /> Show video file</Button>
-                  <a className="button button-secondary" href={"/clips/" + encodeURIComponent(clip.name.replace(/\.mp4$/i, "")) + ".txt"} target="_blank" rel="noreferrer"><FileText size={14} /> Open AI post copy</a>
-                  <Button variant="danger" onClick={onDelete}><Trash2 size={14} /> Delete clip</Button>
-                </div>
-                <p className="muted-note">Manual Post opens the upload page in your normal default browser and keeps your existing login. Select the video yourself, then use Copy title and Copy caption to fill the post. StreamSnip AI never creates a browser profile or presses Publish. Zernio remains a separate optional automated route.</p>
-              </>
-            )}
-            {message ? <p className="inline-feedback">{message}</p> : null}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function SettingsPage({ workspace, section, themeId, onThemeChange }: {
-  workspace: Workspace;
-  section: "general" | "ai" | "speech" | "captions" | "publishing";
-  themeId: ThemeId;
-  onThemeChange: (value: ThemeId) => void;
-}) {
-  const headings = {
-    general: ["GENERAL", "Application settings", "Local storage, performance, and application behavior."],
-    ai: ["AI & MODELS", "AI providers", "Choose how StreamSnip scores moments and creates post metadata."],
-    speech: ["SPEECH RECOGNITION", "Transcription", "Configure the speech engine and timestamped transcript model."],
-    captions: ["VIDEO STYLING", "Caption settings", "Tune the on-video captions, profanity filter, and creator credit."],
-    publishing: ["DISTRIBUTION", "Publishing", "Connect Zernio accounts and control how finished clips are published."],
-  } as const;
-  const [eyebrow, title, description] = headings[section];
-
-  return (
-    <>
-      <PageHeading eyebrow={eyebrow} title={title} description={description} />
-      <div className="settings-layout">
-        <nav className="settings-subnav" aria-label="Settings categories">
-          <div className="settings-subnav-title">SETTINGS</div>
-          <NavLink to="/settings" end className={({ isActive }) => isActive ? "active" : ""}><Settings size={16} /> General</NavLink>
-          <NavLink to="/settings/ai" className={({ isActive }) => isActive ? "active" : ""}><Bot size={16} /> AI providers</NavLink>
-          <NavLink to="/settings/speech" className={({ isActive }) => isActive ? "active" : ""}><Activity size={16} /> Transcription</NavLink>
-          <NavLink to="/settings/captions" className={({ isActive }) => isActive ? "active" : ""}><FileText size={16} /> Captions</NavLink>
-          <NavLink to="/settings/publishing" className={({ isActive }) => isActive ? "active" : ""}><Upload size={16} /> Publishing</NavLink>
-          <div className="settings-subnav-foot">
-            <span className={workspace.saving ? "saving-dot busy" : workspace.saveError ? "saving-dot error" : "saving-dot"} />
-            <span>{workspace.saving ? "Saving changes…" : workspace.saveError ? "Save failed" : workspace.savedAt ? "Saved to this device" : "Local settings"}</span>
-          </div>
-        </nav>
-        <div className="settings-main">
-          {section === "general" ? <GeneralSettings workspace={workspace} themeId={themeId} onThemeChange={onThemeChange} /> : null}
-          {section === "ai" ? <AISettingsPage workspace={workspace} /> : null}
-          {section === "speech" ? <SpeechSettings workspace={workspace} /> : null}
-          {section === "captions" ? <CaptionSettings workspace={workspace} /> : null}
-          {section === "publishing" ? <PublishingSettings key={JSON.stringify([workspace.publishing.providers?.zernio?.accounts, workspace.publishing.accounts, workspace.publishing.auto_post, workspace.publishing.schedule_minutes, workspace.publishing.visibility])} workspace={workspace} /> : null}
-        </div>
-      </div>
-    </>
-  );
-}
-
-function GeneralSettings({ workspace, themeId, onThemeChange }: {
-  workspace: Workspace;
-  themeId: ThemeId;
-  onThemeChange: (value: ThemeId) => void;
-}) {
-  const settings = workspace.settings || {};
-  const [browseBusy, setBrowseBusy] = useState("");
-
-  const browseFolder = async (key: "rec_dir" | "out_dir") => {
-    setBrowseBusy(key);
-    try {
-      const result = await apiPost<{ path: string }>("/api/browse_folder");
-      if (result.path) workspace.updateSettings({ [key]: result.path });
-    } catch (reason) {
-      notifyApp("error", "Folder picker failed", reason instanceof Error ? reason.message : "Could not open the folder picker.");
-    } finally {
-      setBrowseBusy("");
-    }
-  };
-
-  return (
-    <>
-      <section className="settings-section-card appearance-settings-card">
-        <div className="settings-section-heading">
-          <div><h3>Workspace appearance</h3><p>Choose a complete colour palette for the whole studio. Your selection is remembered on this device.</p></div>
-          <Palette size={19} />
-        </div>
-        <ThemeOptions value={themeId} onChange={onThemeChange} />
-        <p className="field-help">Themes change the workspace surfaces, contrast, and accent colour. They do not change your clips or capture settings.</p>
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Storage folders</h3><p>Choose where original recordings and rendered clips are saved.</p></div><Folder size={19} /></div>
-        <label className="field-label">Recording folder</label>
-        <div className="folder-field-row"><input className="field-input" aria-label="Recording folder path" value={asString(settings.rec_dir)} onChange={(event) => workspace.updateSettings({ rec_dir: event.target.value })} placeholder="Default application data folder" disabled={workspace.state.running} /><Button onClick={() => void browseFolder("rec_dir")} disabled={workspace.state.running || !!browseBusy}>{browseBusy === "rec_dir" ? <Loader2 className="spin" size={14} /> : <FolderOpen size={14} />} Browse</Button></div>
-        <label className="field-label">Output / clips folder</label>
-        <div className="folder-field-row"><input className="field-input" aria-label="Output and clips folder path" value={asString(settings.out_dir)} onChange={(event) => workspace.updateSettings({ out_dir: event.target.value })} placeholder="Default application data folder" disabled={workspace.state.running} /><Button onClick={() => void browseFolder("out_dir")} disabled={workspace.state.running || !!browseBusy}>{browseBusy === "out_dir" ? <Loader2 className="spin" size={14} /> : <FolderOpen size={14} />} Browse</Button></div>
-        <p className="field-help">Stop clipping before changing storage locations. Creator-specific recordings and VOD inboxes remain managed by their own monitor folders.</p>
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Processing hardware</h3><p>Hardware selection is automatic and follows the current engine behavior.</p></div><Cpu size={19} /></div>
-        <div className="settings-readonly-row"><div><strong>Automatic GPU acceleration</strong><small>NVIDIA CUDA for speech and NVENC for video when supported.</small></div><StatusPill tone="good">Automatic</StatusPill></div>
-        <div className="settings-readonly-row"><div><strong>CPU fallback</strong><small>Used by the engine only when a compatible GPU is unavailable.</small></div><StatusPill>Available</StatusPill></div>
-        <label className="field-label">Live capture bitrate target <strong className="field-value">{asNumber(settings.capture_bitrate_kbps, 6000).toLocaleString()} kbps</strong></label>
-        <input className="wide-range" aria-label="Live capture bitrate target in kilobits per second" type="range" min="6000" max="50000" step="1000" value={asNumber(settings.capture_bitrate_kbps, 6000)} onChange={(event) => workspace.updateSettings({ capture_bitrate_kbps: Number(event.target.value) })} />
-        <div className="range-ends"><span>6,000 kbps</span><span>50,000 kbps</span></div>
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Application state</h3><p>Connection and settings are stored locally on this computer.</p></div><ShieldCheck size={19} /></div>
-        <div className="settings-readonly-row"><div><strong>Local processing engine</strong><small>Python capture and FFmpeg render pipeline</small></div><StatusPill tone={workspace.connected ? "good" : "warning"}>{workspace.connected ? "Connected" : "Offline"}</StatusPill></div>
-        <div className="settings-readonly-row"><div><strong>Settings autosave</strong><small>{workspace.savedAt ? "Last saved " + formatDate(workspace.savedAt / 1000) : "Changes are saved automatically."}</small></div><StatusPill tone={workspace.saveError ? "bad" : workspace.saving ? "warning" : "good"}>{workspace.saveError ? "Error" : workspace.saving ? "Saving" : "Enabled"}</StatusPill></div>
-        {workspace.saveError ? <p className="inline-feedback error">{workspace.saveError}</p> : null}
-      </section>
-    </>
-  );
-}
-
-function AISettingsPage({ workspace }: { workspace: Workspace }) {
-  const { ai } = workspace;
-  const [geminiKey, setGeminiKey] = useState("");
-  const [hfToken, setHfToken] = useState("");
-  const [customKey, setCustomKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-
-  const update = workspace.updateAI;
-  const extra = () => {
-    const payload: Record<string, string | boolean> = {};
-    if (geminiKey.trim()) payload.gemini_api_key = geminiKey.trim();
-    if (hfToken.trim()) payload.huggingface_token = hfToken.trim();
-    if (customKey.trim()) payload.custom_api_key = customKey.trim();
-    return payload;
-  };
-
-  const save = async () => {
-    setBusy(true);
-    setMessage("");
-    try {
-      await workspace.saveAI(extra());
-      setGeminiKey("");
-      setHfToken("");
-      setCustomKey("");
-      setMessage("AI provider settings saved locally. Credential values are not sent back to the browser.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not save AI settings.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const test = async () => {
-    setBusy(true);
-    setMessage("Testing provider connection…");
-    try {
-      const result = await workspace.testAI(extra());
-      setMessage(result.message);
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "AI provider test failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const clearSecret = async (flag: string, label: string) => {
-    if (!window.confirm("Clear the saved " + label + " from this computer?")) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const updated = await apiPost("/api/ai/settings", {
-        provider: ai.provider,
-        ollama_url: ai.ollama_url,
-        ollama_model: ai.ollama_model,
-        gemini_model: ai.gemini_model,
-        huggingface_model: ai.huggingface_model,
-        custom_api_base: ai.custom_api_base,
-        custom_api_model: ai.custom_api_model,
-        metadata_copy_enabled: ai.metadata_copy_enabled,
-        [flag]: true,
-      });
-      workspace.updateAI(updated as Partial<typeof ai>);
-      if (flag === "clear_gemini_key") setGeminiKey("");
-      if (flag === "clear_hf_token") setHfToken("");
-      if (flag === "clear_custom_api_key") setCustomKey("");
-      setMessage(label + " removed from local settings.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not clear the credential.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const detectModels = async () => {
-    setBusy(true);
-    setMessage("Checking installed Ollama models…");
-    try {
-      const result = await workspace.detectOllama();
-      setOllamaModels(result.models);
-      if (result.models.length && !result.models.includes(ai.ollama_model)) update({ ollama_model: result.models[0] });
-      setMessage(result.models.length ? result.models.length + " installed model(s) found." : "Ollama responded, but no local models were found.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not reach Ollama.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const providers = [
-    { id: "hooks", name: "Hook words", detail: "Free · Offline · Built-in", icon: Zap },
-    { id: "ollama", name: "Ollama local AI", detail: "Local model · Private", icon: Cpu },
-    { id: "gemini", name: "Gemini API", detail: "Hosted · Uses Google quota", icon: Sparkles },
-    { id: "huggingface", name: "Hugging Face", detail: "Hosted · Provider credits", icon: Bot },
-    { id: "custom", name: "Custom API", detail: "OpenAI-compatible endpoint", icon: Settings },
-  ];
-
-  return (
-    <>
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Highlight analysis provider</h3><p>This provider scores candidate moments and, when supported, writes the title and post description.</p></div><Bot size={19} /></div>
-        <div className="provider-choice-grid">
-          {providers.map((provider) => {
-            const Icon = provider.icon;
-            return (
-              <button key={provider.id} className={ai.provider === provider.id ? "provider-choice active" : "provider-choice"} onClick={() => update({ provider: provider.id })}>
-                <Icon size={19} /><span><strong>{provider.name}</strong><small>{provider.detail}</small></span>{ai.provider === provider.id ? <CheckCircle2 size={17} /> : null}
-              </button>
-            );
-          })}
-        </div>
-        <div className="ai-provider-panel">
-          {ai.provider === "hooks" ? (
-            <div className="provider-explanation"><Zap size={20} /><div><strong>Built-in hook-word detection</strong><p>Runs locally and combines your custom phrases with audio energy and speech-rate signals. It does not call a hosted text model, so titles and descriptions use transcript-based fallback copy.</p></div></div>
-          ) : null}
-          {ai.provider === "ollama" ? (
-            <>
-              <label className="field-label">Ollama address<input className="field-input" value={ai.ollama_url} onChange={(event) => update({ ollama_url: event.target.value })} placeholder="http://127.0.0.1:11434" /></label>
-              <div className="field-label-row"><label className="field-label">Installed model</label><Button onClick={() => void detectModels()} disabled={busy}><RefreshCw size={14} /> Detect models</Button></div>
-              <select className="field-select" value={ai.ollama_model} onChange={(event) => update({ ollama_model: event.target.value })}>
-                <option value="">Choose a detected model</option>
-                {[...new Set([ai.ollama_model, ...ollamaModels].filter(Boolean))].map((model) => <option key={model}>{model}</option>)}
-              </select>
-              <p className="field-help">Install Ollama and pull a model before testing. Example: <code>ollama pull qwen3.5:9b</code>.</p>
-            </>
-          ) : null}
-          {ai.provider === "gemini" ? (
-            <>
-              <div className="field-label-row"><label className="field-label">Gemini API key</label><StatusPill tone={ai.gemini_key_set ? "good" : "warning"}>{ai.gemini_key_set ? "Saved locally" : "Not saved"}</StatusPill></div>
-              <input className="field-input" type="password" autoComplete="new-password" value={geminiKey} onChange={(event) => setGeminiKey(event.target.value)} placeholder={ai.gemini_key_set ? "Enter a new key to replace the saved key" : "Paste your Gemini API key"} />
-              <label className="field-label">Preferred Gemini model<input className="field-input" value={ai.gemini_model} onChange={(event) => update({ gemini_model: event.target.value })} placeholder="gemini-3.8-flash" /></label>
-              <div className="credential-actions"><Button variant="quiet" onClick={() => void clearSecret("clear_gemini_key", "Gemini API key")} disabled={!ai.gemini_key_set || busy}><Trash2 size={14} /> Clear saved key</Button></div>
-            </>
-          ) : null}
-          {ai.provider === "huggingface" ? (
-            <>
-              <label className="field-label">Hugging Face model<input className="field-input" value={ai.huggingface_model} onChange={(event) => update({ huggingface_model: event.target.value })} placeholder="deepseek-ai/DeepSeek-V4.1-Flash:fastest" /></label>
-              <div className="field-label-row"><label className="field-label">Access token</label><StatusPill tone={ai.huggingface_token_set ? "good" : "warning"}>{ai.huggingface_token_set ? "Saved locally" : "Not saved"}</StatusPill></div>
-              <input className="field-input" type="password" autoComplete="new-password" value={hfToken} onChange={(event) => setHfToken(event.target.value)} placeholder={ai.huggingface_token_set ? "Enter a new token to replace the saved token" : "hf_… token with Inference Providers access"} />
-              <div className="credential-actions"><Button variant="quiet" onClick={() => void clearSecret("clear_hf_token", "Hugging Face token")} disabled={!ai.huggingface_token_set || busy}><Trash2 size={14} /> Clear saved token</Button></div>
-              <p className="field-help">The token may also be used for authenticated Whisper model downloads. Use an account with the required Inference Providers access and available credits.</p>
-            </>
-          ) : null}
-          {ai.provider === "custom" ? (
-            <>
-              <label className="field-label">OpenAI-compatible base URL<input className="field-input" value={ai.custom_api_base} onChange={(event) => update({ custom_api_base: event.target.value })} placeholder="https://provider.example/v1" /></label>
-              <label className="field-label">Model ID<input className="field-input" value={ai.custom_api_model} onChange={(event) => update({ custom_api_model: event.target.value })} placeholder="Exact provider model ID" /></label>
-              <div className="field-label-row"><label className="field-label">API key</label><StatusPill tone={ai.custom_api_key_set ? "good" : "neutral"}>{ai.custom_api_key_set ? "Saved locally" : "Optional for local/free endpoints"}</StatusPill></div>
-              <input className="field-input" type="password" autoComplete="new-password" value={customKey} onChange={(event) => setCustomKey(event.target.value)} placeholder="Enter a new key if the endpoint requires one" />
-              <div className="credential-actions"><Button variant="quiet" onClick={() => void clearSecret("clear_custom_api_key", "custom API key")} disabled={!ai.custom_api_key_set || busy}><Trash2 size={14} /> Clear saved key</Button></div>
-            </>
-          ) : null}
-        </div>
-        <div className="settings-save-row"><div><Button variant="primary" onClick={() => void save()} disabled={busy}><Save size={15} /> Save AI settings</Button><Button onClick={() => void test()} disabled={busy || ai.provider === "hooks"}><Activity size={15} /> Test connection</Button></div><span>{message}</span></div>
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Generated clip metadata</h3><p>Titles and descriptions are generated using the selected text-capable provider. Hook-word mode uses transcript fallback copy.</p></div><FileText size={19} /></div>
-        <div className="settings-readonly-row"><div><strong>TXT post metadata</strong><small>Always enabled. Each clip receives a title and description sidecar for review and publishing.</small></div><StatusPill tone="good">Always on</StatusPill></div>
-        <p className="field-help">When a hosted provider is selected, transcript text is sent to that provider for analysis and metadata generation. The API key itself remains stored by the local backend and is never returned to this page.</p>
-      </section>
-    </>
-  );
-}
-
-function SpeechSettings({ workspace }: { workspace: Workspace }) {
-  const settings = workspace.settings || {};
-  const models = ["distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base"];
-  const update = workspace.updateSettings;
-  const custom = asString(settings.transcriber_provider) === "custom-command";
-
-  return (
-    <>
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Transcription engine</h3><p>Speech recognition is separate from AI highlight scoring. It creates the timestamped word transcript used by the editor.</p></div><Activity size={19} /></div>
-        <label className="field-label">Transcriber</label>
-        <select className="field-select" value={asString(settings.transcriber_provider, "faster-whisper")} onChange={(event) => update({ transcriber_provider: event.target.value })}>
-          <option value="faster-whisper">Faster-Whisper · local</option>
-          <option value="custom-command">Custom command / CLI</option>
-        </select>
-        {!custom ? (
-          <>
-            <label className="field-label">Speech model</label>
-            <select className="field-select" value={asString(settings.model, "distil-large-v3")} onChange={(event) => update({ model: event.target.value })}>
-              {models.map((model) => <option key={model} value={model}>{model}{model === "distil-large-v3" ? " · fast, English" : model === "large-v3-turbo" ? " · fast, multilingual" : model === "large-v3" ? " · highest accuracy" : ""}</option>)}
-            </select>
-            <div className="model-info-grid">
-              <div><strong>distil-large-v3</strong><span>Fast English transcription</span></div>
-              <div><strong>large-v3-turbo</strong><span>Fast multilingual transcription</span></div>
-              <div><strong>large-v3</strong><span>Higher accuracy, heavier compute</span></div>
-            </div>
-          </>
-        ) : (
-          <>
-            <label className="field-label">Custom transcriber command<input className="field-input" value={asString(settings.transcriber_command)} onChange={(event) => update({ transcriber_command: event.target.value })} placeholder={'whisper-cli -f "{input}" -oj -of "{output}"'} /></label>
-            <label className="field-label">Language placeholder<input className="field-input" value={asString(settings.transcriber_language, "auto")} onChange={(event) => update({ transcriber_language: event.target.value })} maxLength={20} placeholder="auto" /></label>
-            <div className="help-note"><strong>Command placeholders</strong><p><code>{"{input}"}</code> is the source audio/video file, <code>{"{output}"}</code> is the JSON destination, and <code>{"{language}"}</code> is the selected language. Return timestamped word data in JSON or stdout. Do not paste credentials into this command field; use environment variables or your own secure local configuration.</p></div>
-          </>
-        )}
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Runtime behavior</h3><p>StreamSnip chooses supported hardware automatically.</p></div><Cpu size={19} /></div>
-        <div className="settings-readonly-row"><div><strong>Compute device</strong><small>CUDA when a supported NVIDIA GPU is detected; NVENC when FFmpeg supports it.</small></div><StatusPill tone="good">Automatic</StatusPill></div>
-        <div className="settings-readonly-row"><div><strong>Source handling</strong><small>Live capture and VOD processing remain managed by the existing Python engine.</small></div><StatusPill>Engine managed</StatusPill></div>
-        <p className="field-help">The local engine reports transcription and rendering progress in Live Studio and Activity. Provider credentials for custom transcription remain under your own executable's control.</p>
-      </section>
-    </>
-  );
-}
-
-function CaptionSettings({ workspace }: { workspace: Workspace }) {
-  const settings = workspace.settings || {};
-  const update = workspace.updateSettings;
-  const colorChoices = [
-    ["Yellow", "#FFE600"], ["Green", "#00D084"], ["Cyan", "#00D5F2"], ["Orange", "#FF8A35"], ["Pink", "#FF40D4"],
-  ];
-  const custom = asBool(settings.subtitle_custom);
-
-  return (
-    <>
-      <section className="settings-section-card caption-studio-card">
-        <div className="settings-section-heading"><div><h3>Caption preview</h3><p>Preview changes as you adjust the base style and custom subtitle settings.</p></div><FileText size={19} /></div>
-        <div className="caption-preview-layout">
-          <div className="caption-phone" style={{ aspectRatio: ({ "9:16": "9 / 16", "16:9": "16 / 9", "1:1": "1 / 1", "4:5": "4 / 5" } as Record<string, string>)[asString(settings.output_format, "9:16")] || "9 / 16" }}>
-            <div className={"caption-phone-visual " + (asString(settings.layout).startsWith("Facecam") ? "facecam" : "")}>
-              {asString(settings.layout).startsWith("Facecam") ? <><span>FACECAM</span><span>GAMEPLAY</span></> : <Video size={23} />}
-            </div>
-            <div className="caption-preview-text" style={{
-              color: custom ? asString(settings.subtitle_text_color, "#FFFFFF") : "#FFFFFF",
-              fontFamily: custom ? "Arial Black, sans-serif" : asString(settings.font, "Impact"),
-              fontSize: (asNumber(custom ? settings.subtitle_font_size : settings.caption_size, 100) / 100 * 15) + "px",
-              bottom: custom && asString(settings.subtitle_position) === "Top" ? "auto" : custom && asString(settings.subtitle_position) === "Center" ? "50%" : "12%",
-              top: custom && asString(settings.subtitle_position) === "Top" ? "12%" : "auto",
-            }}>
-              <span>THAT WAS</span> <b style={{ color: colorChoices.find((item) => item[0] === asString(settings.color, "Yellow"))?.[1] || "#FFE600" }}>INSANE</b>
-            </div>
-          </div>
-          <div className="caption-preview-info"><strong>Live style preview</strong><p>This is a visual guide only. Actual word timing and subtitle rendering are handled by the existing FFmpeg subtitle pipeline.</p><div className="caption-preview-tags"><span>{asString(settings.font, "Impact")}</span><span>{asString(settings.position, "Lower third")}</span><span>{asNumber(settings.words_per_line, 3)} words / line</span></div></div>
-        </div>
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Base caption style</h3><p>Controls the animated word highlight used by the existing caption renderer.</p></div><SlidersHorizontal size={19} /></div>
-        <label className="field-label">Highlight color</label>
-        <div className="caption-color-options">
-          {colorChoices.map(([name, color]) => <button key={name} className={asString(settings.color, "Yellow") === name ? "active" : ""} onClick={() => update({ color: name })} title={name}><i style={{ background: color }} /><span>{name}</span>{asString(settings.color, "Yellow") === name ? <Check size={13} /> : null}</button>)}
-        </div>
-        <label className="field-label">Caption position</label>
-        <div className="segmented-options">
-          {["Low", "Lower third", "Middle"].map((position) => <button key={position} className={asString(settings.position, "Lower third") === position ? "active" : ""} onClick={() => update({ position })}>{position}</button>)}
-        </div>
-        <ValueSlider label="Words per line" value={asNumber(settings.words_per_line, 3)} min={1} max={4} suffix="" onChange={(value) => update({ words_per_line: Math.round(value) })} />
-        <ValueSlider label="Caption size" value={asNumber(settings.caption_size, 100)} min={60} max={150} suffix="%" onChange={(value) => update({ caption_size: Math.round(value) })} />
-        <label className="field-label">Font family<input className="field-input" list="streamsnip-font-list" value={asString(settings.font, "Impact")} onChange={(event) => update({ font: event.target.value })} /></label>
-        <datalist id="streamsnip-font-list"><option value="Impact" /><option value="Arial Black" /><option value="Segoe UI Black" /><option value="Bahnschrift" /><option value="Franklin Gothic Heavy" /><option value="Verdana" /></datalist>
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Advanced subtitle styling</h3><p>Enable this only when you want to override server-default subtitle styling.</p></div><label className="switch-control"><input type="checkbox" checked={custom} onChange={(event) => update({ subtitle_custom: event.target.checked })} /><span /></label></div>
-        {custom ? (
-          <>
-            <div className="two-fields">
-              <label className="field-label">Subtitle mode<select className="field-select" value={asString(settings.subtitle_mode, "Karaoke")} onChange={(event) => update({ subtitle_mode: event.target.value })}><option>Karaoke</option><option>Classic</option></select></label>
-              <label className="field-label">Style preset<select className="field-select" value={asString(settings.subtitle_style, "Classic")} onChange={(event) => update({ subtitle_style: event.target.value })}>{["Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"].map((value) => <option key={value}>{value}</option>)}</select></label>
-              <label className="field-label">Text color<input className="color-input" type="color" value={asString(settings.subtitle_text_color, "#FFFFFF")} onChange={(event) => update({ subtitle_text_color: event.target.value.toUpperCase() })} /></label>
-              <label className="field-label">Stroke color<input className="color-input" type="color" value={asString(settings.subtitle_stroke_color, "#000000")} onChange={(event) => update({ subtitle_stroke_color: event.target.value.toUpperCase() })} /></label>
-              <label className="field-label">Subtitle position<select className="field-select" value={asString(settings.subtitle_position, "Bottom")} onChange={(event) => update({ subtitle_position: event.target.value })}><option>Top</option><option>Center</option><option>Bottom</option></select></label>
-              <label className="field-label">Text alignment<select className="field-select" value={asString(settings.subtitle_alignment, "Center")} onChange={(event) => update({ subtitle_alignment: event.target.value })}><option>Left</option><option>Center</option></select></label>
-            </div>
-            <ValueSlider label="Subtitle font size" value={asNumber(settings.subtitle_font_size, 100)} min={60} max={180} suffix="%" onChange={(value) => update({ subtitle_font_size: Math.round(value) })} />
-            <ValueSlider label="Vertical nudge" value={asNumber(settings.subtitle_nudge, 0)} min={-400} max={400} suffix=" px" onChange={(value) => update({ subtitle_nudge: Math.round(value) })} />
-          </>
-        ) : <p className="field-help">Advanced subtitle fields are currently off. Turn them on to customize mode, style, size, color, stroke, vertical placement, and alignment.</p>}
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Profanity censor</h3><p>Filter rendered audio, captions, and generated post text.</p></div><label className="switch-control"><input type="checkbox" checked={settings.profanity_filter_enabled !== false} onChange={(event) => update({ profanity_filter_enabled: event.target.checked })} /><span /></label></div>
-        <label className="field-label">Additional words or phrases<textarea className="field-input field-textarea" rows={4} value={asString(settings.profanity_filter_words)} onChange={(event) => update({ profanity_filter_words: event.target.value.slice(0, 4000) })} placeholder="One word or phrase per line" /></label>
-        <p className="field-help">Censoring does not remove a clip, lower its score, or block publishing. Existing clips must be rendered again to apply changed censor settings. Speech recognition can miss words, so review each clip before posting.</p>
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Creator credit</h3><p>Choose the tag written into the clip metadata and whether the credit appears on the video.</p></div><BadgeCheck size={19} /></div>
-        <label className="field-label">Creator tag<input className="field-input" value={asString(settings.streamer_tag)} onChange={(event) => update({ streamer_tag: event.target.value })} placeholder="Leave blank to detect from the stream URL" maxLength={80} /></label>
-        <label className="switch-row"><span><strong>Show credit on the video</strong><small>Render the creator handle on the clip.</small></span><label className="switch-control"><input type="checkbox" checked={settings.show_tag_video !== false} onChange={(event) => update({ show_tag_video: event.target.checked })} /><span /></label></label>
-      </section>
-    </>
-  );
-}
-
-function PublishingSettings({ workspace }: { workspace: Workspace }) {
-  const status = workspace.publishing.providers?.zernio || workspace.publishing;
-  const autoLoaded = useRef(false);
-  const [apiKey, setApiKey] = useState("");
-  const [selected, setSelected] = useState<Record<string, string>>(status.accounts || {});
-  const [autoPost, setAutoPost] = useState(!!status.auto_post);
-  const [delay, setDelay] = useState(asNumber(status.schedule_minutes, 0));
-  const [visibility, setVisibility] = useState(asString(status.visibility, "public"));
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const groups = useMemo(() => workspace.accounts.reduce<Record<string, PublishingAccount[]>>((all, account) => {
-    const platform = asString(account.platform, "other").toLowerCase();
-    if (!all[platform]) all[platform] = [];
-    all[platform].push(account);
-    return all;
-  }, {}), [workspace.accounts]);
-
-  const fetchAccounts = workspace.fetchAccounts;
-  useEffect(() => {
-    if (status.configured && !autoLoaded.current) {
-      autoLoaded.current = true;
-      void fetchAccounts().catch(() => undefined);
-    }
-  }, [status.configured, fetchAccounts]);
-
-  const loadAccounts = async () => {
-    setBusy(true);
-    setMessage("Loading connected social accounts…");
-    try {
-      const result = await workspace.fetchAccounts();
-      setMessage(result.length ? result.length + " connected account(s) loaded. Select one account per platform." : "No connected social accounts were returned.");
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not load publishing accounts.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const save = async () => {
-    setBusy(true);
-    setMessage("");
-    try {
-      await workspace.savePublishing({
-        api_key: apiKey.trim(),
-        account_ids: selected,
-        auto_post: autoPost,
-        schedule_minutes: delay,
-        visibility,
-      });
-      setApiKey("");
-      setMessage("Publishing settings saved locally.");
-      await loadAccounts();
-      await workspace.refreshPublishing();
-    } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not save publishing settings.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const platformNames: Record<string, string> = {
-    twitter: "X / Twitter", instagram: "Instagram", facebook: "Facebook", linkedin: "LinkedIn",
-    tiktok: "TikTok", youtube: "YouTube", pinterest: "Pinterest", reddit: "Reddit",
-    bluesky: "Bluesky", threads: "Threads", googlebusiness: "Google Business",
-  };
-
-  return (
-    <>
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Zernio connection</h3><p>Publishing uses the connected Zernio service. Your API key is saved by the local engine and is never displayed again.</p></div><Upload size={19} /></div>
-        <div className="settings-readonly-row"><div><strong>Connection status</strong><small>{status.available === false ? "Publishing adapter is unavailable." : "Zernio integration status from the local backend."}</small></div><StatusPill tone={status.configured ? "good" : status.available === false ? "bad" : "warning"}>{status.configured ? "API key saved" : status.available === false ? "Unavailable" : "Not configured"}</StatusPill></div>
-        <label className="field-label">Zernio API key</label>
-        <input className="field-input" aria-label="Zernio API key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={status.configured ? "Enter a new key to replace the saved key" : "Paste your Zernio API key"} />
-        <p className="field-help">Leave this blank to keep the already-saved key. The frontend receives only a configured/not-configured flag, never the stored secret.</p>
-        <div className="settings-save-row">
-          <div><Button variant="primary" onClick={() => void save()} disabled={busy || (!status.configured && !apiKey.trim())}><Save size={15} /> Save publishing settings</Button><Button onClick={() => void loadAccounts()} disabled={busy || !status.configured}><RefreshCw size={14} /> Identify accounts</Button></div>
-          <span>{message}</span>
-        </div>
-      </section>
-
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Connected accounts</h3><p>Select the account StreamSnip should use for each supported platform.</p></div><BadgeCheck size={19} /></div>
-        {Object.keys(groups).length ? (
-          <div className="publishing-account-grid">
-            {Object.entries(groups).map(([platform, items]) => (
-              <div className="publishing-platform" key={platform}>
-                <strong>{platformNames[platform] || platform}</strong>
-                {items.map((account) => (
-                  <label key={account.id} className="publishing-account-option">
-                    <input type="radio" name={"account-" + platform} checked={selected[platform] === account.id} onChange={() => setSelected((current) => ({ ...current, [platform]: account.id }))} />
-                    <span>{account.name || account.username || account.id}</span>
-                  </label>
-                ))}
+        <div className="topbar-tools">
+          <form className="global-search" onSubmit={handleSearch}>
+            <Search size={16} />
+            <input aria-label="Search clips" placeholder="Search clips" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} />
+            <kbd>Enter</kbd>
+          </form>
+          <EnginePill connected={connected} running={running} stopping={workspace.state.stopping} />
+          <div className="theme-control">
+            <button className="theme-trigger" aria-label={"Appearance: " + selectedTheme.name} aria-expanded={themeOpen} onClick={() => setThemeOpen((value) => !value)}><Palette size={16} /><span>{selectedTheme.name}</span><ChevronDown size={13} /></button>
+            {themeOpen ? <div className="theme-popover" role="dialog" aria-label="Workspace appearance">
+              <div className="theme-popover-title"><strong>Appearance</strong><span>Saved on this device</span></div>
+              {themes.map((item) => <ThemeOption key={item.id} item={item} selected={theme === item.id} select={() => { setTheme(item.id); }} />)}
+              <div className="theme-font-picker">
+                <label htmlFor="workspace-font">Font family</label>
+                <select id="workspace-font" value={font} onChange={(event) => setFont(event.target.value as FontId)}>
+                  {fontOptions.map((item) => <option key={item.id} value={item.id}>{item.name}{item.kind === "Monospace" ? " · Monospace" : ""}</option>)}
+                </select>
+                <small>Saved on this device. JetBrains Mono is the default.</small>
+                <span className="theme-font-preview" style={{ fontFamily: (fontOptions.find((item) => item.id === font) || fontOptions[0]).family }}>StreamSnip AI · Creator Studio</span>
               </div>
-            ))}
+            </div> : null}
           </div>
-        ) : <EmptyState icon={Upload} title="No connected accounts loaded" body="Save the Zernio key, then identify accounts to select the channels you want to publish to." />}
-        {Object.keys(selected).length ? <Button onClick={() => setSelected({})} variant="quiet"><X size={14} /> Clear account selection</Button> : null}
-      </section>
+          <button className="icon-button" aria-label="Help" onClick={() => navigate("help")}><CircleHelp size={17} /></button>
+          <button className="topbar-quit" onClick={() => { if (window.confirm("Quit StreamSnip AI? Active capture and creator monitors will be stopped.")) void post("quit", "/api/quit", {}); }}>Quit</button>
+        </div>
+      </header>
 
-      <section className="settings-section-card">
-        <div className="settings-section-heading"><div><h3>Publishing behavior</h3><p>Choose whether clips are uploaded automatically and which YouTube visibility to use.</p></div><Settings size={19} /></div>
-        <label className="switch-row"><span><strong>Auto-post new clips</strong><small>Automatically submit newly rendered clips to the selected accounts.</small></span><label className="switch-control"><input type="checkbox" checked={autoPost} onChange={(event) => setAutoPost(event.target.checked)} /><span /></label></label>
-        {autoPost ? <div className="warning-note"><AlertCircle size={14} /> Auto-post can publish every qualifying clip without a manual review step. Review your selected accounts before enabling it.</div> : null}
-        <label className="field-label">Schedule delay (minutes)<input className="field-input" type="number" min="0" max="10080" value={delay} onChange={(event) => setDelay(clamp(Number(event.target.value), 0, 10080))} /></label>
-        <label className="field-label">YouTube visibility<select className="field-select" value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label>
-        <p className="field-help">The schedule delay and visibility are passed to the existing publishing adapter. Actual account capabilities are determined by Zernio.</p>
-        <div className="settings-save-row"><div><Button variant="primary" onClick={() => void save()} disabled={busy || !status.configured}><Save size={15} /> Save publishing behavior</Button></div><span>{message}</span></div>
-      </section>
-    </>
-  );
+      {workspace.error ? <div className="connection-alert" role="alert"><AlertCircle size={16} /><span>{workspace.error}</span><button onClick={() => void workspace.refresh()}><RefreshCw size={14} />Retry</button></div> : null}
+
+      <main className="page-content">
+        {page === "overview" ? <OverviewPage workspace={workspace} navigate={navigate} openClip={(clip) => { setSelectedClip(clip); navigate("clips"); }} /> : null}
+        {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} /> : null}
+        {page === "creators" ? <CreatorsPage creators={workspace.creators} busy={busy} post={post} /> : null}
+        {page === "clips" || page === "published" ? <ClipLibraryPage key={page + "|" + workspace.clipOffset} workspace={workspace} published={page === "published"} navigate={navigate} query={clipSearch} setQuery={setClipSearch} selectedClip={selectedClip} setSelectedClip={setSelectedClip} openForPublishing={openForPublishing} openBulkPublishing={openBulkPublishing} busy={busy} post={post} /> : null}
+        {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} browserStatus={browserStatus} setBrowserStatus={setBrowserStatus} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
+        {page === "words" ? <HypeWordsPage key={workspace.words.text} workspace={workspace} /> : null}
+        {page === "activity" ? <ActivityPage workspace={workspace} busy={busy} post={post} /> : null}
+        {page === "settings" ? <SettingsPage workspace={workspace} theme={theme} setTheme={setTheme} busy={busy} post={post} navigate={navigate} /> : null}
+        {page === "help" ? <HelpPage navigate={navigate} /> : null}
+        {page === "about" ? <AboutPage /> : null}
+      </main>
+      <footer className="app-footer"><span>StreamSnip AI</span><i>·</i><span>Capture and rendering stay on this PC.</span><span className="footer-spacer" /><span>{workspace.saving ? "Saving settings…" : workspace.saveError || "Local workspace"}</span></footer>
+    </div>
+    {toast ? <Toast toast={toast} close={() => setToast(null)} /> : null}
+  </div>;
 }
 
-function WordsPage({ workspace }: { workspace: Workspace }) {
+function Sidebar({ page, navigate, connected, running, mobileOpen, close }: {
+  page: PageId; navigate: (page: PageId) => void; connected: boolean; running: boolean; mobileOpen: boolean; close: () => void;
+}) {
+  return <aside className={"sidebar" + (mobileOpen ? " sidebar-open" : "")}>
+    <div className="brand-row">
+      <span className="brand-mark"><Clapperboard size={20} /></span>
+      <span className="brand-copy"><strong>StreamSnip AI</strong><small>Creator Studio</small></span>
+      <button className="icon-button sidebar-close" aria-label="Close navigation" onClick={close}><X size={17} /></button>
+    </div>
+    <div className="workspace-card"><span className="workspace-avatar">S</span><span className="workspace-copy"><strong>Local workspace</strong><small>On this device</small></span><ChevronDown size={15} /></div>
+    <nav className="sidebar-nav" aria-label="Main navigation">
+      {navGroups.map((group) => <div className="nav-group" key={group.label}>
+        <span className="nav-group-title">{group.label}</span>
+        {group.items.map((item) => {
+          const Icon = item.icon;
+          return <button key={item.id} className={"nav-item" + (page === item.id ? " active" : "")} aria-current={page === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon size={18} /><span>{item.label}</span></button>;
+        })}
+      </div>)}
+    </nav>
+    <div className="sidebar-bottom">
+      <div className={"sidebar-engine" + (running ? " engine-running" : "")}><i /><span><strong>{!connected ? "Connecting to engine" : running ? "Capture active" : "Engine connected"}</strong><small>{connected ? "Local processing" : "Waiting for local API"}</small></span><ShieldCheck size={15} /></div>
+      <button className={"nav-item" + (page === "help" ? " active" : "")} onClick={() => navigate("help")}><CircleHelp size={18} /><span>Help</span></button>
+      <button className={"nav-item" + (page === "about" ? " active" : "")} onClick={() => navigate("about")}><Info size={18} /><span>About</span></button>
+    </div>
+  </aside>;
+}
+
+function EnginePill({ connected, running, stopping }: { connected: boolean; running: boolean; stopping: boolean }) {
+  const label = !connected ? "Engine unavailable" : stopping ? "Stopping" : running ? "Capture running" : "Engine ready";
+  return <span className={"engine-pill" + (!connected ? " is-offline" : running ? " is-running" : "")}><i />{label}</span>;
+}
+function ThemeOption({ item, selected, select }: { item: typeof themes[number]; selected: boolean; select: () => void }) {
+  return <button className={"theme-option" + (selected ? " selected" : "")} onClick={select}>
+    <span className="theme-swatches">{item.colors.map((color) => <i key={color} style={{ background: color }} />)}</span>
+    <span className="theme-option-copy"><strong>{item.name}</strong><small>{item.description}</small></span>
+    {selected ? <Check size={16} /> : null}
+  </button>;
+}
+function PageHeading({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
+  return <div className="page-heading"><div><h1>{title}</h1>{description ? <p>{description}</p> : null}</div>{actions ? <div className="page-heading-actions">{actions}</div> : null}</div>;
+}
+function Panel({ title, description, action, children, className = "" }: { title: string; description?: string; action?: ReactNode; children: ReactNode; className?: string }) {
+  return <section className={"panel " + className}><div className="panel-heading"><div><h2>{title}</h2>{description ? <p>{description}</p> : null}</div>{action ? <div className="panel-action">{action}</div> : null}</div>{children}</section>;
+}
+function Button({ children, kind = "secondary", onClick, disabled, size = "normal", type = "button" }: {
+  children: ReactNode; kind?: "primary" | "secondary" | "quiet" | "danger"; onClick?: () => void; disabled?: boolean; size?: "normal" | "small"; type?: "button" | "submit";
+}) {
+  return <button type={type} className={"button button-" + kind + (size === "small" ? " button-small" : "")} onClick={onClick} disabled={disabled}>{children}</button>;
+}
+function StatusPill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "success" | "warning" | "danger" | "live" }) {
+  return <span className={"status-pill status-" + tone}><i />{children}</span>;
+}
+function Field({ label, hint, children, className = "" }: { label: string; hint?: string; children: ReactNode; className?: string }) {
+  return <label className={"field " + className}><span className="field-label">{label}</span>{children}{hint ? <small className="field-hint">{hint}</small> : null}</label>;
+}
+function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (value: boolean) => void; label: string; description?: string }) {
+  return <label className="toggle-row"><span><strong>{label}</strong>{description ? <small>{description}</small> : null}</span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i /></label>;
+}
+function Stat({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
+  return <div className="summary-stat"><span>{label}</span><strong>{value}</strong>{detail ? <small>{detail}</small> : null}</div>;
+}
+function EmptyState({ icon: Icon = FileVideo, title, description, action }: { icon?: LucideIcon; title: string; description: string; action?: ReactNode }) {
+  return <div className="empty-state"><span className="empty-icon"><Icon size={22} /></span><strong>{title}</strong><p>{description}</p>{action ? <div>{action}</div> : null}</div>;
+}
+function Toast({ toast, close }: { toast: ToastDetail; close: () => void }) {
+  const Icon = toast.tone === "error" ? AlertCircle : toast.tone === "success" ? CheckCircle2 : Info;
+  return <div className={"toast toast-" + toast.tone} role="status"><Icon size={17} /><div><strong>{toast.title}</strong>{toast.message ? <small>{toast.message}</small> : null}</div><button aria-label="Dismiss notification" onClick={close}><X size={15} /></button></div>;
+}
+
+function OverviewPage({ workspace, navigate, openClip }: { workspace: Workspace; navigate: (page: PageId) => void; openClip: (clip: Clip) => void }) {
+  const state = workspace.state;
+  const recent = state.clips.slice(0, 5);
+  const creators = workspace.creators;
+  const active = creators.filter((creator) => creator.running);
+  return <div className="page-stack">
+    <PageHeading title="Studio overview" description="Monitor sources, review the latest clips, and keep your workflow moving." actions={<Button kind="primary" onClick={() => navigate("live")}><Radio size={16} />Open Live Studio</Button>} />
+    <div className="summary-strip">
+      <Stat label="Ready to review" value={count(state.clip_total)} detail="Unpublished clips" />
+      <Stat label="Published" value={count(state.posted_total)} detail="In your local registry" />
+      <Stat label="Active creators" value={count(active.length)} detail={count(creators.length) + " configured"} />
+      <Stat label="Current session" value={duration(state.session.elapsed)} detail={count(state.session.clips) + " clips · " + count(state.session.chunks) + " chunks"} />
+    </div>
+    <div className="overview-grid">
+      <div className="overview-main">
+        <Panel title="Capture status" description="Your local engine and current source." action={<StatusPill tone={toneFor(state.phase, state.running)}>{phaseLabel(state.phase)}</StatusPill>}>
+          <div className="capture-status">
+            <span className={"capture-symbol" + (state.running ? " capture-symbol-live" : "")}><RadioTower size={23} /></span>
+            <span className="capture-copy"><strong>{state.running ? state.status : "No active capture"}</strong><small>{state.running ? (state.mode === "file" ? "Processing a video file" : "Monitoring a live stream") + " · " + duration(state.session.elapsed) : "Choose a live source or a recorded video to begin."}</small></span>
+            <Button kind="primary" onClick={() => navigate("live")}>{state.running ? "View session" : "Configure capture"}<ArrowRight size={15} /></Button>
+          </div>
+          <WorkflowStrip phase={state.phase} running={state.running} />
+          {state.running ? <div className="progress-line"><div><span>{state.status}</span><b>{Math.max(0, Math.min(100, state.progress))}%</b></div><i><span style={{ width: Math.max(2, Math.min(100, state.progress)) + "%" }} /></i></div> : null}
+        </Panel>
+        <Panel title="Recent clips" description="Latest output from your capture and VOD workflows." action={<Button kind="quiet" size="small" onClick={() => navigate("clips")}>Open library<ArrowUpRight size={14} /></Button>}>
+          {recent.length ? <div className="recent-clip-list">{recent.map((clip) => <ClipCompact key={clip.name} clip={clip} click={() => openClip(clip)} />)}</div> : <EmptyState icon={Clapperboard} title="No clips yet" description="Generated clips appear here after the engine finds and renders a highlight." action={<Button onClick={() => navigate("live")}>Choose a source</Button>} />}
+        </Panel>
+      </div>
+      <aside className="overview-side">
+        <Panel title="Creator monitors" description="Independent live sources." action={<Button kind="quiet" size="small" onClick={() => navigate("creators")}>Manage<ArrowUpRight size={14} /></Button>}>
+          {creators.length ? <div className="monitor-compact-list">{creators.slice(0, 5).map((creator) => <div className="monitor-compact-row" key={creator.id}>
+            <span className="creator-initial">{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span>
+            <span className="creator-compact-copy"><strong>{creator.name}</strong><small>{creator.status || creator.phase || "Saved source"}</small></span>
+            <StatusPill tone={creator.running ? "live" : "neutral"}>{creator.running ? "Live" : "Idle"}</StatusPill>
+          </div>)}</div> : <EmptyState icon={Users} title="No creator sources" description="Add a channel to monitor live streams and recorded VODs." action={<Button onClick={() => navigate("creators")}>Add creator</Button>} />}
+        </Panel>
+        <Panel title="Latest activity" description="Recent local engine events." action={<Button kind="quiet" size="small" onClick={() => navigate("activity")}>Full activity<ArrowUpRight size={14} /></Button>}>
+          {workspace.logs.length ? <div className="mini-log-list">{workspace.logs.slice(-6).reverse().map((log) => <div className="mini-log-row" key={log.id}><time>{log.t}</time><span>{log.m}</span></div>)}</div> : <div className="inline-empty">Engine events appear here when work begins.</div>}
+        </Panel>
+        <div className="storage-note"><ShieldCheck size={16} /><span><strong>Local-first processing</strong><small>Capture and rendering stay on this PC. Hosted AI providers receive transcript text when selected.</small></span></div>
+      </aside>
+    </div>
+  </div>;
+}
+
+function WorkflowStrip({ phase, running }: { phase: string; running: boolean }) {
+  const stages = [
+    { id: "capture", label: "Capture", phases: ["waiting", "recording", "stopping"] },
+    { id: "transcribe", label: "Transcribe", phases: ["transcribing"] },
+    { id: "analyze", label: "Analyze", phases: ["analyzing"] },
+    { id: "render", label: "Render", phases: ["rendering"] },
+    { id: "publish", label: "Publish", phases: ["queued"] },
+  ];
+  const active = stages.find((stage) => stage.phases.includes(phase))?.id;
+  const activeIndex = stages.findIndex((stage) => stage.id === active);
+  return <div className="workflow-strip" aria-label="Capture workflow">
+    {stages.map((stage, index) => <div className={"workflow-stage" + (active === stage.id ? " current" : "") + (activeIndex > index ? " passed" : "")} key={stage.id}>
+      <span>{activeIndex > index ? <Check size={13} /> : index + 1}</span><strong>{stage.label}</strong>
+    </div>)}
+    {!running && !active ? <small>Ready</small> : null}
+  </div>;
+}
+function ClipCompact({ clip, click }: { clip: Clip; click: () => void }) {
+  return <button className="recent-clip-row" onClick={click}>
+    <span className="recent-clip-icon"><FileVideo size={18} /></span>
+    <span className="recent-clip-copy"><strong>{clip.title || clip.name}</strong><small>{clip.creator_name || clip.source || "Generated clip"} · {dateLabel(clip.mtime)}</small></span>
+    <span className="recent-clip-size">{sizeLabel(clip.size_mb)}</span><ArrowUpRight size={14} className="recent-clip-arrow" />
+  </button>;
+}
+
+function LivePage({ workspace, busy, post }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
+  const settings = workspace.settings || {};
+  const [mode, setMode] = useState(String(settings.mode || "live"));
+  const [target, setTarget] = useState(String(settings.target || ""));
+  const [setupTab, setSetupTab] = useState<StudioSetupTab>("capture");
+  const [frame, setFrame] = useState("");
+  const running = workspace.state.running;
+  const update = (patch: Partial<AppSettings>) => workspace.updateSettings(patch);
+  const detectedCreator = mode === "live" ? inferCreatorTag(target) : "";
+  const providerLabel = ({ gemini: "Gemini API", ollama: "Ollama", hooks: "Built-in hooks", huggingface: "Hugging Face", custom: "Custom API" } as Record<string, string>)[workspace.ai.provider] || "AI provider";
+  const browse = async () => {
+    const result = await post<{ path: string }>("browse-source", "/api/browse", {});
+    if (result?.path) {
+      setTarget(result.path);
+      setMode("file");
+      update({ target: result.path, mode: "file" });
+    }
+  };
+  const changeMode = (value: string) => {
+    setMode(value);
+    update({ mode: value });
+  };
+  const changeTarget = (value: string) => {
+    setTarget(value);
+    update({ target: value });
+  };
+  const start = async () => {
+    const source = target.trim();
+    if (!source || running || busy || !workspace.configLoaded) return;
+    if (workspace.ai.provider === "gemini" && !workspace.ai.gemini_key_set) {
+      setSetupTab("ai");
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: {
+        tone: "error",
+        title: "Gemini API key required",
+        message: "Add your Gemini API key and save AI settings before starting capture, or choose another provider.",
+      } }));
+      return;
+    }
+    try {
+      await workspace.saveSettings({ ...(workspace.settings || {}), mode, target: source });
+      await workspace.saveAI();
+    } catch {
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: {
+        tone: "error",
+        title: "Session settings could not be saved",
+        message: workspace.saveError || "Review the settings and try again.",
+      } }));
+      return;
+    }
+    await post("start-capture", "/api/start", { ...(workspace.settings || settings), mode, target: source });
+  };
+  const stop = async () => { await post("stop-capture", "/api/stop", { force: false }); };
+  const preview = async () => {
+    const result = await post<{ image: string }>("preview-source", "/api/frame", { mode, target });
+    if (result?.image) setFrame(result.image);
+  };
+  const tabs: Array<{ id: StudioSetupTab; label: string; icon: LucideIcon }> = [
+    { id: "capture", label: "Capture", icon: Radio },
+    { id: "ai", label: "AI provider", icon: Sparkles },
+    { id: "speech", label: "Transcription", icon: FileText },
+    { id: "captions", label: "Captions", icon: Clapperboard },
+  ];
+  return <div className="page-stack live-studio-page">
+    <PageHeading title="Live Studio" description="Choose your source, tune the clip pipeline, then start when everything is ready." actions={<StatusPill tone={toneFor(workspace.state.phase, running)}>{phaseLabel(workspace.state.phase)}</StatusPill>} />
+    <Panel title="Source" description="Paste a Twitch or YouTube channel link, or choose a local VOD.">
+      <div className="segmented-control">
+        <button className={mode === "live" ? "selected" : ""} onClick={() => changeMode("live")} disabled={running}><Radio size={15} />Live stream</button>
+        <button className={mode === "file" ? "selected" : ""} onClick={() => changeMode("file")} disabled={running}><Video size={15} />Video file / VOD</button>
+      </div>
+      <Field label={mode === "live" ? "Twitch or YouTube URL" : "Video file path"} hint={mode === "live" ? "Channel URLs with a public handle are detected automatically." : "Choose a local video supported by FFmpeg."}>
+        <div className="field-with-action">
+          <input value={target} onChange={(event) => changeTarget(event.target.value)} disabled={running} placeholder={mode === "live" ? "https://www.twitch.tv/channel or youtube.com/@handle" : "Choose a video file"} />
+          <Button onClick={() => void browse()} disabled={running || !!busy}><FolderOpen size={15} />Browse</Button>
+        </div>
+      </Field>
+      <div className="studio-source-meta">
+        <div className="studio-channel-detection">
+          <span>Detected creator</span>
+          <strong>{detectedCreator || "No channel handle detected"}</strong>
+          <small>{detectedCreator ? "Filled from the source URL. This credit is used automatically unless you override it in Captions." : mode === "live" ? "Use a Twitch channel or YouTube @handle URL. YouTube watch links do not contain the channel name; add a manual credit in Captions when needed." : "Creator detection is available for channel URLs, not local video files."}</small>
+        </div>
+        <StatusPill tone={detectedCreator ? "success" : "neutral"}>{detectedCreator ? "Channel identified" : "Manual credit available"}</StatusPill>
+      </div>
+    </Panel>
+
+    <div className="studio-workspace-layout">
+      <section className="studio-setup" aria-label="Session setup">
+        <div className="studio-setup-heading">
+          <div><h2>Session setup</h2><p>All processing options are available here before you start a capture.</p></div>
+          <span className="studio-save-state">{workspace.saving ? "Saving changes..." : workspace.saveError || "Saved on this PC"}</span>
+        </div>
+        <nav className="studio-tabs" role="tablist" aria-label="Session configuration">
+          {tabs.map((tab, index) => {
+            const Icon = tab.icon;
+            return <button key={tab.id} type="button" role="tab" id={"studio-tab-" + tab.id} aria-controls="studio-setup-panel" aria-selected={setupTab === tab.id} tabIndex={setupTab === tab.id ? 0 : -1} className={"studio-tab" + (setupTab === tab.id ? " selected" : "")} onClick={() => setSetupTab(tab.id)} onKeyDown={(event) => {
+              if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+              event.preventDefault();
+              const nextIndex = (index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+              const next = tabs[nextIndex];
+              setSetupTab(next.id);
+              document.getElementById("studio-tab-" + next.id)?.focus();
+            }}>
+              <Icon size={16} /><span>{tab.label}</span>
+              {tab.id === "ai" ? <small>{providerLabel}</small> : null}
+            </button>;
+          })}
+        </nav>
+        <div className="studio-tab-panel" id="studio-setup-panel" role="tabpanel" aria-labelledby={"studio-tab-" + setupTab}>
+          {setupTab === "capture" ? <CaptureSettings workspace={workspace} /> : null}
+          {setupTab === "ai" ? <AISettings workspace={workspace} /> : null}
+          {setupTab === "speech" ? <SpeechSettings workspace={workspace} /> : null}
+          {setupTab === "captions" ? <CaptionSettings workspace={workspace} mode={mode} target={target} /> : null}
+        </div>
+      </section>
+
+      <aside className="studio-session-column">
+        <Panel title="Session status" description="Live progress reported by the local engine.">
+          <div className="session-state">
+            <span className={"session-state-icon" + (running ? " is-active" : "")}><RadioTower size={22} /></span>
+            <span><strong>{running ? workspace.state.status : "No active session"}</strong><small>{running ? (workspace.state.mode === "file" ? "Processing a video file" : "Monitoring a live stream") + " · " + duration(workspace.state.session.elapsed) : "Progress appears here after capture starts."}</small></span>
+            <StatusPill tone={toneFor(workspace.state.phase, running)}>{phaseLabel(workspace.state.phase)}</StatusPill>
+          </div>
+          {running ? <><WorkflowStrip phase={workspace.state.phase} running={running} /><div className="progress-line"><div><span>{workspace.state.status}</span><b>{Math.max(0, Math.min(100, workspace.state.progress))}%</b></div><i><span style={{ width: Math.max(2, Math.min(100, workspace.state.progress)) + "%" }} /></i></div></> : null}
+          <div className="session-facts"><div><span>Clips created</span><strong>{count(workspace.state.session.clips)}</strong></div><div><span>Segments processed</span><strong>{count(workspace.state.session.chunks)}</strong></div><div><span>Elapsed</span><strong>{duration(workspace.state.session.elapsed)}</strong></div></div>
+        </Panel>
+        <Panel title="Processing tools" description="The local components used for each session.">
+          <ToolRow icon={Cpu} title="NVIDIA GPU" detail="CUDA is selected automatically when available." />
+          <ToolRow icon={HardDrive} title="FFmpeg" detail="Video cutting, encoding, and caption rendering." />
+          <ToolRow icon={Radio} title="Streamlink" detail="Live Twitch and YouTube capture." />
+        </Panel>
+        <div className="storage-note"><ShieldCheck size={16} /><span><strong>Capture is user-controlled</strong><small>Opening Live Studio never starts a recording. Your settings are saved before capture begins.</small></span></div>
+      </aside>
+    </div>
+
+    <div className="studio-runbar" role="region" aria-label="Capture actions">
+      <div className="studio-runbar-copy">
+        <span className={"studio-runbar-indicator" + (running ? " running" : "")} />
+        <span><strong>{running ? "Capture is running" : "Ready when you are"}</strong><small>{running ? (workspace.state.mode === "file" ? "Processing the selected video" : "Monitoring " + (detectedCreator || "the selected stream")) : (detectedCreator || (target.trim() ? "Source added" : "Choose a source")) + " · " + providerLabel + " · " + (workspace.saving ? "Saving settings" : "Settings ready")}</small></span>
+      </div>
+      <div className="studio-runbar-actions">
+        <span className="studio-runbar-save">{workspace.saving ? "Saving..." : workspace.saveError || ""}</span>
+        <Button onClick={() => void preview()} disabled={!target.trim() || !!busy}><Eye size={15} />Preview source</Button>
+        {!running ? <Button kind="primary" onClick={() => void start()} disabled={!target.trim() || !!busy || workspace.saving || !workspace.configLoaded}><Play size={15} fill="currentColor" />Start capture</Button> : <Button kind="danger" onClick={() => void stop()} disabled={!!busy}><Square size={14} fill="currentColor" />Stop capture</Button>}
+      </div>
+    </div>
+    {frame ? <Panel title="Source preview" action={<Button kind="quiet" size="small" onClick={() => setFrame("")}>Close</Button>}><img className="source-frame" src={frame} alt="Preview frame from the selected source" /></Panel> : null}
+  </div>;
+}
+
+function ToolRow({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
+  return <div className="tool-row"><Icon size={17} /><span><strong>{title}</strong><small>{detail}</small></span></div>;
+}
+
+function CreatorsPage({ creators, busy, post }: { creators: Creator[]; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
+  const [formOpen, setFormOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [nameEdited, setNameEdited] = useState(false);
+  const [target, setTarget] = useState("");
+  const [folderOpen, setFolderOpen] = useState("");
+  const [removing, setRemoving] = useState<Creator | null>(null);
+  const folders = [["live_clips", "Live clips"], ["live_recordings", "Live recordings"], ["vod_inbox", "Recorded VOD inbox"], ["vod_clips", "VOD clips"], ["vod_processed", "Processed VODs"], ["vod_failed", "Failed VODs"]];
+  const add = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const result = await post<{ creator?: Creator }>("add-creator", "/api/creators/add", { name, target });
+    if (result) { setName(""); setNameEdited(false); setTarget(""); setFormOpen(false); }
+  };
+  return <div className="page-stack">
+    <PageHeading title="Creators" description="Monitor live channels and process recorded VODs in separate folders." actions={<Button kind="primary" onClick={() => setFormOpen((value) => !value)}><Plus size={16} />Add creator</Button>} />
+    {formOpen ? <Panel title="Add a creator" description="Paste a Twitch or YouTube channel or stream URL."><form className="add-creator-form" onSubmit={(event) => void add(event)}>
+      <Field label="Creator name" hint={nameEdited ? "Name entered manually." : "Filled from supported Twitch and YouTube channel links; you can edit it."}><input value={name} onChange={(event) => { setName(event.target.value); setNameEdited(true); }} maxLength={80} required placeholder="Auto-detected from channel URL" /></Field>
+      <Field label="Twitch or YouTube URL"><input value={target} onChange={(event) => { const value = event.target.value; setTarget(value); if (!nameEdited) setName(inferCreatorTag(value).replace(/^@/, "")); }} required placeholder="https://www.twitch.tv/channel" /></Field>
+      <div className="form-actions"><Button kind="primary" type="submit" disabled={!name.trim() || !target.trim() || !!busy}><Plus size={15} />Save creator</Button><Button onClick={() => { setFormOpen(false); setName(""); setNameEdited(false); setTarget(""); }}>Cancel</Button></div>
+    </form></Panel> : null}
+    <div className="creator-toolbar"><span>{count(creators.length)} configured creator{creators.length === 1 ? "" : "s"}</span><span>{count(creators.filter((creator) => creator.running).length)} live monitors active</span></div>
+    {creators.length ? <div className="creator-table">
+      <div className="creator-table-head"><span>Creator</span><span>Live monitor</span><span>VOD inbox</span><span>Library</span><span>Actions</span></div>
+      {creators.map((creator) => <div className="creator-table-row" key={creator.id}>
+        <div className="creator-identity"><span className={"creator-avatar" + (creator.running ? " active" : "")}>{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span><span><strong>{creator.name}</strong><small title={creator.target}>{creator.target}</small></span></div>
+        <div className="creator-status-cell"><StatusPill tone={creator.running ? "live" : creator.phase === "stopping" ? "warning" : "neutral"}>{creator.running ? "Monitoring" : phaseLabel(creator.phase || "idle")}</StatusPill><small>{creator.status || "Saved source"}</small></div>
+        <div className="creator-status-cell"><StatusPill tone={creator.watching_vods ? "success" : "neutral"}>{creator.watching_vods ? "Watching" : "Paused"}</StatusPill><small>{creator.vod_status || count(creator.vod_pending) + " files waiting"}</small></div>
+        <div className="creator-counts"><span>{count(creator.live_clips)} live</span><span>{count(creator.vod_clips)} VOD</span></div>
+        <div className="creator-actions">
+          {creator.running ? <Button size="small" kind="danger" onClick={() => void post("stop-" + creator.id, "/api/creators/stop", { id: creator.id })} disabled={!!busy}><Square size={13} />Stop</Button> : <Button size="small" kind="primary" onClick={() => void post("start-" + creator.id, "/api/creators/start", { id: creator.id })} disabled={!!busy}><Play size={13} />Monitor</Button>}
+          {creator.watching_vods ? <Button size="small" onClick={() => void post("stop-vod-" + creator.id, "/api/creators/stop-vod-watch", { id: creator.id })} disabled={!!busy}><Pause size={13} />Stop VOD</Button> : <Button size="small" onClick={() => void post("watch-vod-" + creator.id, "/api/creators/watch-vods", { id: creator.id })} disabled={!!busy}><FolderOpen size={13} />Watch VODs</Button>}
+          <div className="folder-menu"><button className="icon-button" aria-label={"Open " + creator.name + " folders"} aria-expanded={folderOpen === creator.id} onClick={() => setFolderOpen(folderOpen === creator.id ? "" : creator.id)}><MoreHorizontal size={17} /></button>
+            {folderOpen === creator.id ? <div className="folder-popover">{folders.map(([folder, label]) => <button key={folder} onClick={() => { void post("folder-" + creator.id, "/api/creators/open", { id: creator.id, folder }); setFolderOpen(""); }}><FolderOpen size={14} />{label}</button>)}<button className="folder-danger" onClick={() => { setRemoving(creator); setFolderOpen(""); }}><Trash2 size={14} />Remove creator</button></div> : null}
+          </div>
+        </div>
+      </div>)}
+    </div> : <EmptyState icon={Users} title="No creator monitors yet" description="Add a Twitch or YouTube source. Live clips and recorded-VOD clips will be kept in separate folders." action={<Button kind="primary" onClick={() => setFormOpen(true)}><Plus size={15} />Add creator</Button>} />}
+    {removing ? <div className="inline-confirm"><span>Remove {removing.name}? Existing recordings and clips will be kept.</span><Button size="small" kind="danger" onClick={() => { void post("remove-" + removing.id, "/api/creators/remove", { id: removing.id }).then(() => setRemoving(null)); }}>Remove creator</Button><Button size="small" onClick={() => setRemoving(null)}>Cancel</Button></div> : null}
+  </div>;
+}
+
+function ClipLibraryPage({ workspace, published, navigate, query, setQuery, selectedClip, setSelectedClip, openForPublishing, openBulkPublishing, busy, post }: {
+  workspace: Workspace; published: boolean; navigate: (page: PageId) => void; query: string; setQuery: (value: string) => void; selectedClip: Clip | null;
+  setSelectedClip: (clip: Clip | null) => void; openForPublishing: (clip: Clip) => void; openBulkPublishing: (names: string[]) => void;
+  busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>;
+}) {
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [metadataDraft, setMetadataDraft] = useState<{ name: string; title: string; description: string } | null>(null);
+  const title = metadataDraft && metadataDraft.name === selectedClip?.name ? metadataDraft.title : selectedClip?.title || "";
+  const description = metadataDraft && metadataDraft.name === selectedClip?.name ? metadataDraft.description : selectedClip?.description || "";
+  const setTitle = (value: string) => {
+    if (!selectedClip) return;
+    setMetadataDraft((current) => ({
+      name: selectedClip.name,
+      title: value,
+      description: current?.name === selectedClip.name ? current.description : selectedClip.description || "",
+    }));
+  };
+  const setDescription = (value: string) => {
+    if (!selectedClip) return;
+    setMetadataDraft((current) => ({
+      name: selectedClip.name,
+      title: current?.name === selectedClip.name ? current.title : selectedClip.title || "",
+      description: value,
+    }));
+  };
+  const [platform, setPlatform] = useState("youtube");
+  const [confirm, setConfirm] = useState<"selected" | "all" | null>(null);
+  const clips = workspace.state.clips;
+  const filtered = useMemo(() => clips.filter((clip) => (clip.title || "").concat(" ", clip.name, " ", clip.creator_name || "", " ", clip.source || "").toLowerCase().includes(query.toLowerCase())), [clips, query]);
+  const total = published ? workspace.state.posted_total : workspace.state.clip_total;
+  const pageSize = 60;
+  const currentPage = Math.floor(workspace.clipOffset / pageSize) + 1;
+  const maxPages = Math.max(1, Math.ceil(total / pageSize));
+  const toggleAll = () => setSelectedNames(selectedNames.length === filtered.length ? [] : filtered.map((clip) => clip.name));
+  const toggleOne = (name: string) => setSelectedNames((items) => items.includes(name) ? items.filter((item) => item !== name) : items.concat(name));
+  const deleteNow = async () => {
+    if (confirm === "all") await post("delete-all", "/api/delete_all", { clip_tab: published ? "posted" : "clips" });
+    else if (selectedClip && selectedNames.length === 0) await post("delete-one", "/api/delete", { name: selectedClip.name });
+    else if (selectedNames.length) await post("delete-many", "/api/delete_many", { names: selectedNames });
+    setConfirm(null); setSelectedNames([]); setSelectedClip(null);
+  };
+  const saveMetadata = async () => {
+    if (!selectedClip || !title.trim()) return;
+    const result = await post<{ ok: boolean }>("save-clip-metadata", "/api/clip-metadata", { name: selectedClip.name, title, description });
+    if (result) {
+      setSelectedClip({ ...selectedClip, title, description });
+      setMetadataDraft(null);
+    }
+  };
+  return <div className="page-stack">
+    <PageHeading title={published ? "Published" : "Clip library"} description={published ? "Clips recorded in your local posted registry." : "Review generated clips, edit post metadata, and prepare a publishing handoff."} actions={<Button onClick={() => void post("open-clips-folder", "/api/open_folder", {})}><FolderOpen size={15} />Open folder</Button>} />
+    <div className="library-toolbar">
+      <div className="library-tabs">
+        <button className={!published ? "selected" : ""} onClick={() => { navigate("clips"); setSelectedClip(null); }}><Video size={15} />Ready to review <b>{count(workspace.state.clip_total)}</b></button>
+        <button className={published ? "selected" : ""} onClick={() => { navigate("published"); setSelectedClip(null); }}><BadgeCheck size={15} />Published <b>{count(workspace.state.posted_total)}</b></button>
+      </div>
+      <label className="library-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter this page by title or creator" /></label>
+    </div>
+    {selectedNames.length ? <div className="selection-bar"><strong>{count(selectedNames.length)} selected</strong><Button size="small" onClick={() => openBulkPublishing(selectedNames)} disabled={published}><Send size={14} />Publish selected</Button><Button size="small" kind="danger" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete</Button><Button size="small" kind="quiet" onClick={() => setSelectedNames([])}>Clear</Button></div> : null}
+    <div className={"clip-library-layout" + (selectedClip ? " has-inspector" : "")}>
+      <section className="clip-list-panel">
+        <div className="clip-list-head"><label><input type="checkbox" checked={filtered.length > 0 && selectedNames.length === filtered.length} onChange={toggleAll} /><span>{filtered.length ? "Select this page" : "Clips"}</span></label><span>{count(total)} total</span><button className="text-button danger-text" onClick={() => setConfirm("all")} disabled={!total}>Delete all</button></div>
+        {filtered.length ? <div className="clip-list">{filtered.map((clip) => <div className={"clip-row" + (selectedClip?.name === clip.name ? " selected" : "")} key={clip.name}>
+          <input className="clip-checkbox" type="checkbox" aria-label={"Select " + (clip.title || clip.name)} checked={selectedNames.includes(clip.name)} onChange={() => toggleOne(clip.name)} />
+          <button className="clip-thumb" onClick={() => setSelectedClip(clip)} aria-label={"Preview " + (clip.title || clip.name)}>
+            <video src={clipUrl(clip.name)} muted playsInline preload="metadata" onLoadedMetadata={(event) => { try { event.currentTarget.currentTime = 0.35; } catch { /* This file may not seek on metadata load. */ } }} />
+            <span className="thumb-play"><Play size={15} fill="currentColor" /></span>
+          </button>
+          <button className="clip-main-copy" onClick={() => setSelectedClip(clip)}><strong>{clip.title || clip.name}</strong><span>{clip.creator_name || clip.source || "Generated clip"}</span><small>{dateLabel(clip.mtime)} · {sizeLabel(clip.size_mb)}</small></button>
+          <button className="icon-button clip-row-open" aria-label={"Open " + clip.name} onClick={() => setSelectedClip(clip)}><ArrowUpRight size={16} /></button>
+        </div>)}</div> : <EmptyState icon={published ? BadgeCheck : Clapperboard} title={query ? "No matching clips" : published ? "Nothing published yet" : "Your clip library is empty"} description={query ? "Try another title, file name, or creator." : "Clips appear here after a source has been processed and a highlight rendered."} action={query ? <Button onClick={() => setQuery("")}>Clear search</Button> : undefined} />}
+        <div className="pagination-row"><span>Page {currentPage} of {maxPages}</span><div><Button size="small" disabled={workspace.clipOffset <= 0} onClick={() => workspace.setClipOffset(Math.max(0, workspace.clipOffset - pageSize))}><ChevronLeft size={15} />Previous</Button><Button size="small" disabled={workspace.clipOffset + pageSize >= total} onClick={() => workspace.setClipOffset(workspace.clipOffset + pageSize)}>Next<ChevronRight size={15} /></Button></div></div>
+      </section>
+      {selectedClip ? <aside className="clip-inspector">
+        <div className="inspector-head"><strong>Clip details</strong><button className="icon-button" aria-label="Close clip details" onClick={() => setSelectedClip(null)}><X size={16} /></button></div>
+        <video className="inspector-video" controls playsInline preload="metadata" src={clipUrl(selectedClip.name)} />
+        <div className="inspector-file"><strong>{selectedClip.name}</strong><span>{sizeLabel(selectedClip.size_mb)}</span></div>
+        <Field label="Post title"><input maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Add a title" /></Field>
+        <Field label="Post description"><textarea rows={5} maxLength={2200} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Write a description" /></Field>
+        <div className="inspector-actions"><Button kind="primary" onClick={() => void saveMetadata()} disabled={!title.trim() || !!busy}><Check size={15} />Save details</Button><Button onClick={() => openForPublishing(selectedClip)} disabled={published}><Send size={15} />Publish</Button></div>
+        <div className="inspector-subactions"><a href={clipUrl(selectedClip.name)} download><Download size={14} />Download clip</a><button onClick={() => void post("reveal-clip", "/api/reveal", { name: selectedClip.name })}><FolderOpen size={14} />Show in folder</button></div>
+        {!published ? <div className="mark-posted"><label>Record an external post<select value={platform} onChange={(event) => setPlatform(event.target.value)}><option value="youtube">YouTube</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="manual">Other / manual</option></select></label><Button size="small" onClick={() => void post("mark-posted", "/api/posted/mark", { name: selectedClip.name, platform, accounts: [platform] })}><BadgeCheck size={14} />Mark as published</Button></div> : <StatusPill tone="success">Recorded as published · {dateLabel(selectedClip.posted_at)}</StatusPill>}
+        <Button kind="danger" size="small" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete clip</Button>
+      </aside> : null}
+    </div>
+    {confirm ? <div className="inline-confirm"><span>{confirm === "all" ? "Permanently delete all " + count(total) + " clips in this tab?" : "Permanently delete the selected clip(s) and their caption files?"}</span><Button kind="danger" size="small" onClick={() => void deleteNow()}>Confirm delete</Button><Button size="small" onClick={() => setConfirm(null)}>Cancel</Button></div> : null}
+  </div>;
+}
+
+function PublishingPage({ workspace, clip, bulkNames, browserStatus, setBrowserStatus, busy, post, openLibrary }: {
+  workspace: Workspace; clip: Clip | null; bulkNames: string[]; browserStatus: RecordLike; setBrowserStatus: (value: RecordLike) => void;
+  busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; openLibrary: () => void;
+}) {
+  const pub = workspace.publishing.providers?.zernio || workspace.publishing;
+  const [apiKey, setApiKey] = useState("");
+  const [autoPost, setAutoPost] = useState(Boolean(pub.auto_post));
+  const [schedule, setSchedule] = useState(num(pub.schedule_minutes, 0));
+  const [visibility, setVisibility] = useState(String(pub.visibility || "public"));
+  const [accountsByPlatform, setAccountsByPlatform] = useState<Record<string, string>>(pub.accounts || {});
+  const [platform, setPlatform] = useState("youtube");
+  const [title, setTitle] = useState(clip?.title || "");
+  const [description, setDescription] = useState(clip?.description || "");
+  const [manualMessage, setManualMessage] = useState("");
+  const selectedCount = Object.keys(accountsByPlatform).length;
+  const toggleAccount = (account: { id: string; platform: string }) => setAccountsByPlatform((current) => {
+    const next = { ...current };
+    if (next[account.platform] === account.id) delete next[account.platform];
+    else next[account.platform] = account.id;
+    return next;
+  });
+  const loadAccounts = async () => { try { await workspace.fetchAccounts(); } catch { /* The API layer reports failures. */ } };
+  const saveSettings = async () => {
+    try {
+      await workspace.savePublishing({ api_key: apiKey, account_ids: accountsByPlatform, auto_post: autoPost, schedule_minutes: schedule, visibility });
+      setApiKey("");
+    } catch { /* The API layer reports failures. */ }
+  };
+  const publish = async () => {
+    if (!selectedCount) return;
+    if (bulkNames.length) await post("publish-batch", "/api/publishing/publish", { names: bulkNames, account_ids: accountsByPlatform });
+    else if (clip) await post("publish-one", "/api/publishing/publish-one", { name: clip.name, title, description, account_ids: accountsByPlatform });
+  };
+  const manualUpload = async () => {
+    if (!clip) return;
+    const result = await post<RecordLike>("manual-upload", "/api/browser/prepare", { name: clip.name, platform, title, description, browser: "default" });
+    if (result) {
+      setManualMessage("Opened " + platform + " in your system default browser. Select the video and complete the final publish step there.");
+      try { setBrowserStatus(await apiGet<RecordLike>("/api/browser/status")); } catch { /* Keep the handoff message. */ }
+    }
+  };
+  return <div className="page-stack">
+    <PageHeading title="Publishing" description="Connect a social account, queue clips through Zernio, or prepare a manual upload." actions={<Button onClick={() => void workspace.refreshPublishing()}><RefreshCw size={15} />Refresh status</Button>} />
+    <div className="publishing-layout">
+      <div className="publishing-main">
+        <Panel title="Zernio connection" description="Use your Zernio API key to load connected social accounts.">
+          <div className="provider-summary"><span className="provider-logo">Z</span><span><strong>Zernio</strong><small>Social account connection and scheduled publishing.</small></span><StatusPill tone={pub.api_key_set ? "success" : "warning"}>{pub.api_key_set ? "Key saved" : "Not configured"}</StatusPill></div>
+          <Field label="Zernio API key" hint={pub.api_key_set ? "A key is saved locally. Leave this blank to keep using it." : "Stored in local publishing settings and never returned to the interface."}><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={pub.api_key_set ? "Saved key · enter a new key to replace" : "Paste Zernio API key"} /></Field>
+          <div className="form-actions"><Button kind="primary" onClick={() => void saveSettings()} disabled={!!busy}><Check size={15} />Save connection</Button><Button onClick={() => void loadAccounts()} disabled={!!busy || (!pub.api_key_set && !apiKey.trim())}><RefreshCw size={15} />Load accounts</Button></div>
+          <div className="account-list"><div className="account-list-heading"><strong>Connected accounts</strong><span>{count(workspace.accounts.length)} found</span></div>
+            {workspace.accounts.length ? workspace.accounts.map((account) => <label className="account-row" key={account.id}>
+              <input type="checkbox" checked={accountsByPlatform[account.platform] === account.id} onChange={() => toggleAccount(account)} />
+              <span className={"account-platform account-" + account.platform}>{account.platform.slice(0, 1).toUpperCase()}</span>
+              <span className="account-details"><strong>{account.name || account.platform}</strong><small>{account.username ? "@" + account.username : account.platform}</small></span>
+              <span className="account-selection">{accountsByPlatform[account.platform] === account.id ? "Selected" : "Select"}</span>
+            </label>) : <div className="inline-empty">Load connected accounts after saving your API key.</div>}
+          </div>
+          {workspace.accounts.length ? <Button onClick={() => void saveSettings()} disabled={!!busy}><Check size={15} />Save selected accounts</Button> : null}
+        </Panel>
+        <Panel title="Publishing defaults" description="These options apply to Zernio jobs.">
+          <div className="settings-grid"><Field label="YouTube visibility"><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></Field><Field label="Schedule interval (minutes)"><input type="number" min="0" max="1440" value={schedule} onChange={(event) => setSchedule(Number(event.target.value))} /></Field></div>
+          <Toggle checked={autoPost} onChange={setAutoPost} label="Automatically submit finished clips" description="When enabled and configured, the local publisher submits completed clips to selected accounts." />
+          <div className="form-actions"><Button kind="primary" onClick={() => void saveSettings()} disabled={!!busy}><Check size={15} />Save publishing defaults</Button></div>
+        </Panel>
+      </div>
+      <aside className="publishing-aside">
+        <Panel title="Selected clip" description={bulkNames.length ? count(bulkNames.length) + " clips selected for publishing." : "Choose a clip from the library to prepare a post."}>
+          {clip ? <div className="publish-clip-card"><video src={clipUrl(clip.name)} muted playsInline preload="metadata" /><strong>{clip.title || clip.name}</strong><small>{clip.creator_name || clip.source || "Generated clip"} · {sizeLabel(clip.size_mb)}</small></div> : bulkNames.length ? <div className="bulk-selected"><Clapperboard size={20} /><strong>{count(bulkNames.length)} clips</strong><small>Publishing uses the saved caption metadata for each clip.</small></div> : <EmptyState icon={Video} title="No clip selected" description="Select one or more clips in the library to prepare a publishing job." action={<Button onClick={openLibrary}>Open clip library</Button>} />}
+          {clip || bulkNames.length ? <div className="publishing-job-actions">
+            {clip ? <><Field label="Post title"><input maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} /></Field><Field label="Post description"><textarea rows={5} maxLength={2200} value={description} onChange={(event) => setDescription(event.target.value)} /></Field></> : null}
+            <Button kind="primary" onClick={() => void publish()} disabled={!selectedCount || !!busy}><Send size={15} />Queue with Zernio</Button>
+            <div className="manual-upload-box"><strong>Manual upload</strong><small>Opens the platform in your default browser. You select the video and complete publishing there.</small>
+              <Field label="Platform"><select value={platform} onChange={(event) => setPlatform(event.target.value)}><option value="youtube">YouTube</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option></select></Field>
+              <Button onClick={() => void manualUpload()} disabled={!clip || !!busy}><ExternalLink size={14} />Open upload page</Button>
+              {manualMessage ? <div className="inline-success"><CheckCircle2 size={15} />{manualMessage}</div> : null}
+            </div>
+          </div> : null}
+        </Panel>
+        <Panel title="Browser handoff" description="Manual upload uses your normal browser session.">
+          <div className="browser-status-row"><span>Default browser</span><strong>{browserStatus.browser || "System default"}</strong></div>
+          <div className="browser-status-row"><span>File selection</span><strong>Manual</strong></div>
+          <div className="browser-status-row"><span>Final publish</span><strong>Manual confirmation</strong></div>
+          <small className="field-hint">StreamSnip AI does not reuse a private browser profile or click Publish for you.</small>
+        </Panel>
+      </aside>
+    </div>
+  </div>;
+}
+
+function HypeWordsPage({ workspace }: { workspace: Workspace }) {
   const [text, setText] = useState(workspace.words.text);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() && !line.trim().startsWith("#"));
+  const save = async () => { setSaving(true); try { await workspace.saveWords(text); } catch { /* API layer reports errors. */ } finally { setSaving(false); } };
+  return <div className="page-stack">
+    <PageHeading title="Hype words" description="Custom phrases can help the highlight scorer notice creator-specific reactions." actions={<Button kind="primary" onClick={() => void save()} disabled={saving}><Check size={15} />Save phrase list</Button>} />
+    <div className="settings-layout">
+      <div className="settings-main-column"><Panel title="Custom words and phrases" description="One phrase per line. Add an optional score after a vertical bar, for example: no way bro | 3">
+        <Field label="Custom phrase list"><textarea className="words-editor" rows={18} value={text} onChange={(event) => setText(event.target.value)} /></Field>
+        <div className="save-status"><span>{count(lines.length)} custom entries</span><span>{saving ? "Saving…" : "Save changes when ready."}</span></div>
+        <Button kind="primary" onClick={() => void save()} disabled={saving}><Check size={15} />Save phrase list</Button>
+      </Panel></div>
+      <aside className="settings-side-column"><Panel title="Built-in vocabulary" description="The engine includes streamer reactions and phrases.">
+        <div className="vocabulary-counts"><div><strong>{count(workspace.words.words.length)}</strong><span>Words</span></div><div><strong>{count(workspace.words.phrases.length)}</strong><span>Phrases</span></div></div>
+        <div className="chip-cloud">{workspace.words.words.slice(0, 24).map((word) => <span key={word}>{word}</span>)}</div>
+      </Panel><div className="storage-note"><Info size={16} /><span><strong>How scoring works</strong><small>Transcript phrases contribute to moment detection. AI providers can also evaluate wider context when configured.</small></span></div></aside>
+    </div>
+  </div>;
+}
 
+function ActivityPage({ workspace, busy, post }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
+  const [filter, setFilter] = useState("");
+  const filtered = workspace.logs.filter((log) => (log.m + " " + log.t).toLowerCase().includes(filter.toLowerCase()));
+  return <div className="page-stack">
+    <PageHeading title="Activity" description="Messages from capture, transcription, rendering, creator monitors, and publishing." actions={<a className="button button-secondary" href="/api/log/download"><Download size={15} />Download log</a>} />
+    <Panel title="Engine events" description={count(filtered.length) + " messages shown."} action={<label className="library-search"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter events" /></label>}>
+      {filtered.length ? <div className="activity-list">{filtered.slice().reverse().map((log) => <ActivityRow key={log.id} log={log} post={post} busy={busy} />)}</div> : <EmptyState icon={Activity} title="No activity found" description="Engine messages appear here when capture, processing, or publishing work begins." action={filter ? <Button onClick={() => setFilter("")}>Clear filter</Button> : undefined} />}
+    </Panel>
+  </div>;
+}
+function ActivityRow({ log, post, busy }: { log: LogEntry; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; busy: string }) {
+  const lock = log.file_lock as RecordLike | undefined;
+  return <div className="activity-row"><time>{log.t}</time><i /><div><p>{log.m}</p>{lock ? <div className="file-lock-warning"><AlertCircle size={14} /><span>{lock.message || "A process is holding this file open."}</span><Button size="small" onClick={() => void post("stop-file-holder", "/api/stop_file_holder", { name: lock.file, pid: lock.pid })} disabled={!!busy}>Close locking app</Button></div> : null}</div></div>;
+}
+
+function SettingsPage({ workspace, theme, setTheme, busy, post, navigate }: { workspace: Workspace; theme: ThemeId; setTheme: (theme: ThemeId) => void; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
+  const [section, setSection] = useState("general");
+  const sections: Array<[string, string, LucideIcon]> = [
+    ["general", "General", Settings], ["appearance", "Appearance", Palette],
+  ];
+  return <div className="page-stack"><PageHeading title="Settings" description="Manage application storage and workspace appearance. Prepare each capture session in Live Studio." />
+    <div className="settings-layout"><nav className="settings-subnav" aria-label="Application settings">{sections.map(([id, label, Icon]) => <button key={id} className={section === id ? "active" : ""} onClick={() => setSection(id)}><Icon size={16} />{label}</button>)}</nav>
+      <div className="settings-main-column">
+        {section === "general" ? <><GeneralSettings workspace={workspace} busy={busy} post={post} /><Panel title="Session setup lives in Studio" description="Capture behavior, AI provider, transcription, and caption design sit beside the source controls so they can be checked before a session starts."><Button kind="primary" onClick={() => navigate("live")}><Radio size={15} />Open Live Studio setup</Button></Panel></> : null}
+        {section === "appearance" ? <AppearanceSettings theme={theme} setTheme={setTheme} /> : null}
+      </div>
+    </div>
+  </div>;
+}
+function GeneralSettings({ workspace, busy, post }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
+  const settings = workspace.settings || {};
+  const update = (key: string, value: string | number | boolean) => workspace.updateSettings({ [key]: value });
+  const browse = async (key: "out_dir" | "rec_dir") => {
+    const result = await post<{ path: string }>("browse-" + key, "/api/browse_folder", {});
+    if (result?.path) update(key, result.path);
+  };
+  return <>
+    <Panel title="Storage folders" description="Choose where generated clips and temporary recordings are stored.">
+      <div className="path-field"><Field label="Clip output folder"><input value={String(settings.out_dir || "")} placeholder="Default application output folder" onChange={(event) => update("out_dir", event.target.value)} /></Field><Button onClick={() => void browse("out_dir")} disabled={!!busy}><FolderOpen size={14} />Browse</Button></div>
+      <div className="path-field"><Field label="Recording folder"><input value={String(settings.rec_dir || "")} placeholder="Default application recording folder" onChange={(event) => update("rec_dir", event.target.value)} /></Field><Button onClick={() => void browse("rec_dir")} disabled={!!busy}><FolderOpen size={14} />Browse</Button></div>
+      <Toggle checked={Boolean(settings.delete_rec)} onChange={(value) => update("delete_rec", value)} label="Delete temporary live recordings after processing" description="Completed live recording chunks may be removed after their clips have rendered." />
+      <div className="form-actions"><Button onClick={() => void post("open-output-folder", "/api/open_folder", {})}><FolderOpen size={15} />Open clip folder</Button></div>
+    </Panel>
+    <Panel title="Application updates" description="Check the repository and local components for available updates.">
+      <div className="update-actions"><Button onClick={() => void post("check-app-updates", "/api/check_app_update", {})} disabled={!!busy}><RefreshCw size={15} />Check app update</Button><Button onClick={() => void post("check-components", "/api/check_updates", {})} disabled={!!busy}><RefreshCw size={15} />Check components</Button><Button onClick={() => void post("update-components", "/api/update_components", {})} disabled={!!busy}><Download size={15} />Update components</Button></div>
+    </Panel>
+    <div className="save-status">{workspace.saving ? "Saving…" : workspace.savedAt ? "Saved " + dateLabel(workspace.savedAt / 1000) : "Settings save automatically."}{workspace.saveError ? <span className="danger-text">{workspace.saveError}</span> : null}</div>
+  </>;
+}
+function CaptureSettings({ workspace }: { workspace: Workspace }) {
+  const settings = workspace.settings || {};
+  const update = (patch: Partial<AppSettings>) => workspace.updateSettings(patch);
+  return <Panel title="Capture defaults" description="Used when you start a new live or VOD session.">
+    <div className="settings-grid">
+      <Field label="Clips per batch"><input type="number" min="0" max="10" value={num(settings.clips_per_chunk, 2)} onChange={(event) => update({ clips_per_chunk: Number(event.target.value) })} /></Field>
+      <Field label="Batch length (minutes)"><input type="number" min="3" max="15" value={num(settings.chunk_min, 3)} onChange={(event) => update({ chunk_min: Number(event.target.value) })} /></Field>
+      <Field label="Seconds before highlight"><input type="number" min="3" max="90" value={num(settings.pre, 20)} onChange={(event) => update({ pre: Number(event.target.value) })} /></Field>
+      <Field label="Seconds after highlight"><input type="number" min="3" max="90" value={num(settings.post, 15)} onChange={(event) => update({ post: Number(event.target.value) })} /></Field>
+      <Field label="Minimum highlight score"><input type="number" min="0" max="100" step="0.5" value={num(settings.min_score, 70)} onChange={(event) => update({ min_score: Number(event.target.value) })} /></Field>
+      <Field label="Capture bitrate (Kbps)"><input type="number" min="6000" max="50000" step="500" value={num(settings.capture_bitrate_kbps, 6000)} onChange={(event) => update({ capture_bitrate_kbps: Number(event.target.value) })} /></Field>
+    </div>
+    <div className="save-status">{workspace.saving ? "Saving changes…" : "Capture defaults save automatically."}</div>
+  </Panel>;
+}
+function AISettings({ workspace }: { workspace: Workspace }) {
+  const ai = workspace.ai;
+  const [secrets, setSecrets] = useState({ gemini_api_key: "", huggingface_token: "", custom_api_key: "" });
+  const [models, setModels] = useState<string[]>([]);
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const set = (key: keyof typeof ai, value: string | boolean) => workspace.updateAI({ [key]: value });
+  const setSecret = (key: keyof typeof secrets, value: string) => setSecrets((current) => ({ ...current, [key]: value }));
+  const test = async () => {
+    setTesting(true);
+    try {
+      const result = await workspace.testAI(secrets);
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: result.ok === false ? "error" : "success", title: result.message || "Provider test completed." } }));
+    } catch { /* API layer reports errors. */ } finally { setTesting(false); }
+  };
   const save = async () => {
     setSaving(true);
-    setMessage("");
+    try { await workspace.saveAI(secrets); setSecrets({ gemini_api_key: "", huggingface_token: "", custom_api_key: "" }); }
+    catch { /* API layer reports errors. */ } finally { setSaving(false); }
+  };
+  const detect = async () => {
     try {
-      const result = await workspace.saveWords(text);
-      setMessage("Saved " + result.entries + " custom phrase(s). Updates apply to the next analysis chunk.");
+      const result = await workspace.detectOllama();
+      setModels(result.models || []);
+      if (!ai.ollama_model && result.models.length) set("ollama_model", result.models[0]);
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "success", title: result.models.length + " Ollama model(s) found." } }));
+    } catch { /* API layer reports errors. */ }
+  };
+  return <div className="page-stack compact-stack">
+    <Panel title="Highlight analysis provider" description="Gemini is the first-run default. Choose a local or hosted provider for highlight evaluation.">
+      <Field label="Provider"><select value={ai.provider} onChange={(event) => set("provider", event.target.value)}><option value="gemini">Google Gemini · recommended default</option><option value="ollama">Ollama · local</option><option value="hooks">Built-in hook words · offline</option><option value="huggingface">Hugging Face</option><option value="custom">Custom OpenAI-compatible API</option></select></Field>
+      {ai.provider === "gemini" ? <div className="provider-info"><StatusPill tone={ai.gemini_key_set ? "success" : "warning"}>{ai.gemini_key_set ? "Gemini key saved" : "Gemini API key required"}</StatusPill><small>Transcript text is sent to Google Gemini for highlight analysis. API usage counts against your Google AI quota.</small></div> : null}
+      {ai.provider === "ollama" ? <><div className="settings-grid"><Field label="Ollama URL"><input value={ai.ollama_url} onChange={(event) => set("ollama_url", event.target.value)} /></Field><Field label="Model name"><input value={ai.ollama_model} onChange={(event) => set("ollama_model", event.target.value)} /></Field></div><Button onClick={() => void detect()}><RefreshCw size={14} />Detect installed models</Button>{models.length ? <div className="chip-cloud">{models.map((model) => <button key={model} onClick={() => set("ollama_model", model)}>{model}</button>)}</div> : null}</> : null}
+      {ai.provider === "gemini" ? <><Field label="Gemini model"><input value={ai.gemini_model} onChange={(event) => set("gemini_model", event.target.value)} /></Field><Field label="Gemini API key" hint={ai.gemini_key_set ? "A key is already saved. Leave blank to keep it." : "Stored locally and never returned to the interface."}><input type="password" autoComplete="new-password" value={secrets.gemini_api_key} onChange={(event) => setSecret("gemini_api_key", event.target.value)} placeholder={ai.gemini_key_set ? "Saved key" : "Enter API key"} /></Field></> : null}
+      {ai.provider === "huggingface" ? <><Field label="Hugging Face model"><input value={ai.huggingface_model} onChange={(event) => set("huggingface_model", event.target.value)} /></Field><Field label="Hugging Face token" hint={ai.huggingface_token_set ? "A token is already saved. Leave blank to keep it." : "Stored locally and never returned to the interface."}><input type="password" autoComplete="new-password" value={secrets.huggingface_token} onChange={(event) => setSecret("huggingface_token", event.target.value)} placeholder={ai.huggingface_token_set ? "Saved token" : "Enter token"} /></Field></> : null}
+      {ai.provider === "custom" ? <><div className="settings-grid"><Field label="API base URL"><input value={ai.custom_api_base} onChange={(event) => set("custom_api_base", event.target.value)} /></Field><Field label="Model"><input value={ai.custom_api_model} onChange={(event) => set("custom_api_model", event.target.value)} /></Field></div><Field label="API key" hint={ai.custom_api_key_set ? "A key is already saved. Leave blank to keep it." : "Optional for local or unauthenticated endpoints."}><input type="password" autoComplete="new-password" value={secrets.custom_api_key} onChange={(event) => setSecret("custom_api_key", event.target.value)} placeholder={ai.custom_api_key_set ? "Saved key" : "Enter API key"} /></Field></> : null}
+      <div className="form-actions"><Button kind="primary" onClick={() => void save()} disabled={saving}><Check size={15} />Save AI settings</Button><Button onClick={() => void test()} disabled={testing}><Zap size={15} />Test provider</Button></div>
+      <p className="field-hint">Provider secrets are not returned by the public configuration endpoint.</p>
+    </Panel>
+    <Panel title="Clip metadata" description="AI-generated titles and descriptions are enabled for supported providers."><ToolRow icon={Sparkles} title="AI post copy" detail="Uses transcript text to prepare title and description fields." /><StatusPill tone={workspace.ai.metadata_copy_enabled ? "success" : "neutral"}>{workspace.ai.metadata_copy_enabled ? "Enabled" : "Disabled"}</StatusPill></Panel>
+  </div>;
+}
+function SpeechSettings({ workspace }: { workspace: Workspace }) {
+  const settings = workspace.settings || {};
+  const update = (patch: Partial<AppSettings>) => workspace.updateSettings(patch);
+  return <Panel title="Transcription" description="Faster-Whisper runs locally by default. A custom command can be supplied when needed.">
+    <Field label="Transcription provider"><select value={String(settings.transcriber_provider || "faster-whisper")} onChange={(event) => update({ transcriber_provider: event.target.value })}><option value="faster-whisper">Faster-Whisper</option><option value="custom-command">Custom command</option></select></Field>
+    <div className="settings-grid"><Field label="Language"><input value={String(settings.transcriber_language || "auto")} onChange={(event) => update({ transcriber_language: event.target.value })} placeholder="auto" /><small className="field-hint">Use a language code, or auto for detection.</small></Field><Field label="Whisper model"><select value={String(settings.model || "distil-large-v3")} onChange={(event) => update({ model: event.target.value })}>{["distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base"].map((model) => <option key={model}>{model}</option>)}</select></Field></div>
+    {settings.transcriber_provider === "custom-command" ? <Field label="Custom transcription command" hint="Executed by the local engine."><textarea rows={4} value={String(settings.transcriber_command || "")} onChange={(event) => update({ transcriber_command: event.target.value })} /></Field> : null}
+    <ToolRow icon={Cpu} title="GPU acceleration" detail="CUDA is selected automatically when a compatible NVIDIA GPU is available." />
+  </Panel>;
+}
+function RangeSetting({ label, value, min, max, step = 1, onChange }: {
+  label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void;
+}) {
+  const display = Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return <label className="range-setting"><span><span>{label}</span><strong>{display}%</strong></span><input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} /></label>;
+}
+
+function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mode: string; target: string }) {
+  const settings = workspace.settings || {};
+  const update = (patch: Partial<AppSettings>) => workspace.updateSettings(patch);
+  const [previewFrame, setPreviewFrame] = useState("");
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const loadFrame = async () => {
+    setPreviewBusy(true);
+    setPreviewError("");
+    try {
+      const result = await apiPost<{ image: string }>("/api/frame", { mode, target });
+      setPreviewFrame(result.image || "");
     } catch (reason) {
-      setMessage(reason instanceof Error ? reason.message : "Could not save hype words.");
+      setPreviewError(reason instanceof Error ? reason.message : "Could not read a frame from this source.");
     } finally {
-      setSaving(false);
+      setPreviewBusy(false);
     }
   };
-
-  return (
-    <>
-      <PageHeading eyebrow="HIGHLIGHT SIGNALS" title="Hype words" description="Add the phrases your streamers actually use. Custom phrases influence local hook-word analysis." action={<Button variant="primary" onClick={() => void save()} disabled={saving}><Save size={15} /> Save phrases</Button>} />
-      <div className="words-layout">
-        <section className="panel-card words-editor-card">
-          <div className="panel-heading"><div><div className="eyebrow">CUSTOM DICTIONARY</div><h3>Your words and phrases</h3></div><span className="count-badge">{text.split(/\r?\n/).filter((line) => line.trim() && !line.trim().startsWith("#")).length} entries</span></div>
-          <p className="panel-description">One word or phrase per line. Add a weight after a pipe, such as <code>no chance | 3</code>. Lines beginning with <code>#</code> are comments. Default weight is 2.</p>
-          <textarea className="words-textarea" aria-label="Custom hype words and phrases, one per line" spellCheck={false} value={text} onChange={(event) => setText(event.target.value)} placeholder={"oh my days\nno chance | 3\nhe actually did it"} />
-          <div className="settings-save-row"><div><Button variant="primary" onClick={() => void save()} disabled={saving}><Save size={15} /> {saving ? "Saving…" : "Save hype words"}</Button></div><span>{message}</span></div>
-        </section>
-        <aside className="panel-card builtin-words-card">
-          <div className="eyebrow">BUILT-IN DICTIONARY</div><h3>Default reactions</h3>
-          <p className="panel-description">The engine also includes a built-in list of common reactions and emphasis phrases.</p>
-          <div className="builtin-chip-cloud">{workspace.words.words.slice(0, 120).map((word) => <span key={word}>{word}</span>)}</div>
-          {workspace.words.phrases.length ? <><h4>Phrase patterns</h4><div className="builtin-chip-cloud">{workspace.words.phrases.slice(0, 60).map((phrase) => <span key={phrase}>{phrase}</span>)}</div></> : null}
-        </aside>
+  const layout = String(settings.layout || "Facecam + game (Twitch)");
+  const cropX = num(settings.crop_x, 34.2);
+  const cropY = num(settings.crop_y, 0);
+  const cropW = num(settings.crop_w, 31.6);
+  const cropH = num(settings.crop_h, 100);
+  const camX = num(settings.cam_x, 70);
+  const camY = num(settings.cam_y, 4);
+  const camW = num(settings.cam_w, 29);
+  const camH = num(settings.cam_h, 37);
+  const detectedTag = mode === "live" ? inferCreatorTag(target) : "";
+  const setRange = (key: string, value: number) => update({ [key]: value });
+  return <div className="page-stack compact-stack">
+    <Panel title="Video layout" description="Set the output aspect ratio and framing preset used when rendering clips.">
+      <div className="settings-grid"><Field label="Output format"><select value={String(settings.output_format || "9:16")} onChange={(event) => update({ output_format: event.target.value })}>{["9:16", "16:9", "1:1", "4:5"].map((format) => <option key={format}>{format}</option>)}</select></Field><Field label="Layout preset"><select value={String(settings.layout || "Facecam + game (Twitch)")} onChange={(event) => update({ layout: event.target.value })}>{["Facecam + game (Twitch)", "Blur background", "Fill (crop center)", "Selected crop"].map((layout) => <option key={layout}>{layout}</option>)}</select></Field></div>
+    </Panel>
+    <Panel title="Framing preview" description="Load one still frame to position the crop or facecam area. This does not start a recording or creator monitor.">
+      <div className="framing-source-summary">
+        <span><strong>{mode === "live" ? "Live stream source" : "Video file source"}</strong><small title={target}>{target || "Choose a source in the panel above."}</small></span>
+        <Button kind="primary" onClick={() => void loadFrame()} disabled={previewBusy || !target.trim()}><Eye size={14} />{previewBusy ? "Loading frame..." : "Load preview"}</Button>
       </div>
-    </>
-  );
-}
-
-function ActivityPage({ workspace }: { workspace: Workspace }) {
-  const [pausedLogs, setPausedLogs] = useState<LogEntry[] | null>(null);
-  const [filter, setFilter] = useState<"all" | "problems">("all");
-  const logs = pausedLogs === null ? workspace.logs : pausedLogs;
-  const isProblem = (entry: LogEntry) => /\b(error|failed|failure|exception|traceback|critical|denied|timeout|timed out|could not|unable to|not found|invalid|unavailable)\b/i.test(entry.m);
-  const problemCount = logs.filter(isProblem).length;
-  const visibleLogs = filter === "problems" ? logs.filter(isProblem) : logs;
-
-  return (
-    <>
-      <PageHeading eyebrow="SYSTEM DIAGNOSTICS" title="Activity" description="A live diagnostic timeline for UI actions, capture, transcription, AI, rendering, creator monitors, and publishing." action={<a className="button button-secondary" href="/api/log/download" download="streamsnip.log"><Download size={15} /> Download diagnostic log</a>} />
-      <section className="panel-card activity-page-card">
-        <div className="panel-heading">
-          <div><div className="eyebrow">ENGINE TIMELINE</div><h3>Live activity log</h3><p>{problemCount} problem event(s) in the current log window. Client actions, backend validation errors, exceptions, capture failures and publishing outcomes are included.</p></div>
-          <div className="activity-toolbar">
-            <StatusPill tone={problemCount ? "bad" : pausedLogs === null ? "good" : "warning"}>{problemCount ? problemCount + " problem(s)" : pausedLogs === null ? "Live updates" : "Paused snapshot"}</StatusPill>
-            <Button variant={filter === "all" ? "primary" : "secondary"} onClick={() => setFilter("all")}>All events</Button>
-            <Button variant={filter === "problems" ? "danger" : "secondary"} onClick={() => setFilter("problems")}>Problems only</Button>
-            <Button onClick={() => setPausedLogs((current) => current === null ? [...workspace.logs] : null)}>{pausedLogs === null ? <PauseIcon /> : <Play size={14} />} {pausedLogs === null ? "Pause" : "Resume"}</Button>
-            <Button onClick={() => setPausedLogs([])}><X size={14} /> Clear view</Button>
-          </div>
-        </div>
-        {visibleLogs.length ? (
-          <div className="activity-event-list">
-            {[...visibleLogs].reverse().map((entry) => {
-              const message = entry.m.toLowerCase();
-              const tone = isProblem(entry) ? "error" : message.includes("clip ready") || message.includes("complete") || message.includes("ui info") ? "success" : "normal";
-              return <div key={entry.id} className={"activity-event " + tone}><span className="activity-event-icon"><Activity size={15} /></span><time>{entry.t}</time><p>{entry.m}</p><small>#{entry.id}</small></div>;
-            })}
-          </div>
-        ) : <EmptyState icon={filter === "problems" ? CheckCircle2 : Activity} title={filter === "problems" ? "No problems in the current log" : "No events in this view"} body={filter === "problems" ? "No errors have been reported in the events currently loaded." : "The local engine will report events here when actions run, streams are processed, or a problem occurs."} />}
-      </section>
-    </>
-  );
-}
-
-function PauseIcon() {
-  return <span className="pause-glyph">Ⅱ</span>;
-}
-
-function HelpPage() {
-  const items = [
-    ["Start clipping a live stream", "Open Live Studio, choose Live stream, paste a Twitch or YouTube URL, choose the highlight provider and score threshold, then select Start clipping. The engine reports the actual capture and processing stages in the pipeline."],
-    ["Process a local VOD", "Choose Video / VOD in Live Studio, browse to a supported video file, and start clipping. The original VOD is preserved; rendered clips are written to your configured clips folder."],
-    ["Configure video layouts", "Open Layout Studio. Choose Facecam + game, Blur background, Fill, or Selected crop. Capture a frame from your source, drag the highlighted area, resize it with the corner handle, and save the layout."],
-    ["Understand AI and transcription", "Speech recognition creates the timestamped transcript. The selected highlight provider scores transcript moments separately. Hook words and Ollama are local; Gemini, Hugging Face, and custom hosted APIs can receive transcript text."],
-    ["Review and publish clips", "Open Clips to preview a video and inspect its TXT metadata. Publishing through Zernio is queued separately; a clip moves to Published only when the backend receives confirmation. You can also record a post published outside StreamSnip."],
-    ["Manage creator monitors", "Add a Twitch or YouTube creator from Live Studio. Each monitor has separate live clips, a recorded-VOD inbox, and VOD output folders. Start the folder watcher before placing VOD files into the inbox."],
-  ];
-  return (
-    <>
-      <PageHeading eyebrow="DOCUMENTATION" title="Help centre" description="Practical guidance for the main StreamSnip AI workflows." />
-      <div className="help-page-grid">
-        {items.map(([title, body], index) => <details className="help-accordion" key={title} open={index === 0}><summary><span className="help-step">{String(index + 1).padStart(2, "0")}</span><strong>{title}</strong><ChevronDown size={16} /></summary><p>{body}</p></details>)}
+      {previewError ? <p className="framing-error" role="alert">{previewError}</p> : null}
+      {previewFrame ? <div className="framing-stage">
+        <img src={previewFrame} alt="Still frame from the selected source" />
+        {layout === "Selected crop" ? <div className="framing-overlay framing-crop" style={{ left: cropX + "%", top: cropY + "%", width: cropW + "%", height: cropH + "%" }} /> : null}
+        {layout === "Facecam + game (Twitch)" ? <div className="framing-overlay framing-camera" style={{ left: camX + "%", top: camY + "%", width: camW + "%", height: camH + "%" }} /> : null}
+      </div> : <div className="framing-placeholder"><Eye size={19} /><strong>No preview loaded</strong><span>Choose a source and load one frame to see the selected area.</span></div>}
+      <p className="framing-note">The preview is a still frame only. Adjustments save automatically and apply to future renders.</p>
+    </Panel>
+    {layout === "Selected crop" ? <Panel title="Selected crop area" description="Set the crop rectangle as percentages of the source frame.">
+      <div className="framing-range-grid">
+        <RangeSetting label="Left" value={cropX} min={0} max={90} step={0.5} onChange={(value) => setRange("crop_x", value)} />
+        <RangeSetting label="Top" value={cropY} min={0} max={90} step={0.5} onChange={(value) => setRange("crop_y", value)} />
+        <RangeSetting label="Width" value={cropW} min={10} max={Math.max(10, 100 - cropX)} step={0.5} onChange={(value) => setRange("crop_w", value)} />
+        <RangeSetting label="Height" value={cropH} min={10} max={Math.max(10, 100 - cropY)} step={0.5} onChange={(value) => setRange("crop_h", value)} />
       </div>
-      <section className="panel-card help-support-card"><CircleHelp size={21} /><div><h3>Need to inspect a problem?</h3><p>Use Activity to inspect engine events and download the diagnostic log. Your capture and render backend remains the existing local Python engine.</p><Link to="/activity" className="button button-secondary">Open Activity <ArrowRight size={14} /></Link></div></section>
-    </>
-  );
+      <div className="form-actions"><Button onClick={() => update({ crop_x: 34.2, crop_y: 0, crop_w: 31.6, crop_h: 100 })}>Reset crop area</Button></div>
+    </Panel> : null}
+    {layout === "Facecam + game (Twitch)" ? <Panel title="Facecam and game framing" description="Position the facecam region and set the game split point.">
+      <div className="framing-range-grid">
+        <RangeSetting label="Facecam left" value={camX} min={0} max={90} step={0.5} onChange={(value) => setRange("cam_x", value)} />
+        <RangeSetting label="Facecam top" value={camY} min={0} max={90} step={0.5} onChange={(value) => setRange("cam_y", value)} />
+        <RangeSetting label="Facecam width" value={camW} min={10} max={Math.max(10, 100 - camX)} step={0.5} onChange={(value) => setRange("cam_w", value)} />
+        <RangeSetting label="Facecam height" value={camH} min={10} max={Math.max(10, 100 - camY)} step={0.5} onChange={(value) => setRange("cam_h", value)} />
+        <RangeSetting label="Game split point" value={num(settings.game_x, 50)} min={0} max={100} step={0.5} onChange={(value) => setRange("game_x", value)} />
+      </div>
+      <div className="form-actions"><Button onClick={() => update({ cam_x: 70, cam_y: 4, cam_w: 29, cam_h: 37, game_x: 50 })}>Reset facecam framing</Button></div>
+    </Panel> : null}
+    <Panel title="Caption style" description="Choose subtitle mode and the appearance of rendered words.">
+      <div className="settings-grid">
+        <Field label="Subtitle mode"><select value={String(settings.subtitle_mode || "Karaoke")} onChange={(event) => update({ subtitle_mode: event.target.value })}><option>Karaoke</option><option>Classic</option></select></Field>
+        <Field label="Subtitle preset"><select value={String(settings.subtitle_style || "Classic")} onChange={(event) => update({ subtitle_style: event.target.value })}>{["Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"].map((style) => <option key={style}>{style}</option>)}</select></Field>
+        <Field label="Font"><input value={String(settings.font || "Impact")} onChange={(event) => update({ font: event.target.value })} /></Field>
+        <Field label="Base font size"><input type="number" min="60" max="150" value={num(settings.caption_size, 100)} onChange={(event) => update({ caption_size: Number(event.target.value) })} /></Field>
+        <Field label="Words per line"><input type="number" min="1" max="4" value={num(settings.words_per_line, 3)} onChange={(event) => update({ words_per_line: Number(event.target.value) })} /></Field>
+        <Field label="Caption position"><select value={String(settings.position || "Lower third")} onChange={(event) => update({ position: event.target.value })}><option>Lower third</option><option>Middle</option><option>Low</option></select></Field>
+        <Field label="Highlight color"><select value={String(settings.color || "Yellow")} onChange={(event) => update({ color: event.target.value })}>{["Yellow", "Green", "Cyan", "Orange", "Pink"].map((color) => <option key={color}>{color}</option>)}</select></Field>
+      </div>
+      <Toggle checked={Boolean(settings.subtitle_custom)} onChange={(value) => update({ subtitle_custom: value })} label="Use custom subtitle controls" description="Override preset defaults for size, colors, position, and alignment." />
+      {settings.subtitle_custom ? <div className="settings-grid">
+        <Field label="Custom font size"><input type="number" min="60" max="180" value={num(settings.subtitle_font_size, 100)} onChange={(event) => update({ subtitle_font_size: Number(event.target.value) })} /></Field>
+        <Field label="Vertical nudge"><input type="number" min="-400" max="400" value={num(settings.subtitle_nudge, 0)} onChange={(event) => update({ subtitle_nudge: Number(event.target.value) })} /></Field>
+        <Field label="Text color"><input type="color" value={String(settings.subtitle_text_color || "#FFFFFF")} onChange={(event) => update({ subtitle_text_color: event.target.value })} /></Field>
+        <Field label="Stroke color"><input type="color" value={String(settings.subtitle_stroke_color || "#000000")} onChange={(event) => update({ subtitle_stroke_color: event.target.value })} /></Field>
+        <Field label="Position"><select value={String(settings.subtitle_position || "Bottom")} onChange={(event) => update({ subtitle_position: event.target.value })}><option>Top</option><option>Center</option><option>Bottom</option></select></Field>
+        <Field label="Alignment"><select value={String(settings.subtitle_alignment || "Center")} onChange={(event) => update({ subtitle_alignment: event.target.value })}><option>Left</option><option>Center</option></select></Field>
+      </div> : null}
+    </Panel>
+    <Panel title="Creator credit and profanity filter" description="Control the credit overlay and how detected profanity is treated.">
+      <Field label="Creator credit" hint={settings.streamer_tag ? "Manual creator credit override." : detectedTag ? "Auto-detected as " + detectedTag + ". Edit to set an override; clear the field to return to automatic detection." : "A channel handle is inferred when the source URL exposes one."}><input maxLength={80} value={String(settings.streamer_tag || detectedTag)} onChange={(event) => update({ streamer_tag: event.target.value })} placeholder="Auto-detected from source URL" /></Field>
+      <Toggle checked={Boolean(settings.show_tag_video)} onChange={(value) => update({ show_tag_video: value })} label="Show creator tag in the video" />
+      <Toggle checked={Boolean(settings.profanity_filter_enabled)} onChange={(value) => update({ profanity_filter_enabled: value })} label="Filter detected profanity" description="Detected words are masked in captions and muted in rendered audio." />
+      <Field label="Additional words to filter"><textarea rows={5} value={String(settings.profanity_filter_words || "")} onChange={(event) => update({ profanity_filter_words: event.target.value })} /></Field>
+    </Panel>
+  </div>;
 }
-
+function AppearanceSettings({ theme, setTheme }: { theme: ThemeId; setTheme: (theme: ThemeId) => void }) {
+  return <Panel title="Workspace appearance" description="Choose a palette saved on this device. Theme selection does not change capture or publishing behavior.">
+    <div className="theme-grid">{themes.map((item) => <button key={item.id} className={"theme-card" + (theme === item.id ? " selected" : "")} onClick={() => setTheme(item.id)}>
+      <span className={"theme-preview theme-preview-" + item.id}><i /><i /><i /></span><span className="theme-card-copy"><strong>{item.name}</strong><small>{item.description}</small></span>{theme === item.id ? <CheckCircle2 size={17} /> : null}
+    </button>)}</div>
+  </Panel>;
+}
+function HelpPage({ navigate }: { navigate: (page: PageId) => void }) {
+  return <div className="page-stack">
+    <PageHeading title="Help" description="A practical guide to the local capture and review workflow." />
+    <div className="help-grid">
+      <Panel title="1. Choose a source" description="Use Live Studio for a Twitch or YouTube stream, or choose a local VOD file."><p>Starting capture is always an explicit action. The engine checks the source, records or processes it, and reports each stage in the workspace.</p><Button onClick={() => navigate("live")}>Open Live Studio<ArrowRight size={14} /></Button></Panel>
+      <Panel title="2. Monitor creators" description="Save channels once, then start live monitoring or watch a dedicated VOD folder."><p>Each creator keeps separate live clips, recordings, a VOD inbox, processed VODs, and failed VODs. Existing files are kept when a monitor is removed.</p><Button onClick={() => navigate("creators")}>Manage creators<ArrowRight size={14} /></Button></Panel>
+      <Panel title="3. Review clips" description="Generated clips appear in the library with matching TXT metadata."><p>Edit the title and description before publishing. A clip can be downloaded or shown in its local folder.</p><Button onClick={() => navigate("clips")}>Open clip library<ArrowRight size={14} /></Button></Panel>
+      <Panel title="4. Publish" description="Choose Zernio or prepare a manual browser upload."><p>Zernio jobs run through the configured provider. Manual handoff opens your default browser; you select the video and complete the final Publish action yourself.</p><Button onClick={() => navigate("publishing")}>Open publishing<ArrowRight size={14} /></Button></Panel>
+    </div>
+  </div>;
+}
 function AboutPage() {
-  return (
-    <>
-      <PageHeading eyebrow="PROJECT INFORMATION" title="About StreamSnip AI" description="A local-first creator workspace for stream capture, transcription, highlight analysis, clip production, and publishing." />
-      <section className="about-hero-card">
-        <div className="about-brand-icon"><Clapperboard size={28} /></div>
-        <div><div className="eyebrow">CREATED BY SCARZERO</div><h2>StreamSnip AI</h2><p>Created and maintained by Sifat Jaman / ScarZero. Capture, edit, and publish standout moments from streams and video files.</p></div>
-      </section>
-      <div className="about-info-grid">
-        <section className="panel-card"><div className="eyebrow">LOCAL-FIRST</div><h3>Your engine, your files</h3><p>Capture, local transcription, FFmpeg rendering, clip metadata, and settings are stored on this computer. Hosted AI and publishing services are optional integrations.</p></section>
-        <section className="panel-card"><div className="eyebrow">WORKFLOW</div><h3>From stream to short</h3><p>StreamSnip monitors a source, transcribes speech, scores candidate moments, applies the selected layout and captions, and writes clip files with post metadata.</p></section>
-        <section className="panel-card"><div className="eyebrow">CURRENT RELEASE</div><h3>3.0.0</h3><p>As documented by the existing project README. The creator workspace is the redesigned interface for the current local engine.</p></section>
-      </div>
-      <section className="panel-card about-links-card">
-        <h3>Project links</h3>
-        <div className="about-links-list">
-          <a href="https://github.com/sifat-jaman-13/stream-clip-ai" target="_blank" rel="noreferrer"><ExternalLink size={15} /> GitHub source</a>
-          <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest" target="_blank" rel="noreferrer"><ExternalLink size={15} /> Latest release</a>
-          <a href="https://sifat-jaman-13.github.io/stream-clip-ai/" target="_blank" rel="noreferrer"><ExternalLink size={15} /> Project website</a>
-        </div>
-        <p className="field-help">The project uses a proprietary non-commercial-use license. Review the repository LICENSE before redistribution or commercial use.</p>
-      </section>
-    </>
-  );
+  return <div className="page-stack">
+    <PageHeading title="About StreamSnip AI" description="A local-first creator clipping workspace." />
+    <Panel title="Application" description="StreamSnip AI connects live monitoring, transcription, AI-assisted highlight detection, video rendering, and publishing handoff.">
+      <div className="about-brand"><span className="brand-mark"><Clapperboard size={22} /></span><span><strong>StreamSnip AI</strong><small>Creator Studio · Local workspace</small></span></div>
+      <p>The Python engine handles capture and processing on this computer. The interface reads engine state from the local API; provider credentials stay in local configuration.</p>
+      <div className="project-links"><a href="https://github.com/sifat-jaman-13/stream-clip-ai" target="_blank" rel="noreferrer"><ExternalLink size={15} />GitHub source</a><a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest" target="_blank" rel="noreferrer"><ExternalLink size={15} />Latest release</a></div>
+    </Panel>
+  </div>;
 }

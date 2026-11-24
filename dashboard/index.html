@@ -1,2 +1,39 @@
-﻿<!doctype html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#090d18" /><meta name="description" content="StreamSnip AI — live stream monitoring and intelligent clip production." /><title>StreamSnip AI</title><link rel="icon" type="image/svg+xml" href="/dashboard/favicon.svg" /><script>window.__STREAMSNIP_TOKEN__ = "";</script></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#282c34" />
+    <meta name="description" content="StreamSnip AI — a local creator studio for stream capture, clip review, and publishing handoff." />
+    <title>StreamSnip AI · Creator Studio</title>
+    <link rel="icon" type="image/svg+xml" href="/dashboard/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500;600;700&family=Google+Sans+Flex:GRAD,opsz,ROND,wdth,wght@0..100,6..144,0..100,25..151,1..1000&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Lato:wght@400;700;900&family=Montserrat:wght@400;500;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Open+Sans:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+    <script>
+    try {
+      const savedTheme = localStorage.getItem("streamsnip.theme") || "";
+      const aliases = { midnight: "github", graphite: "github", dark: "studio-dark", light: "studio-light", studio: "studio-light", odyssey: "odysseus" };
+      const resolvedTheme = aliases[savedTheme] || savedTheme;
+      document.documentElement.dataset.theme = ["odysseus", "studio-light", "studio-dark", "github", "odysseas"].includes(resolvedTheme) ? resolvedTheme : "odysseus";
+      const fontFamilies = {
+        "google-sans": '"Google Sans Flex", "Google Sans", "Segoe UI", Arial, sans-serif',
+        inter: '"Inter", Arial, sans-serif', roboto: '"Roboto", Arial, sans-serif',
+        "open-sans": '"Open Sans", Arial, sans-serif', montserrat: '"Montserrat", Arial, sans-serif',
+        poppins: '"Poppins", Arial, sans-serif', lato: '"Lato", Arial, sans-serif',
+        "nunito-sans": '"Nunito Sans", Arial, sans-serif', "dm-sans": '"DM Sans", Arial, sans-serif',
+        "ibm-plex-sans": '"IBM Plex Sans", Arial, sans-serif', "space-grotesk": '"Space Grotesk", Arial, sans-serif',
+        "fira-code": '"Fira Code", Consolas, monospace', "jetbrains-mono": '"JetBrains Mono", Consolas, monospace'
+      };
+      const savedFont = localStorage.getItem("streamsnip.font");
+      const defaultFont = !savedFont || savedFont === "google-sans" ? "jetbrains-mono" : savedFont;
+      if (defaultFont !== savedFont) localStorage.setItem("streamsnip.font", defaultFont);
+      document.documentElement.style.setProperty("--font-family", fontFamilies[defaultFont] || fontFamilies["jetbrains-mono"]);
+    } catch { document.documentElement.dataset.theme = "odysseus"; }
+  </script>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

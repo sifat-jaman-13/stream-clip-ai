@@ -1,52 +1,63 @@
-# StreamSnip AI — React Dashboard
+# StreamSnip AI Creator Studio
 
-The React dashboard is a separate frontend for the existing StreamSnip AI Python engine. It uses the engine's local HTTP API; it does not replace the capture, transcription, rendering, AI, or publishing backend.
+The dashboard is the React, TypeScript, and Vite frontend for StreamSnip AI. It is the default local interface and connects to the Python application through its loopback-only FastAPI API.
 
-## Current dashboard areas
+The Python application remains responsible for capture, creator monitoring, transcription, AI analysis, rendering, files, and publishing integrations. The API transport adapts the established application services; it is not a separate capture engine.
 
-- **Overview** — session status, creator monitors, and recent clips.
-- **Live Studio** — add creator profiles, start/stop live monitors, and manage recorded-VOD folder watchers.
-- **Clip library** — search, preview, reveal, and delete generated clips.
-- **Published** — view clips already recorded in the backend's Posted registry.
-- **Activity** — review events returned by the local engine.
-- **Settings and Help** — migration guidance; advanced provider and application settings remain in the classic interface for now.
+## Workspace areas
+
+- **Dashboard** - engine status, current session, recent clips, and creator activity.
+- **Live Studio** - choose a Twitch/YouTube live source or a local video/VOD. Configure Capture, AI provider, Transcription, and Captions before starting.
+- **Creators** - manage independent live monitors and recorded-VOD folder watchers.
+- **Clip library** - search, preview, inspect, edit metadata, and prepare clips.
+- **Published** - review clips recorded in the local Posted registry.
+- **Hype words** - edit the phrase list used by local highlight scoring.
+- **Publishing** - configure Zernio accounts or prepare a manual upload in the system browser.
+- **Settings** - manage application-wide storage and appearance. Session-specific processing settings belong in Live Studio.
+- **Activity, Help, and About** - inspect engine events and access workflow and project information.
+
+Opening the dashboard does not start capture or a creator monitor. Starting and stopping work are explicit user actions.
 
 ## Requirements
 
 - Windows 10 or 11.
-- Python 3.10–3.12 for the documented backend setup.
-- Node.js with npm.
-- FFmpeg available on PATH for video processing.
+- Python 3.10 or later (Python 3.12 is used in the commands below).
+- Node.js and npm compatible with the installed Vite version.
+- FFmpeg available on PATH for media processing.
 
-## 1. Install the Python backend dependencies
+## Production build
 
-Run these commands from the repository root, not from the dashboard folder:
+Run these commands from the repository root:
 
 ~~~powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+
+Set-Location .\dashboard
+npm ci
+npm run build
+Set-Location ..
+python autoclip.py
 ~~~
 
-If the repository's .venv already exists and its dependencies are installed, skip this step. If PowerShell blocks virtual-environment activation, you can call the environment's interpreter directly with ..\.venv\Scripts\python.exe from this folder.
+The Python application serves the compiled dashboard from /dashboard/ and opens it by default when the build is present. The root URL redirects to /dashboard/. The production bundle is written to dashboard/dist.
 
-## 2. Start the existing Python engine
+## Development mode
 
-Open a first PowerShell terminal in the repository root:
+Use two PowerShell terminals.
+
+**Terminal 1 - start the Python application from the repository root:**
 
 ~~~powershell
 $env:STREAMSNIP_PORT = "8204"
 .\.venv\Scripts\python.exe .\autoclip.py
 ~~~
 
-The port setting matters: the Vite development proxy targets http://127.0.0.1:8204. Without this environment variable, the Python app chooses an available random port by default.
+The fixed port is required by the Vite proxy configuration. The app uses an available port automatically when STREAMSNIP_PORT is omitted.
 
-Keep this terminal open while using StreamSnip AI. The Python app also opens its classic interface; the React dashboard is opened separately in the next step.
-
-## 3. Install and start the React dashboard
-
-Open a second PowerShell terminal:
+**Terminal 2 - start Vite from the dashboard folder:**
 
 ~~~powershell
 Set-Location .\dashboard
@@ -54,9 +65,9 @@ npm ci
 npm run dev
 ~~~
 
-Open **http://127.0.0.1:5173/dashboard/**. Vite proxies /api and /clips requests to the Python engine on port 8204.
+Open http://127.0.0.1:5173/dashboard/. Vite proxies /api and /clips to the Python application at http://127.0.0.1:8204.
 
-In Vite development, the React frontend obtains the running engine's local session token from /api/session. In production, the Python handler injects that process token into the built dashboard HTML. The session endpoint accepts requests only when the Host is loopback and any supplied Origin is also loopback. Keep the backend bound to localhost; do not expose it to your LAN or the public internet.
+In development, the frontend obtains the running process's session token from /api/session. In production, the Python application injects its process token into the built dashboard HTML. The local API validates loopback host and client addresses. Keep the service on localhost; do not expose it to a LAN or the public internet.
 
 ## Development checks
 
@@ -67,24 +78,30 @@ npm run lint
 npm run build
 ~~~
 
-The production build is written to dashboard/dist.
-
 Run the Python regression suite from the repository root:
 
 ~~~powershell
 .\.venv\Scripts\python.exe -m pytest -q
+python -m py_compile autoclip.py api_server.py
 ~~~
 
-## Important migration note
+## Architecture notes
 
-The Python backend continues to serve the classic interface at its root URL. After npm run build, the same Python HTTP server serves the React bundle at /dashboard/. During development, Vite serves the same route at port 5173. The Settings and Help pages intentionally point users to the classic interface for features that have not been migrated.
+- React owns the presentation and local workspace interactions.
+- The Python application owns capture and media-processing behavior.
+- FastAPI and Uvicorn provide the local HTTP transport around the existing application handler.
+- Session-specific capture, AI, transcription, and caption configuration is grouped in Live Studio so users can review it before starting.
+- Global Settings is reserved for application-wide storage and appearance.
+- The default appearance is Odysseus with JetBrains Mono. Users can select another theme or font from the appearance controls.
+- Provider credentials remain in local application settings and are not returned to the frontend.
+- Hosted AI providers receive transcript text when selected. The AI provider tab identifies the transcript-sharing behavior.
 
-No capture or publishing job is started simply by opening the dashboard. Monitoring and clip deletion are separate actions initiated from their controls. Publishing controls remain in the classic interface until that part of the migration is complete.
+Publishing creates an external side effect. Do not run a real publish test unless you intend to create a public or scheduled post.
 
 ## Troubleshooting
 
-- **Engine offline:** confirm the Python terminal is still running and that it was started with STREAMSNIP_PORT=8204.
-- **POST requests return 403:** restart the backend after updating the Python source, then reload the Vite page so it fetches a fresh session token.
-- **Port 8204 is already in use:** stop the other process only if you know it is safe to stop, or choose another backend port and update dashboard/vite.config.ts to match.
-- **Missing video previews:** verify that the Python engine is running and that the clip is still present in the local clip folders.
+- **Engine unavailable:** confirm the Python application is still running and that it was started with STREAMSNIP_PORT=8204.
+- **POST requests return 403:** reload the dashboard to fetch the current session token. Restart the Python application after updating backend source.
+- **Port 8204 is in use:** stop the other process only when you know it is safe, or update dashboard/vite.config.ts and STREAMSNIP_PORT to the same unused port.
+- **Missing video previews:** verify the Python application is running and that the clip still exists in its local output folder.
 - **Missing packages:** run npm ci in dashboard, or python -m pip install -r requirements.txt from the repository root.

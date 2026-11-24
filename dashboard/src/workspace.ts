@@ -69,7 +69,7 @@ const emptyState: DashboardState = {
 };
 
 const emptyAI: AISettings = {
-  provider: "hooks",
+  provider: "gemini",
   ollama_url: "http://127.0.0.1:11434",
   ollama_model: "",
   gemini_model: "gemini-3.8-flash",

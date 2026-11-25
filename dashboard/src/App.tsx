@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity, AlertCircle, ArrowRight, ArrowUpRight, BadgeCheck, Check, CheckCircle2,
-  ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clapperboard, CloudUpload, Cpu, Download,
+  ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clapperboard, CloudUpload, Copy, Cpu, Download,
   ExternalLink, Eye, FileText, FileVideo, FolderOpen, HardDrive, Info, LayoutDashboard,
   Menu, MoreHorizontal, Palette, Pause, Play, Plus, Radio,
   RadioTower, RefreshCw, Search, Send, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Square, Trash2,
@@ -190,6 +190,7 @@ export default function App() {
   const [quitting, setQuitting] = useState(false);
   const [toast, setToast] = useState<ToastDetail | null>(null);
   const themeControlRef = useRef<HTMLDivElement | null>(null);
+  const globalSearchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => installWindowLeaseLifecycle(), []);
 
@@ -219,6 +220,20 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
+      if ((event.key === "k" && (event.ctrlKey || event.metaKey)) || (event.key === "/" && !isEditing && !event.ctrlKey && !event.metaKey && !event.altKey)) {
+        event.preventDefault();
+        globalSearchRef.current?.focus();
+        globalSearchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, []);
 
   useEffect(() => {
     if (!themeOpen) return;
@@ -285,11 +300,12 @@ export default function App() {
   };
   const connected = workspace.connected;
   const running = workspace.state.running;
+  const activeCreators = workspace.creators.filter((creator) => creator.running || isCreatorCaptureActive(creator, workspace)).length;
   const title = pageInfo[page].title;
   const selectedTheme = themes.find((item) => item.id === theme) || themes[0];
 
   return <div className="app-shell">
-    <Sidebar page={page} navigate={navigate} connected={connected} running={running} mobileOpen={mobileOpen} close={() => setMobileOpen(false)} />
+    <Sidebar page={page} navigate={navigate} connected={connected} running={running} clipTotal={workspace.state.clip_total} activeCreators={activeCreators} mobileOpen={mobileOpen} close={() => setMobileOpen(false)} />
     {mobileOpen ? <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} /> : null}
     <div className="main-shell">
       <header className="topbar">
@@ -300,8 +316,8 @@ export default function App() {
         <div className="topbar-tools">
           <form className="global-search" onSubmit={handleSearch}>
             <Search size={16} />
-            <input aria-label="Search clips" placeholder="Search clips" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} />
-            <kbd>Enter</kbd>
+            <input ref={globalSearchRef} aria-label="Search clips" placeholder="Search clips" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} />
+            {globalSearch ? <button type="button" className="search-clear-btn" aria-label="Clear global search" onClick={() => setGlobalSearch("")}><X size={13} /></button> : <kbd>/</kbd>}
           </form>
           <EnginePill connected={connected} running={running} stopping={workspace.state.stopping} />
           <div className="theme-control" ref={themeControlRef}>
@@ -355,8 +371,8 @@ export default function App() {
   </div>;
 }
 
-function Sidebar({ page, navigate, connected, running, mobileOpen, close }: {
-  page: PageId; navigate: (page: PageId) => void; connected: boolean; running: boolean; mobileOpen: boolean; close: () => void;
+function Sidebar({ page, navigate, connected, running, clipTotal, activeCreators, mobileOpen, close }: {
+  page: PageId; navigate: (page: PageId) => void; connected: boolean; running: boolean; clipTotal: number; activeCreators: number; mobileOpen: boolean; close: () => void;
 }) {
   return <aside className={"sidebar" + (mobileOpen ? " sidebar-open" : "")}>
     <div className="brand-row">
@@ -370,7 +386,8 @@ function Sidebar({ page, navigate, connected, running, mobileOpen, close }: {
         <span className="nav-group-title">{group.label}</span>
         {group.items.map((item) => {
           const Icon = item.icon;
-          return <button key={item.id} className={"nav-item" + (page === item.id ? " active" : "")} aria-current={page === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon size={18} /><span>{item.label}</span></button>;
+          const badge = item.id === "clips" && clipTotal > 0 ? count(clipTotal) : item.id === "creators" && activeCreators > 0 ? count(activeCreators) : "";
+          return <button key={item.id} className={"nav-item" + (page === item.id ? " active" : "")} aria-current={page === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon size={18} /><span>{item.label}</span>{badge ? <b className={"nav-badge" + (item.id === "creators" ? " is-live" : "")}>{badge}</b> : null}</button>;
         })}
       </div>)}
     </nav>
@@ -900,7 +917,7 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
         <Field label="Post title"><input maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Add a title" /></Field>
         <Field label="Post description"><textarea rows={5} maxLength={2200} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Write a description" /></Field>
         <div className="inspector-actions"><Button kind="primary" onClick={() => void saveMetadata()} disabled={!title.trim() || !!busy}><Check size={15} />Save details</Button><Button onClick={() => openForPublishing(selectedClip)} disabled={published}><Send size={15} />Publish</Button></div>
-        <div className="inspector-subactions"><a href={clipUrl(selectedClip.name)} download><Download size={14} />Download clip</a><button onClick={() => void post("reveal-clip", "/api/reveal", { name: selectedClip.name })}><FolderOpen size={14} />Show in folder</button></div>
+        <div className="inspector-subactions"><a href={clipUrl(selectedClip.name)} download><Download size={14} />Download clip</a><button type="button" onClick={() => { const text = [title.trim(), description.trim()].filter(Boolean).join("\n\n"); if (!text) return; void navigator.clipboard?.writeText(text).then(() => window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "success", title: "Copied post copy" } }))); }}><Copy size={14} />Copy post copy</button><button onClick={() => void post("reveal-clip", "/api/reveal", { name: selectedClip.name })}><FolderOpen size={14} />Show in folder</button></div>
         <Button kind="danger" size="small" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete clip</Button>
       </aside> : null}
     </div>

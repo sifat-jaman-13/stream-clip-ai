@@ -74,3 +74,8 @@ youtube_token.json
 # Persistent local browser sessions (contain social-account cookies)
 browser-profiles/
 tmp-browser-profile/
+
+# Local SQLite runtime database
+streamsnip.db
+streamsnip.db-shm
+streamsnip.db-wal

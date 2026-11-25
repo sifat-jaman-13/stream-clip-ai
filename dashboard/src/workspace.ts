@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, loadDashboard } from "./api";
 import type { Clip, Creator, DashboardState, LogEntry } from "./types";
 
@@ -174,7 +174,10 @@ export function useWorkspace() {
     if (settingsTimer.current !== null) window.clearTimeout(settingsTimer.current);
     setSaving(true);
     settingsTimer.current = window.setTimeout(() => {
-      void apiPost("/api/settings", next)
+      const creatorId = String(next.creator_id || "");
+      void (creatorId && next.mode !== "file"
+        ? apiPost("/api/creators/settings/save", { id: creatorId, settings: next })
+        : apiPost("/api/settings", next))
         .then(() => {
           setSavedAt(Date.now());
           setSaveError("");
@@ -197,7 +200,9 @@ export function useWorkspace() {
     setSettings(value);
     setSaving(true);
     try {
-      await apiPost("/api/settings", value);
+      const creatorId = String(value.creator_id || "");
+      if (creatorId && value.mode !== "file") await apiPost("/api/creators/settings/save", { id: creatorId, settings: value });
+      else await apiPost("/api/settings", value);
       setSavedAt(Date.now());
       setSaveError("");
     } catch (reason) {
@@ -207,6 +212,16 @@ export function useWorkspace() {
     } finally {
       setSaving(false);
     }
+  }, []);
+
+
+  const loadCreatorSettings = useCallback(async (creatorId: string) => {
+    const result = await apiGet<{ settings: AppSettings }>("/api/creators/settings?id=" + encodeURIComponent(creatorId));
+    const next = { ...result.settings, creator_id: creatorId };
+    settingsRef.current = next;
+    setSettings(next);
+    setSaveError("");
+    return next;
   }, []);
 
   const updateAI = useCallback((patch: Partial<AISettings>) => {
@@ -306,6 +321,7 @@ export function useWorkspace() {
     loadConfig,
     updateSettings,
     saveSettings,
+    loadCreatorSettings,
     updateAI,
     saveAI,
     testAI,

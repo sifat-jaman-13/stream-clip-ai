@@ -22,6 +22,8 @@ configurable from the local UI.
 """
 import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64, uuid, shlex, tempfile
 import math
+import sqlite3
+from contextlib import contextmanager
 import mimetypes
 import urllib.request
 from importlib import metadata as importlib_metadata
@@ -2441,7 +2443,10 @@ class Core:
                         "started": None, "done": 0, "last_name": "", "errors": 0}
         self.session = {"clips": 0, "chunks": 0, "started": None, "ended": None}
         self.settings = load_settings()
+        self.default_settings = clean_cfg(self.settings)
+        self.default_settings.pop("creator_id", None)
         apply_storage_paths(self.settings)
+        self._init_creator_database()
         self.creators = self._load_creator_profiles()
         self.creator_workers = {}
         self.creator_engines = {}
@@ -2454,28 +2459,114 @@ class Core:
             self.push(STORAGE_PATH_WARNING)
 
     def _creator_profiles_path(self):
+        # Legacy import source only. Creator records now live in SQLite.
         return _data_root / "creators.json"
 
-    def _load_creator_profiles(self):
+    def _creator_default_settings(self):
+        return clean_cfg(getattr(self, "default_settings", getattr(self, "settings", {})))
+
+    @contextmanager
+    def _creator_db(self):
+        _data_root.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(str(_data_root / "streamsnip.db"), timeout=10)
+        connection.row_factory = sqlite3.Row
         try:
-            raw = json.loads(self._creator_profiles_path().read_text(encoding="utf-8"))
-            if not isinstance(raw, list):
-                return {}
-            profiles = {}
-            for item in raw[:100]:
-                if not isinstance(item, dict):
-                    continue
-                creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(item.get("id", "")))[:48]
-                name = re.sub(r"[\r\n\x00-\x1f]", "", str(item.get("name", ""))).strip()[:80]
-                target = str(item.get("target", "")).strip()[:1000]
-                if creator_id and name and target:
-                    profiles[creator_id] = {"id": creator_id, "name": name, "target": target}
-            return profiles
-        except (OSError, ValueError, TypeError):
-            return {}
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode = WAL")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
+    def _init_creator_database(self):
+        with self._creator_db() as db:
+            db.execute("""CREATE TABLE IF NOT EXISTS creators (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, target TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS creator_settings (
+                creator_id TEXT PRIMARY KEY REFERENCES creators(id) ON DELETE CASCADE,
+                settings_json TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""")
+            # One-time, idempotent migration from the old JSON creator registry.
+            legacy_path = self._creator_profiles_path()
+            remove_legacy = False
+            if legacy_path.is_file():
+                try:
+                    legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+                    remove_legacy = isinstance(legacy, list)
+                except (OSError, ValueError, TypeError):
+                    legacy = []
+                if isinstance(legacy, list):
+                    for item in legacy[:100]:
+                        if not isinstance(item, dict):
+                            continue
+                        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(item.get("id", "")))[:48]
+                        name = re.sub(r"[\r\n\x00-\x1f]", "", str(item.get("name", ""))).strip()[:80]
+                        target = str(item.get("target", "")).strip()[:1000]
+                        if creator_id and name and target:
+                            db.execute("INSERT OR IGNORE INTO creators(id,name,target) VALUES(?,?,?)",
+                                       (creator_id, name, target))
+            default_settings = json.dumps(self._creator_default_settings(), ensure_ascii=False)
+            db.execute("""INSERT OR IGNORE INTO creator_settings(creator_id,settings_json)
+                SELECT id, ? FROM creators""", (default_settings,))
+        # The database is now authoritative; remove the migrated JSON registry.
+        if remove_legacy:
+            try:
+                legacy_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _load_creator_profiles(self):
+        with self._creator_db() as db:
+            rows = db.execute("SELECT id,name,target FROM creators ORDER BY created_at,id").fetchall()
+        return {row["id"]: {"id": row["id"], "name": row["name"], "target": row["target"]}
+                for row in rows}
 
     def _save_creator_profiles(self):
-        atomic_json_write(self._creator_profiles_path(), list(self.creators.values()))
+        # Synchronize the in-memory registry transactionally; FK cascade removes settings
+        # for deleted creators while preserving every other creator's configuration.
+        with self._creator_db() as db:
+            current_ids = set(self.creators)
+            existing_ids = {row[0] for row in db.execute("SELECT id FROM creators")}
+            for creator_id in existing_ids - current_ids:
+                db.execute("DELETE FROM creators WHERE id=?", (creator_id,))
+            for creator_id, profile in self.creators.items():
+                db.execute("""INSERT INTO creators(id,name,target) VALUES(?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET name=excluded.name,target=excluded.target""",
+                    (creator_id, profile["name"], profile["target"]))
+                db.execute("INSERT OR IGNORE INTO creator_settings(creator_id,settings_json) VALUES(?,?)",
+                           (creator_id, json.dumps(self._creator_default_settings(), ensure_ascii=False)))
+
+    def get_creator_settings(self, creator_id):
+        self._init_creator_database()
+        with self._creator_db() as db:
+            row = db.execute("SELECT settings_json FROM creator_settings WHERE creator_id=?", (creator_id,)).fetchone()
+        if not row:
+            if creator_id not in self.creators:
+                raise ValueError("Creator monitor not found.")
+            return self._creator_default_settings()
+        try:
+            return clean_cfg(json.loads(row["settings_json"]))
+        except (ValueError, TypeError):
+            return self._creator_default_settings()
+
+    def save_creator_settings(self, creator_id, settings):
+        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
+        if creator_id not in self.creators:
+            raise ValueError("Creator monitor not found.")
+        self._init_creator_database()
+        cfg = clean_cfg({**self.get_creator_settings(creator_id), **(settings if isinstance(settings, dict) else {})})
+        cfg["mode"] = "live"
+        cfg["target"] = self.creators[creator_id]["target"]
+        cfg["creator_id"] = creator_id
+        with self._creator_db() as db:
+            db.execute("INSERT OR IGNORE INTO creators(id,name,target) VALUES(?,?,?)",
+                       (creator_id, self.creators[creator_id]["name"], self.creators[creator_id]["target"]))
+            db.execute("""INSERT INTO creator_settings(creator_id,settings_json,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)
+                ON CONFLICT(creator_id) DO UPDATE SET settings_json=excluded.settings_json,updated_at=CURRENT_TIMESTAMP""",
+                (creator_id, json.dumps(cfg, ensure_ascii=False)))
+        return cfg
 
     def _creator_paths(self, creator_id):
         profile = getattr(self, "creators", {}).get(creator_id, {})
@@ -2729,7 +2820,8 @@ class Core:
             if active >= MAX_ACTIVE_CREATOR_MONITORS:
                 raise ValueError(f"All {MAX_ACTIVE_CREATOR_MONITORS} creator monitor slots are active. Stop one before starting another.")
             paths = self._ensure_creator_paths(creator_id)
-            cfg = clean_cfg({**self.settings, "mode": "live", "target": profile["target"],
+            creator_settings = self.get_creator_settings(creator_id)
+            cfg = clean_cfg({**creator_settings, "mode": "live", "target": profile["target"],
                              "creator_id": creator_id,
                              "creator_out_dir": str(paths["live_clips"]),
                              "creator_rec_dir": str(paths["live_recordings"])})
@@ -2926,9 +3018,13 @@ class Core:
                 paths = self._ensure_creator_paths(creator_id)
                 cfg["creator_out_dir"] = str(paths["live_clips"])
                 cfg["creator_rec_dir"] = str(paths["live_recordings"])
+                cfg = self.save_creator_settings(creator_id, cfg)
             self.settings = cfg
             apply_storage_paths(cfg)
-            save_settings(cfg)
+            if not creator_id:
+                self.default_settings = clean_cfg(cfg)
+                self.default_settings.pop("creator_id", None)
+                save_settings(cfg)
             self.engine = Engine(cfg, self.emit)
             self.running = True
             self.phase, self.status = "waiting", "Starting..."
@@ -3604,6 +3700,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, {"names": names})
             if path == "/api/creators":
                 return self._send(200, {"creators": CORE.list_creators()})
+            if path == "/api/creators/settings":
+                q = urllib.parse.parse_qs(u.query)
+                creator_id = q.get("id", [""])[0]
+                return self._send(200, {"settings": CORE.get_creator_settings(creator_id)})
             if path == "/api/config":
                 # Public UI configuration only: never expose provider credentials.
                 return self._send(200, {"settings": CORE.settings, "ai": public_ai_settings(),
@@ -3684,6 +3784,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True})
                 if path == "/api/start":
                     CORE.start(clean_cfg(body)); return self._send(200, {"ok": True})
+                if path == "/api/creators/settings/save":
+                    return self._send(200, {"settings": CORE.save_creator_settings(body.get("id", ""), body.get("settings", {}))})
                 if path == "/api/creators/add":
                     return self._send(200, CORE.add_creator(body))
                 if path == "/api/creators/remove":
@@ -3702,9 +3804,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     cfg = clean_cfg(body)
                     if CORE.running and (cfg.get("rec_dir") != CORE.settings.get("rec_dir") or cfg.get("out_dir") != CORE.settings.get("out_dir")):
                         return self._send(400, {"error": "Stop clipping before changing storage folders."})
-                    CORE.settings = cfg
-                    if not CORE.running: apply_storage_paths(cfg)
-                    save_settings(cfg)
+                    creator_id = str(cfg.get("creator_id") or "")
+                    if creator_id and creator_id in CORE.creators:
+                        CORE.save_creator_settings(creator_id, cfg)
+                    else:
+                        CORE.settings = cfg
+                        CORE.default_settings = clean_cfg(cfg)
+                        CORE.default_settings.pop("creator_id", None)
+                        if not CORE.running: apply_storage_paths(cfg)
+                        save_settings(cfg)
                     return self._send(200, {"ok": True})
                 if path == "/api/stop":
                     CORE.stop(bool(body.get("force"))); return self._send(200, {"ok": True})

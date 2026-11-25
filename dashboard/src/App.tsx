@@ -495,6 +495,10 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
     || null;
   const sourceTarget = mode === "live" ? (target.trim() || selectedCreator?.target || "") : target;
   const running = workspace.state.running;
+  useEffect(() => {
+    if (!selectedCreatorId || running) return;
+    void workspace.loadCreatorSettings(selectedCreatorId).catch(() => undefined);
+  }, [selectedCreatorId, running, workspace.loadCreatorSettings]);
   const update = (patch: Partial<AppSettings>) => { setOutputPreview(""); workspace.updateSettings(patch); };
   const detectedCreator = mode === "live" ? (selectedCreator?.name || inferCreatorTag(sourceTarget)) : "";
   const providerLabel = ({ gemini: "Gemini API", ollama: "Ollama", hooks: "Built-in hooks", huggingface: "Hugging Face", custom: "Custom API" } as Record<string, string>)[workspace.ai.provider] || "AI provider";
@@ -590,7 +594,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
       {mode === "live" ? <div className="live-creator-picker">
         <div className="live-creator-picker-heading"><div><strong>Choose a creator</strong><small>Saved creators keep their live recordings and clips in their own folders.</small></div><Button size="small" onClick={() => navigate("creators")}><Users size={14} />Manage creators</Button></div>
         {workspace.creators.length ? <div className="live-creator-list" role="listbox" aria-label="Saved creators">
-          {workspace.creators.map((creator) => <button type="button" role="option" aria-selected={selectedCreator?.id === creator.id} key={creator.id} className={"live-creator-option" + (selectedCreator?.id === creator.id ? " selected" : "")} onClick={() => { setSelectedCreatorId(creator.id); changeTarget(creator.target); setOutputPreview(""); setFacecamResult(null); }}>
+          {workspace.creators.map((creator) => <button type="button" role="option" aria-selected={selectedCreator?.id === creator.id} key={creator.id} className={"live-creator-option" + (selectedCreator?.id === creator.id ? " selected" : "")} onClick={() => { setSelectedCreatorId(creator.id); setTarget(creator.target); setOutputPreview(""); setFacecamResult(null); }}>
             <span className="creator-initial">{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span><span className="live-creator-option-copy"><strong>{creator.name}</strong><small>{isCreatorCaptureActive(creator, workspace) ? "Recording in Live Studio" : creator.status || creator.phase || creator.target}</small></span><StatusPill tone={isCreatorCaptureActive(creator, workspace) || creator.running ? "live" : "neutral"}>{isCreatorCaptureActive(creator, workspace) ? "Recording" : creator.running ? "Monitoring" : "Saved"}</StatusPill><span className="creator-select-mark"><Check size={15}/></span>
           </button>)}
         </div> : <EmptyState icon={Users} title="No saved creators yet" description="Add a Twitch or YouTube creator first. Your saved channels will appear here." action={<Button onClick={() => navigate("creators")}>Add a creator</Button>} />}

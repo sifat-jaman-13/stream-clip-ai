@@ -34,7 +34,6 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            ollama_models, select_moments, test_provider)
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
-from browser_automation import BrowserAutomationManager, BrowserAutomationError
 APP_VERSION = "4.0.4"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
@@ -777,13 +776,13 @@ def load_posted_registry():
 def save_posted_registry(registry):
     atomic_json_write(POSTED_FILE, registry)
 
-def mark_clip_posted(name, platform="manual", accounts=None):
+def record_zernio_posted(name, accounts=None):
     path = find_clip_path(name)
     if not path:
         raise ValueError("Clip not found.")
     registry = load_posted_registry()
     registry[name] = {
-        "posted_at": time.time(), "platform": str(platform or "manual")[:40],
+        "posted_at": time.time(), "platform": "zernio",
         "accounts": [str(x)[:100] for x in (accounts or [])][:20],
     }
     save_posted_registry(registry)
@@ -3006,7 +3005,7 @@ class Core:
         cfg = dict(self._config_for(), enabled=enabled)
         return ZernioPublisher(
             self.push, cfg,
-            on_success=lambda path: mark_clip_posted(path.name, "zernio", list(cfg.get("accounts", {}).keys()) or
+            on_success=lambda path: record_zernio_posted(path.name, list(cfg.get("accounts", {}).keys()) or
                                                      [key for key in ("instagram", "youtube") if cfg.get(key + "_id")]),
         ) if ZERNIO_AVAILABLE else None
 
@@ -3173,10 +3172,6 @@ class Core:
         return {"ok": True, "message": message}
 
     def shutdown(self):
-        try:
-            BROWSER_AUTOMATION.stop()
-        except Exception:
-            pass
         with self.lock:
             engine = self.engine
             worker = self.worker
@@ -3291,7 +3286,7 @@ class Core:
                     try:
                         publisher = self._make_publisher(provider, False)
                         if publisher:
-                            publisher.on_success = lambda path: mark_clip_posted(path.name, "zernio", list(selected_accounts.keys()))
+                            publisher.on_success = lambda path: record_zernio_posted(path.name, list(selected_accounts.keys()))
                         delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
                         with self.lock: self.posting["current"] = name
                         self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
@@ -3598,7 +3593,6 @@ def grab_output_preview(mode, target, settings=None):
                          + (last_error or "Try another source or layout."))
 
 CORE = Core()
-BROWSER_AUTOMATION = BrowserAutomationManager()
 TOKEN = secrets.token_urlsafe(24)
 
 # ------------------------------------------------------------------ http server
@@ -3798,8 +3792,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, {"settings": CORE.settings, "ai": public_ai_settings(),
                                         "transcriber_models": MODELS, "layouts": LAYOUTS,
                                         "output_formats": list(OUTPUT_FORMATS.keys())})
-            if path == "/api/browser/status":
-                return self._send(200, BROWSER_AUTOMATION.status())
             if path == "/api/publishing/status":
                 # publishing_status exposes only credential-presence flags, never the API key.
                 return self._send(200, CORE.publishing_status())
@@ -3921,22 +3913,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
                     return self._send(200, CORE.publish_clips([str(n) for n in names]))
-                if path == "/api/browser/prepare":
-                    name = str(body.get("name", ""))
-                    clip_path = find_clip_path(name)
-                    if not clip_path:
-                        return self._send(404, {"error": "Clip not found."})
-                    result = BROWSER_AUTOMATION.prepare(
-                        video_path=clip_path,
-                        platform=str(body.get("platform", "")),
-                        title=str(body.get("title", "")),
-                        description=str(body.get("description", "")),
-                        browser=str(body.get("browser", "default")).lower(),
-                    )
-                    return self._send(200, result)
-                if path == "/api/browser/close":
-                    BROWSER_AUTOMATION.close()
-                    return self._send(200, {"ok": True})
                 if path == "/api/publishing":
                     return self._send(200, CORE.publishing_save(body))
                 if path == "/api/publishing/accounts":
@@ -4047,10 +4023,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     sidecar.write_text(metadata, encoding="utf-8")
                     CORE.push(f"Updated TXT metadata for {name}")
                     return self._send(200, {"ok": True, "name": name, "caption": metadata})
-                if path == "/api/posted/mark":
-                    name = str(body.get("name", ""))
-                    posted = mark_clip_posted(name, body.get("platform", "manual"), body.get("accounts", []))
-                    return self._send(200, {"ok": True, "posted": posted})
                 if path == "/api/open_folder":
                     open_folder(OUT); return self._send(200, {"ok": True})
                 if path == "/api/output-preview":
@@ -5294,19 +5266,18 @@ function updateRun(s){
   $$(".left .scroll input,.left .scroll select,.left .scroll .seg button,.left .scroll .sw button").forEach(el=>{});
 }
 function openSocialPost(c){
-  const titleText=c.title||((c.caption||"").split("\n")[0]||c.name);
-  const descText=c.description||((c.caption||"").split("\n\n").slice(1).join("\n\n"));
-  const platforms=[
-    {id:"instagram",label:"Instagram",url:"https://www.instagram.com/create/select/"},
-    {id:"tiktok",label:"TikTok",url:"https://www.tiktok.com/upload"},
-    {id:"facebook",label:"Facebook",url:"https://www.facebook.com/reels/create/"},
-    {id:"youtube",label:"YouTube",url:"https://www.youtube.com/upload"}
-  ];
+  const titleText=c.title||((c.caption||"").split("
+")[0]||c.name);
+  const descText=c.description||((c.caption||"").split("
+
+").slice(1).join("
+
+"));
   const title=h("input",{class:"text",type:"text",maxlength:"100"});
   title.value=titleText;
   const description=h("textarea",{class:"text"});
   description.value=descText;
-  const directChecks={},manualChecks={};
+  const directChecks={};
   const savedAccounts=Object.assign({},Z.accounts||{});
   if(!Object.keys(savedAccounts).length){
     if(Z.instagram_id)savedAccounts.instagram=Z.instagram_id;
@@ -5320,62 +5291,33 @@ function openSocialPost(c){
     directChecks[id]=input;
     return h("label",{class:"platform-pick"},input,platformLabels[id]||id);
   }));
-  const manualChoices=h("div",{class:"platform-picks"},...platforms.map(platform=>{
-    const input=h("input",{type:"checkbox"});input.checked=true;manualChecks[platform.id]=input;
-    return h("label",{class:"platform-pick"},input,platform.label);
-  }));
   const selectedAccounts=()=>Object.fromEntries(connected.filter(([id])=>directChecks[id]&&directChecks[id].checked));
   const close=()=>{overlay.remove();document.removeEventListener("keydown",onKey)};
   const onKey=e=>{if(e.key==="Escape")close()};
   const overlay=h("div",{class:"overlay",onclick:e=>{if(e.target===overlay)close()}});
-  const copyValue=(value,label)=>{
-    navigator.clipboard.writeText(value).then(
-      ()=>toast(label+" copied. Paste it into the platform form.","ok"),
-      ()=>toast("Clipboard access blocked; select and copy the text manually.","bad")
-    );
-  };
-  const copyTitle=h("button",{class:"btn ghost",onclick:()=>copyValue(title.value.trim(),"Title")},"Copy title");
-  const copyDescription=h("button",{class:"btn ghost",onclick:()=>copyValue(description.value.trim(),"Description")},"Copy description");
   const publish=h("button",{class:"btn primary",disabled:!connected.length||!Z.api_key_set,onclick:async()=>{
     const accounts=selectedAccounts();
     if(!Object.keys(accounts).length){toast("Select at least one connected Zernio account","bad");return}
     if(!title.value.trim()){toast("Add a post title first","bad");return}
     publish.disabled=true;publish.textContent="Queueing publish...";
     try{
-      const result=await api("/api/publishing/publish-one",{name:c.name,title:title.value.trim(),description:description.value.trim(),account_ids:accounts});
-      toast("Clip queued for direct publishing to "+Object.keys(accounts).join(", "), "ok");
+      await api("/api/publishing/publish-one",{name:c.name,title:title.value.trim(),description:description.value.trim(),account_ids:accounts});
+      toast("Clip queued for Zernio publishing to "+Object.keys(accounts).join(", "), "ok");
       close();
     }catch(error){toast(error.message,"bad");publish.disabled=false;publish.textContent="Publish via Zernio"}
   }},"Publish via Zernio");
-  const open=h("button",{class:"btn ghost",onclick:()=>{
-    const selected=platforms.filter(p=>manualChecks[p.id]&&manualChecks[p.id].checked);
-    if(!selected.length){toast("Select at least one platform","bad");return}
-    if(!title.value.trim()){toast("Add a post title first","bad");return}
-    let opened=0;
-    for(const platform of selected){
-      const tab=window.open(platform.url,"_blank");
-      if(tab)opened++;
-    }
-    if(opened<selected.length)toast("Some tabs were blocked. Allow pop-ups for StreamSnip AI and try again.","bad");
-    else toast("Opened "+opened+" platform page(s). Upload the clip, copy its title/description, and publish.","ok");
-    close();
-  }},"Open selected platforms");
-  const markPosted=h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/posted/mark",{name:c.name,platform:"manual"});toast("Moved to Posted","ok");close();selectedClips.delete(c.name);order="";poll(true)}catch(e){toast(e.message,"bad")}}},"Mark as posted");
   const cancel=h("button",{class:"btn ghost",onclick:close},"Cancel");
   overlay.append(h("div",{class:"post-dialog"},
-    h("h3",{},"Prepare social post"),
-    h("p",{class:"sub"},"Clip: "+c.name+" · Select one or more destinations"),
+    h("h3",{},"Prepare Zernio post"),
+    h("p",{class:"sub"},"Clip: "+c.name+" · Choose connected Zernio destinations"),
     h("label",{},"Post title"),
     title,
     h("label",{},"Description and hashtags"),
     description,
-    h("label",{},"Publish directly through your connected Zernio accounts"),
+    h("label",{},"Connected Zernio accounts"),
     choices,
-    h("p",{class:"post-note"},connected.length?"Direct publishing uploads this clip and sends your edited caption to the selected connected accounts. Curse words do not block publishing; the clip uses whatever censoring was applied during rendering.":"Connect Zernio and select social accounts in Settings to publish directly."),
-    h("label",{},"Manual upload fallback"),
-    manualChoices,
-    h("p",{class:"post-note"},"Manual upload opens the selected native upload pages. Download the clip, attach it yourself, and paste the copied title and description; platform security prevents silent form filling or local-file attachment."),
-    h("div",{class:"prow",style:"justify-content:flex-end"},cancel,h("a",{class:"btn ghost",href:"/clips/"+encodeURIComponent(c.name),download:c.name},"Download clip"),copyTitle,copyDescription,markPosted,publish,open)
+    h("p",{class:"post-note"},connected.length?"Zernio uploads this clip and submits your title and description to the selected connected accounts.":"Connect Zernio and select social accounts in Publishing settings to publish."),
+    h("div",{class:"prow",style:"justify-content:flex-end"},cancel,h("a",{class:"btn ghost",href:"/clips/"+encodeURIComponent(c.name),download:c.name},"Download clip"),publish)
   ));
   document.body.append(overlay);
   document.addEventListener("keydown",onKey);
@@ -5395,7 +5337,6 @@ function clipCard(c){
       h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB · "+origin),
         h("span",{class:"acts"},
           h("button",{class:"ib post",title:"Prepare a post for Instagram, TikTok, Facebook, or YouTube",onclick:post},"Post"),
-          ...(!c.posted?[h("button",{class:"ib",title:"Move this clip to Posted after you publish it manually",onclick:async()=>{try{await api("/api/posted/mark",{name:c.name,platform:"manual"});selectedClips.delete(c.name);toast("Moved to Posted","ok");order="";poll(true)}catch(e){toast(e.message,"bad")}}},"Mark posted")]:[]),
           h("button",{class:"ib",title:"Copy caption + hashtags",onclick:copy},ico("copy",15)),
           h("a",{class:"ib",title:"Download",href:"/clips/"+encodeURIComponent(c.name),download:c.name},ico("download",15)),
           h("button",{class:"ib",title:"Show in folder",onclick:()=>api("/api/reveal",{name:c.name}).catch(e=>toast(e.message,"bad"))},ico("folder",15)),
@@ -5409,7 +5350,7 @@ function renderClips(list,total=0){
   $("#empty").hidden=list.length>0;$("#grid").hidden=list.length===0;
   const cnt=$("#cnt");cnt.hidden=!list.length;cnt.textContent=list.length;
   $("#empty h4").textContent=clipTab==="posted"?"No posted clips yet":"No clips yet";
-  $("#empty p").textContent=clipTab==="posted"?"Clips appear here after a successful Zernio post or when you mark a manual upload as posted.":"Paste a Twitch or YouTube live link (or choose a video file) and hit Start. Finished clips appear here, ready to review and post.";
+  $("#empty p").textContent=clipTab==="posted"?"Clips appear here after a successful Zernio post.":"Paste a Twitch or YouTube live link (or choose a video file) and hit Start. Finished clips appear here, ready to review and post.";
   $("#clip-page-label").textContent=list.length?`${clipOffset+1}-${clipOffset+list.length} of ${total} clips`:"0 clips";
   $("#btn-clips-newer").disabled=clipOffset===0;
   $("#btn-clips-older").disabled=clipOffset+list.length>=total;

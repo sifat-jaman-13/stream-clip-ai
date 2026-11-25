@@ -422,3 +422,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Manual Post now opens the selected platform URL through the operating system's default browser, preserving the user's ordinary browser profile and sign-in.
 - Removed the browser picker and Playwright dependency. Video selection and metadata paste are manual; the final Publish click remains with the user.
 - Added regression tests proving legacy browser selections are ignored and no profile directory is created.
+
+## Zernio-only publishing cleanup (25 Nov 2026)
+
+- Removed the legacy manual platform-opening and external-post marking flows; publishing is exclusively through Zernio.
+- Removed obsolete browser automation packaging, API actions, UI styles, and documentation.
+- Preserved Zernio account configuration, publishing callbacks, and existing clip/recording data.

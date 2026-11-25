@@ -97,11 +97,12 @@ class RegressionTests(unittest.TestCase):
             with patch.object(autoclip, "OUT", output), patch.object(autoclip, "POSTED_FILE", root / "posted.json"), patch.object(autoclip, "CORE", None):
                 autoclip.invalidate_clip_cache()
                 self.assertEqual(len(autoclip.list_clips(clip_tab="clips")), 1)
-                autoclip.mark_clip_posted(clip.name, "manual")
+                autoclip.record_zernio_posted(clip.name)
                 self.assertEqual(autoclip.list_clips(clip_tab="clips"), [])
                 posted = autoclip.list_clips(clip_tab="posted")
                 self.assertEqual([item["name"] for item in posted], [clip.name])
                 self.assertEqual(posted[0]["posted"], True)
+                self.assertEqual(autoclip.load_posted_registry()[clip.name]["platform"], "zernio")
                 autoclip.forget_posted_clips([clip.name])
                 self.assertEqual(len(autoclip.list_clips(clip_tab="clips")), 1)
 

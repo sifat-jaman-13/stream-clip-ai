@@ -20,7 +20,7 @@ A desktop media workflow that connects stream capture and creator monitoring to 
 
 The React and TypeScript Creator Studio runs in the local browser. The Python application owns capture and media processing and exposes application services through a loopback-only FastAPI transport. The user can run a built dashboard or use Vite during development.
 
-Manual publishing opens the platform in the operating system's default browser. The user selects the local video and completes the final Publish action. Direct publishing uses a configured Zernio integration and connected social accounts.
+Publishing is handled exclusively through the configured Zernio integration and its connected social accounts. StreamSnip does not provide a separate manual platform-upload or browser-handoff workflow.
 
 ## Capabilities and constraints
 

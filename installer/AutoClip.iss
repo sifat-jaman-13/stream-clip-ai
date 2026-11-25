@@ -27,7 +27,6 @@ Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubd
 Source: "..\autoclip.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\api_server.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\dashboard\dist\*"; DestDir: "{app}\source\dashboard\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\browser_automation.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\ai_highlights.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\post_metadata.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\zernio_poster.py"; DestDir: "{app}\source"; Flags: ignoreversion

@@ -23,8 +23,8 @@ The React Creator Studio is the default interface. The Python engine continues t
    - **Transcription:** local speech model, language, and optional custom transcriber.
    - **Captions:** aspect ratio, framing, subtitle appearance, creator credit, and profanity filtering.
 4. **Creators** - Save channels for independent live monitoring and recorded-VOD folder watching.
-5. **Clip library** - Preview generated clips, inspect or edit their title and description, and prepare a post.
-6. **Publishing / Published** - Publish through a configured Zernio connection or hand off to a platform's upload page in the system browser. Successfully posted clips are tracked separately.
+5. **Clip library** - Preview generated clips, inspect or edit their title and description, and prepare a Zernio post.
+6. **Publishing / Published** - Publish and schedule through Zernio. Successfully published clips are tracked separately.
 
 Opening Live Studio does not start a recording. Capture starts only after the user presses **Start capture**. The application saves the visible session settings before sending the start request.
 
@@ -45,10 +45,8 @@ Opening Live Studio does not start a recording. Capture starts only after the us
 - Record live streams at a configurable 8,000–50,000 Kbps target (8,000 Kbps minimum).
 - Generate transcript-grounded titles, descriptions, and hashtags.
 - Review clips before sharing and keep posted clips in a separate Published view.
-- Publish through Zernio when an API key and eligible connected social account are available.
-- Publish an individual clip to selected connected platforms/accounts from its review dialog, or use the manual browser handoff.
+- Publish and schedule clips exclusively through Zernio when an API key and eligible connected social account are available.
 - Track completed posts in a persistent Published view; scheduled posts are not marked as published before they are accepted.
-- Use manual browser handoff as a fallback; the user selects the local video and completes the final Publish action.
 - Choose an application theme and font. Odysseus is the default theme; JetBrains Mono is the default interface font. Google Sans, Inter, Roboto, and other font options are available.
 
 Highlight scores are estimates, not guarantees of reach or engagement.
@@ -135,7 +133,6 @@ Enable a creator's VOD folder watcher and place a completed recording in its Wat
 
 For direct publishing, configure the Zernio API key and connect the social accounts you intend to use. Select destinations and edit the post copy before publishing. Availability depends on account permissions and each platform's media requirements.
 
-Manual publishing opens the selected platform in the operating system's default browser and prepares the post text. You must select the local video and complete the final Publish action yourself. StreamSnip does not silently attach a local file or take control of another site's authenticated form.
 
 Do not run a real publishing test unless you intend to create a public or scheduled post. Account and credential checks that do not submit a post are safe read-only checks.
 
@@ -229,7 +226,6 @@ The production dashboard bundle is written to dashboard/dist. GitHub Actions run
 - [Issues](https://github.com/sifat-jaman-13/stream-clip-ai/issues)
 - [Discussions](https://github.com/sifat-jaman-13/stream-clip-ai/discussions)
 - [Project site](https://sifat-jaman-13.github.io/stream-clip-ai/)
-- [Browser-assisted publishing guide](docs/BROWSER_AUTOMATION.md)
 
 ## Licence
 

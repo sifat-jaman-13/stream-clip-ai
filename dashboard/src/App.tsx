@@ -8,12 +8,12 @@ import {
   Users, Video, WandSparkles, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { apiGet, apiPost, installWindowLeaseLifecycle } from "./api";
+import { apiPost, installWindowLeaseLifecycle } from "./api";
 import { useWorkspace, type AppSettings, type Workspace } from "./workspace";
 import type { Clip, Creator, LogEntry } from "./types";
 import "./App.css";
 
-type PageId = "overview" | "live" | "creators" | "clips" | "post-clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
+type PageId = "overview" | "live" | "creators" | "clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
 type ThemeId = "odysseus" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseas";
 type FontId = "google-sans" | "inter" | "roboto" | "open-sans" | "montserrat" | "poppins" | "lato" | "nunito-sans" | "dm-sans" | "ibm-plex-sans" | "space-grotesk" | "fira-code" | "jetbrains-mono";
 type StudioSetupTab = "capture" | "ai" | "speech" | "captions";
@@ -50,7 +50,6 @@ const pageInfo: Record<PageId, { title: string; description: string }> = {
   live: { title: "Live Studio", description: "Choose a source and control capture from your local engine." },
   creators: { title: "Creators", description: "Manage independent live monitors and recorded-VOD folders." },
   clips: { title: "Clip library", description: "Review generated clips and edit metadata." },
-  "post-clips": { title: "Post Your Clips", description: "Choose destinations for finished clips and prepare each upload." },
   published: { title: "Published", description: "Clips recorded in your local posted registry." },
   publishing: { title: "Publishing", description: "Connect Zernio or prepare a manual upload in your browser." },
   words: { title: "Hype words", description: "Tune the phrase list used by the local highlight scorer." },
@@ -68,7 +67,6 @@ const navGroups: Array<{ label: string; items: Array<{ id: PageId; label: string
   ] },
   { label: "Content", items: [
     { id: "clips", label: "Clip library", icon: Clapperboard },
-    { id: "post-clips", label: "Post Your Clips", icon: CloudUpload },
     { id: "published", label: "Published", icon: BadgeCheck },
     { id: "words", label: "Hype words", icon: WandSparkles },
   ] },
@@ -191,7 +189,6 @@ export default function App() {
   const [busy, setBusy] = useState("");
   const [quitting, setQuitting] = useState(false);
   const [toast, setToast] = useState<ToastDetail | null>(null);
-  const [browserStatus, setBrowserStatus] = useState<RecordLike>({});
 
   useEffect(() => installWindowLeaseLifecycle(), []);
 
@@ -221,11 +218,6 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  useEffect(() => {
-    let cancelled = false;
-    apiGet<RecordLike>("/api/browser/status").then((value) => { if (!cancelled) setBrowserStatus(value); }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, []);
 
   useEffect(() => {
     if (!themeOpen) return;
@@ -328,9 +320,8 @@ export default function App() {
         {page === "overview" ? <OverviewPage workspace={workspace} navigate={navigate} openClip={(clip) => { setSelectedClip(clip); navigate("clips"); }} /> : null}
         {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
         {page === "creators" ? <CreatorsPage workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
-        {page === "post-clips" ? <PostYourClipsPage workspace={workspace} busy={busy} post={post} /> : null}
         {page === "clips" || page === "published" ? <ClipLibraryPage key={page + "|" + workspace.clipOffset} workspace={workspace} published={page === "published"} navigate={navigate} query={clipSearch} setQuery={setClipSearch} selectedClip={selectedClip} setSelectedClip={setSelectedClip} openForPublishing={openForPublishing} openBulkPublishing={openBulkPublishing} busy={busy} post={post} /> : null}
-        {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} browserStatus={browserStatus} setBrowserStatus={setBrowserStatus} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
+        {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
         {page === "words" ? <HypeWordsPage key={workspace.words.text} workspace={workspace} /> : null}
         {page === "activity" ? <ActivityPage workspace={workspace} busy={busy} post={post} /> : null}
         {page === "settings" ? <SettingsPage workspace={workspace} theme={theme} setTheme={setTheme} busy={busy} post={post} navigate={navigate} /> : null}
@@ -820,7 +811,6 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
       description: value,
     }));
   };
-  const [platform, setPlatform] = useState("youtube");
   const [confirm, setConfirm] = useState<"selected" | "all" | null>(null);
   const clips = workspace.state.clips;
   const filtered = useMemo(() => clips.filter((clip) => (clip.title || "").concat(" ", clip.name, " ", clip.creator_name || "", " ", clip.source || "").toLowerCase().includes(query.toLowerCase())), [clips, query]);
@@ -876,7 +866,6 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
         <Field label="Post description"><textarea rows={5} maxLength={2200} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Write a description" /></Field>
         <div className="inspector-actions"><Button kind="primary" onClick={() => void saveMetadata()} disabled={!title.trim() || !!busy}><Check size={15} />Save details</Button><Button onClick={() => openForPublishing(selectedClip)} disabled={published}><Send size={15} />Publish</Button></div>
         <div className="inspector-subactions"><a href={clipUrl(selectedClip.name)} download><Download size={14} />Download clip</a><button onClick={() => void post("reveal-clip", "/api/reveal", { name: selectedClip.name })}><FolderOpen size={14} />Show in folder</button></div>
-        {!published ? <div className="mark-posted"><label>Record an external post<select value={platform} onChange={(event) => setPlatform(event.target.value)}><option value="youtube">YouTube</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="manual">Other / manual</option></select></label><Button size="small" onClick={() => void post("mark-posted", "/api/posted/mark", { name: selectedClip.name, platform, accounts: [platform] })}><BadgeCheck size={14} />Mark as published</Button></div> : <StatusPill tone="success">Recorded as published · {dateLabel(selectedClip.posted_at)}</StatusPill>}
         <Button kind="danger" size="small" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete clip</Button>
       </aside> : null}
     </div>
@@ -884,8 +873,8 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
   </div>;
 }
 
-function PublishingPage({ workspace, clip, bulkNames, browserStatus, setBrowserStatus, busy, post, openLibrary }: {
-  workspace: Workspace; clip: Clip | null; bulkNames: string[]; browserStatus: RecordLike; setBrowserStatus: (value: RecordLike) => void;
+function PublishingPage({ workspace, clip, bulkNames, busy, post, openLibrary }: {
+  workspace: Workspace; clip: Clip | null; bulkNames: string[];
   busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; openLibrary: () => void;
 }) {
   const pub = workspace.publishing.providers?.zernio || workspace.publishing;
@@ -894,10 +883,8 @@ function PublishingPage({ workspace, clip, bulkNames, browserStatus, setBrowserS
   const [schedule, setSchedule] = useState(num(pub.schedule_minutes, 0));
   const [visibility, setVisibility] = useState(String(pub.visibility || "public"));
   const [accountsByPlatform, setAccountsByPlatform] = useState<Record<string, string>>(pub.accounts || {});
-  const [platform, setPlatform] = useState("youtube");
   const [title, setTitle] = useState(clip?.title || "");
   const [description, setDescription] = useState(clip?.description || "");
-  const [manualMessage, setManualMessage] = useState("");
   const selectedCount = Object.keys(accountsByPlatform).length;
   const toggleAccount = (account: { id: string; platform: string }) => setAccountsByPlatform((current) => {
     const next = { ...current };
@@ -917,16 +904,8 @@ function PublishingPage({ workspace, clip, bulkNames, browserStatus, setBrowserS
     if (bulkNames.length) await post("publish-batch", "/api/publishing/publish", { names: bulkNames, account_ids: accountsByPlatform });
     else if (clip) await post("publish-one", "/api/publishing/publish-one", { name: clip.name, title, description, account_ids: accountsByPlatform });
   };
-  const manualUpload = async () => {
-    if (!clip) return;
-    const result = await post<RecordLike>("manual-upload", "/api/browser/prepare", { name: clip.name, platform, title, description, browser: "default" });
-    if (result) {
-      setManualMessage("Opened " + platform + " in your system default browser. Select the video and complete the final publish step there.");
-      try { setBrowserStatus(await apiGet<RecordLike>("/api/browser/status")); } catch { /* Keep the handoff message. */ }
-    }
-  };
   return <div className="page-stack">
-    <PageHeading title="Publishing" description="Connect a social account, queue clips through Zernio, or prepare a manual upload." actions={<Button onClick={() => void workspace.refreshPublishing()}><RefreshCw size={15} />Refresh status</Button>} />
+    <PageHeading title="Publishing" description="Connect social accounts and publish through Zernio." actions={<Button onClick={() => void workspace.refreshPublishing()}><RefreshCw size={15} />Refresh status</Button>} />
     <div className="publishing-layout">
       <div className="publishing-main">
         <Panel title="Zernio connection" description="Use your Zernio API key to load connected social accounts.">
@@ -955,70 +934,10 @@ function PublishingPage({ workspace, clip, bulkNames, browserStatus, setBrowserS
           {clip || bulkNames.length ? <div className="publishing-job-actions">
             {clip ? <><Field label="Post title"><input maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} /></Field><Field label="Post description"><textarea rows={5} maxLength={2200} value={description} onChange={(event) => setDescription(event.target.value)} /></Field></> : null}
             <Button kind="primary" onClick={() => void publish()} disabled={!selectedCount || !!busy}><Send size={15} />Queue with Zernio</Button>
-            <div className="manual-upload-box"><strong>Manual upload</strong><small>Opens the platform in your default browser. You select the video and complete publishing there.</small>
-              <Field label="Platform"><select value={platform} onChange={(event) => setPlatform(event.target.value)}><option value="youtube">YouTube</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option></select></Field>
-              <Button onClick={() => void manualUpload()} disabled={!clip || !!busy}><ExternalLink size={14} />Open upload page</Button>
-              {manualMessage ? <div className="inline-success"><CheckCircle2 size={15} />{manualMessage}</div> : null}
-            </div>
           </div> : null}
-        </Panel>
-        <Panel title="Browser handoff" description="Manual upload uses your normal browser session.">
-          <div className="browser-status-row"><span>Default browser</span><strong>{browserStatus.browser || "System default"}</strong></div>
-          <div className="browser-status-row"><span>File selection</span><strong>Manual</strong></div>
-          <div className="browser-status-row"><span>Final publish</span><strong>Manual confirmation</strong></div>
-          <small className="field-hint">StreamSnip AI does not reuse a private browser profile or click Publish for you.</small>
         </Panel>
       </aside>
     </div>
-  </div>;
-}
-
-function PostYourClipsPage({ workspace, busy, post }: {
-  workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>;
-}) {
-  const platforms = [
-    { id: "youtube", label: "YouTube" },
-    { id: "facebook", label: "Facebook" },
-    { id: "instagram", label: "Instagram" },
-    { id: "tiktok", label: "TikTok" },
-  ];
-  const clips = workspace.state.clips.filter((item) => !item.posted);
-  const [destinations, setDestinations] = useState<Record<string, string[]>>({});
-  const [activeClip, setActiveClip] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, string>>({});
-  const toggle = (name: string, platform: string) => setDestinations((current) => {
-    const selected = current[name] || [];
-    return { ...current, [name]: selected.includes(platform) ? selected.filter((value) => value !== platform) : [...selected, platform] };
-  });
-  const selectedTotal = Object.values(destinations).reduce((sum, values) => sum + values.length, 0);
-  const prepare = async (clip: Clip) => {
-    const selected = destinations[clip.name] || [];
-    if (!selected.length) return;
-    setActiveClip(clip.name);
-    for (const platform of selected) {
-      const key = clip.name + "::" + platform;
-      setResults((current) => ({ ...current, [key]: "Opening upload and attaching clip…" }));
-      const result = await post<RecordLike>("post-clip-" + platform, "/api/browser/prepare", {
-        name: clip.name, platform, title: clip.title || clip.name, description: clip.description || "",
-      });
-      setResults((current) => ({ ...current, [key]: result?.ready_for_review && result?.file_selected && result?.title_filled && result?.description_filled ? "Video attached and metadata verified — review, then Publish" : result?.error || "Automation could not confirm the upload" }));
-    }
-    setActiveClip(null);
-  };
-  return <div className="page-stack">
-    <PageHeading title="Post Your Clips" description="Every finished clip appears here. Choose one or more destinations, then prepare its upload." actions={<Button onClick={() => void workspace.refresh()}><RefreshCw size={15} />Refresh clips</Button>} />
-    <div className="storage-note"><ShieldCheck size={17} /><span><strong>Your final say stays yours</strong><small>A dedicated browser profile keeps your platform sign-in. StreamSnip attaches the clip and verifies the title/caption before showing Ready. You click Publish yourself.</small></span></div>
-    <Panel title="Ready to post" description={count(clips.length) + " clips available · " + count(selectedTotal) + " destinations selected"}>
-      {clips.length ? <div className="post-clip-list">{clips.map((clip) => <article className="post-clip-card" key={clip.name}>
-        <video className="post-clip-preview" src={clipUrl(clip.name)} muted playsInline preload="metadata" />
-        <div className="post-clip-details"><strong>{clip.title || clip.name}</strong><small>{clip.name} · {sizeLabel(clip.size_mb)}</small>
-          <div className="post-platforms">{platforms.map((platform) => <label key={platform.id} className="post-platform-option"><input type="checkbox" checked={(destinations[clip.name] || []).includes(platform.id)} onChange={() => toggle(clip.name, platform.id)} /><span>{platform.label}</span></label>)}</div>
-          <small className="post-metadata-preview">Title: {clip.title || "No generated title yet"}<br />Description: {clip.description || "No generated description yet"}</small>
-          <Button kind="primary" onClick={() => void prepare(clip)} disabled={!!busy || activeClip !== null || !(destinations[clip.name] || []).length}><ExternalLink size={14} />{activeClip === clip.name ? "Preparing…" : "Attach video + fill details"}</Button>
-          {(destinations[clip.name] || []).map((platform) => results[clip.name + "::" + platform] ? <div className="post-result" key={platform}><span>{platforms.find((item) => item.id === platform)?.label}</span><small>{results[clip.name + "::" + platform]}</small></div> : null)}
-        </div>
-      </article>)}</div> : <EmptyState icon={Clapperboard} title="No clips ready to post" description="Newly rendered clips will appear here automatically." />}
-    </Panel>
   </div>;
 }
 
@@ -1277,7 +1196,7 @@ function HelpPage({ navigate }: { navigate: (page: PageId) => void }) {
         <li><strong>Choose transcription.</strong> Faster-Whisper runs locally. Select a model and language (Auto detects); the speech model may download the first time.</li>
         <li><strong>Set framing and captions.</strong> Load a still frame in Facecam detection and layout. Drag the pink facecam box and cyan game-capture box independently, then save both regions. In Captions, choose one of four location presets or switch to Custom caption and review the placement preview.</li>
         <li><strong>Start processing.</strong> Confirm the source and settings, then explicitly press Start. Watch progress in Studio and Activity.</li>
-        <li><strong>Review and publish.</strong> Open Clip library, edit the TXT-backed title/description, then use Publishing for Zernio or manual browser upload.</li>
+        <li><strong>Review and publish.</strong> Open Clip library, edit the TXT-backed title/description, then use Publishing to send through Zernio.</li>
       </ol>
       <Button kind="primary" onClick={() => navigate("live")}>Open Live Studio setup <ArrowRight size={14} /></Button>
     </Panel>
@@ -1287,8 +1206,8 @@ function HelpPage({ navigate }: { navigate: (page: PageId) => void }) {
       <Panel title="Selected Gemini model & automatic fallback" description="Your selected model is always tried first. Temporary failures are retried, then the engine moves to the next available model."><p>The exact Gemini model selected in AI settings gets up to three attempts first. If it keeps failing, StreamSnip moves to the next available Gemini model and tries that model up to three times. It makes one ordered pass through available Gemini models, then uses configured fallback providers (local Ollama first, followed by configured Hugging Face or custom API). A fallback is announced in Activity and does not overwrite your selection: your chosen Gemini model is tried first again on the next clip/task.</p><p>For the best fallback coverage, install Ollama and download a model, or configure another provider in AI settings.</p></Panel>
       <Panel title="Creators & multi-monitor" description="Save channels and run independent monitor jobs."><p>Add a Twitch or YouTube channel in Creators. Each creator has isolated live/VOD folders and status. Start or stop each monitor individually; stop all before closing the app. Removing a profile does not delete its existing media.</p><Button onClick={() => navigate("creators")}>Manage creators</Button></Panel>
       <Panel title="Transcription & captions" description="Speech recognition and visual subtitle rendering."><p>Faster-Whisper uses your PC and compatible NVIDIA GPU acceleration. Larger models can improve recognition but use more VRAM and time. Facecam (pink) and game capture (cyan) are independent source-frame regions in Live Studio. Caption placement offers Top, Upper third, Lower third, and Bottom presets; Custom caption exposes manual size, color, stroke, alignment, and nudge controls.</p><Button onClick={() => navigate("live")}>Configure framing and captions</Button></Panel>
-      <Panel title="Clip library & metadata" description="Find, edit, and organize generated clips."><p>Clips include a video and matching text metadata. Gemini, Ollama, Hugging Face, and compatible custom models generate both title and description from the clip transcript. Built-in Hook words mode uses its strongest matched phrase as the title and a conservative transcript-based description. Search the library, preview, edit title/description, open the containing folder, download, or mark a clip published. Published is a local registry; it does not prove a platform post unless publishing reports success.</p><Button onClick={() => navigate("clips")}>Open clip library</Button></Panel>
-      <Panel title="Publishing" description="Automated scheduling or manual upload."><p>Save your Zernio key, load connected accounts, select accounts, and save defaults. Queueing sends a job through Zernio. Manual upload opens the platform in your default browser; select the file and complete the final publish action yourself.</p><Button onClick={() => navigate("publishing")}>Publishing settings</Button></Panel>
+      <Panel title="Clip library & metadata" description="Find, edit, and organize generated clips."><p>Clips include a video and matching text metadata. Gemini, Ollama, Hugging Face, and compatible custom models generate both title and description from the clip transcript. Built-in Hook words mode uses its strongest matched phrase as the title and a conservative transcript-based description. Search the library, preview, edit title/description, open the containing folder, or download. The Published view records successful Zernio publishing jobs.</p><Button onClick={() => navigate("clips")}>Open clip library</Button></Panel>
+      <Panel title="Publishing" description="Zernio scheduling and publishing."><p>Save your Zernio key, load connected accounts, select accounts, and save defaults. Queueing sends the selected clip through Zernio.</p><Button onClick={() => navigate("publishing")}>Publishing settings</Button></Panel>
       <Panel title="Settings & component checks" description="Storage, app updates, and runtime versions."><p>Settings controls output/recording folders and appearance. Check app update queries the latest GitHub release. Check components reads installed FFmpeg, Python package versions and the selected Whisper model cache; it is read-only and does not install anything. Update components changes packages and may download the speech model—review the confirmation first.</p><Button onClick={() => navigate("settings")}>Open Settings</Button></Panel>
       <Panel title="Troubleshooting" description="Common issues and where to look."><p><strong>Source won’t open:</strong> verify the URL, stream is live/public, and Streamlink/FFmpeg are available. <strong>AI test fails:</strong> check API key, model availability, quota, and network; review Activity. <strong>Clips are missing:</strong> check output folder and Activity errors. <strong>Slow processing:</strong> use a smaller Whisper model, reduce parallel workload, and check GPU/VRAM. <strong>Disk full:</strong> move output/recording folders in Settings.</p><Button onClick={() => navigate("activity")}>Open Activity log</Button></Panel>
     </div>

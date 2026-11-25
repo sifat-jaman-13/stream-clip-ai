@@ -435,7 +435,6 @@ try {
         "ai_highlights.py",
         "post_metadata.py",
         "zernio_poster.py",
-        "browser_automation.py",
         "facecam_detect.py",
         "requirements.txt",
         "models\face_detection_yunet_2023mar.onnx",

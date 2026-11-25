@@ -155,7 +155,6 @@ const actionLabels: Record<string, string> = {
   "/api/publishing/publish": "Queue publishing",
   "/api/publishing/publish-one": "Queue clip publishing",
   "/api/clip-metadata": "Save clip metadata",
-  "/api/posted/mark": "Record external post",
   "/api/reveal": "Open clip location",
   "/api/ai/settings": "Save AI settings",
   "/api/ai/test": "Test AI provider",

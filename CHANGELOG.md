@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.0.4] - 2026-11-25
+
+### Fixed
+- Live Studio associates captures started from a saved creator with that creator's ID and routes new recordings and clips into the creator's dedicated folders.
+- Creator status distinguishes foreground Live Studio capture from the separate background-monitor worker, including legacy live sessions matched by their saved channel URL.
+- Creator activity counts include active Live Studio captures, and each creator row links back to its active session without confusing it with a background monitor.
+- Prevented the same saved creator from being recorded simultaneously by a Live Studio capture and a separate background-monitor worker.
+
+### Verification
+- 188 Python tests passed, including 8 subtests; all four focused creator regressions passed.
+- Frontend lint reported 0 warnings and 0 errors; TypeScript and Vite production build passed.
+- Windows installer compiled successfully; installed 4.0.4 API health and creator records verified.
+
 ## [4.0.3] - 2026-11-25
 
 ### Fixed

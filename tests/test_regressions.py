@@ -155,6 +155,123 @@ class RegressionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Twitch or YouTube"):
                 core.add_creator({"name": "Impostor", "target": "https://twitch.tv.evil.example/live"})
 
+    def test_live_studio_capture_for_saved_creator_uses_creator_owned_folders(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.creators = {
+            "creator_a": {
+                "id": "creator_a",
+                "name": "angryginge13",
+                "target": "https://www.twitch.tv/angryginge13",
+            }
+        }
+        core.running = False
+        core.settings = {}
+        core.phase = "idle"
+        core.status = "Ready when you are."
+        core.progress = 0
+        core.session = {"clips": 0, "chunks": 0, "started": None, "ended": None}
+        core.push = MagicMock()
+        paths = {
+            "live_clips": Path(tempfile.gettempdir()) / "creator-a-live-clips",
+            "live_recordings": Path(tempfile.gettempdir()) / "creator-a-live-recordings",
+        }
+        fake_engine = MagicMock()
+        fake_worker = MagicMock()
+
+        with (
+            patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg.exe"),
+            patch.object(autoclip, "streamlink_available", return_value=True),
+            patch.object(autoclip, "apply_storage_paths"),
+            patch.object(autoclip, "save_settings"),
+            patch.object(autoclip, "Engine", return_value=fake_engine) as engine_factory,
+            patch.object(autoclip.threading, "Thread", return_value=fake_worker),
+            patch.object(core, "_ensure_creator_paths", return_value=paths),
+        ):
+            core.start({
+                "mode": "live",
+                "target": "https://www.twitch.tv/angryginge13",
+                "creator_id": "creator_a",
+            })
+
+        engine_cfg = engine_factory.call_args.args[0]
+        self.assertEqual(engine_cfg["creator_id"], "creator_a")
+        self.assertEqual(engine_cfg["creator_out_dir"], str(paths["live_clips"]))
+        self.assertEqual(engine_cfg["creator_rec_dir"], str(paths["live_recordings"]))
+        fake_worker.start.assert_called_once()
+
+    def test_live_studio_capture_blocks_duplicate_background_monitor_for_same_creator(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.creators = {
+            "creator_a": {
+                "id": "creator_a",
+                "name": "angryginge13",
+                "target": "https://www.twitch.tv/angryginge13",
+            }
+        }
+        core.creator_workers = {}
+        core.creator_engines = {}
+        core.creator_status = {}
+        core.engine = types.SimpleNamespace(cfg={
+            "mode": "live",
+            "target": "https://www.twitch.tv/angryginge13",
+        })
+        core.running = True
+
+        with self.assertRaisesRegex(ValueError, "already being captured in Live Studio"):
+            core.start_creator("creator_a")
+
+    def test_background_monitor_blocks_duplicate_live_studio_capture_for_same_creator(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.creators = {
+            "creator_a": {
+                "id": "creator_a",
+                "name": "angryginge13",
+                "target": "https://www.twitch.tv/angryginge13",
+            }
+        }
+        core.creator_workers = {
+            "creator_a": types.SimpleNamespace(is_alive=lambda: True)
+        }
+        core.running = False
+
+        with patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg.exe"):
+            with patch.object(autoclip, "streamlink_available", return_value=True):
+                with self.assertRaisesRegex(ValueError, "already has a background monitor"):
+                    core.start({
+                        "mode": "live",
+                        "target": "https://www.twitch.tv/angryginge13",
+                        "creator_id": "creator_a",
+                    })
+
+    def test_creator_list_marks_matching_live_studio_capture_without_claiming_monitor_is_running(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(autoclip, "_data_root", Path(directory)):
+            core = object.__new__(autoclip.Core)
+            core.lock = threading.RLock()
+            core.creators = {
+                "creator_a": {
+                    "id": "creator_a",
+                    "name": "angryginge13",
+                    "target": "https://www.twitch.tv/angryginge13",
+                }
+            }
+            core.creator_status = {"creator_a": {"phase": "offline", "status": "Monitor stopped."}}
+            core.creator_workers = {}
+            core.creator_watchers = {}
+            core.engine = types.SimpleNamespace(cfg={
+                "mode": "live",
+                "target": "https://www.twitch.tv/angryginge13",
+            })
+            core.running = True
+
+            creator = core.list_creators()[0]
+
+            self.assertFalse(creator["running"], "A Live Studio capture is not a background monitor.")
+            self.assertTrue(creator["capture_active"])
+            self.assertEqual(creator["status"], "Monitor stopped.")
+
     def test_quit_stops_all_active_creator_engines(self):
         core = object.__new__(autoclip.Core)
         core.lock = autoclip.threading.RLock()

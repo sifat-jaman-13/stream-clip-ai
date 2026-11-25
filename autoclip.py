@@ -33,7 +33,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
 from browser_automation import BrowserAutomationManager, BrowserAutomationError
-APP_VERSION = "4.0.3"
+APP_VERSION = "4.0.4"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -2510,6 +2510,16 @@ class Core:
     def list_creators(self):
         with self.lock:
             result = []
+            active_engine = getattr(self, "engine", None)
+            active_cfg = getattr(active_engine, "cfg", {}) or {}
+            capture_running = bool(getattr(self, "running", False) and active_cfg.get("mode") == "live")
+            capture_creator_id = str(active_cfg.get("creator_id") or "").strip()
+            capture_target = ""
+            if capture_running and not capture_creator_id:
+                try:
+                    capture_target = normalize_stream_target(str(active_cfg.get("target") or ""))
+                except (TypeError, ValueError):
+                    capture_target = ""
             for creator_id, profile in self.creators.items():
                 status = dict(self.creator_status.get(creator_id, {}))
                 paths = self._ensure_creator_paths(creator_id)
@@ -2522,8 +2532,18 @@ class Core:
                     status.setdefault("vod_clips", 0)
                     status.setdefault("vod_pending", 0)
                 watcher = getattr(self, "creator_watchers", {}).get(creator_id)
+                capture_active = False
+                if capture_running:
+                    if capture_creator_id:
+                        capture_active = capture_creator_id == creator_id
+                    elif capture_target:
+                        try:
+                            capture_active = normalize_stream_target(profile.get("target", "")) == capture_target
+                        except (TypeError, ValueError):
+                            capture_active = False
                 result.append({**profile, **status,
                                "running": bool(self.creator_workers.get(creator_id) and self.creator_workers[creator_id].is_alive()),
+                               "capture_active": bool(capture_active),
                                "watching_vods": bool(watcher and watcher.is_alive())})
             return result
 
@@ -2694,6 +2714,15 @@ class Core:
             worker = self.creator_workers.get(creator_id)
             if not profile:
                 raise ValueError("Creator monitor not found.")
+            active_engine = getattr(self, "engine", None)
+            active_cfg = getattr(active_engine, "cfg", {}) or {}
+            if self.running and active_cfg.get("mode") == "live":
+                try:
+                    same_source = normalize_stream_target(active_cfg.get("target", "")) == normalize_stream_target(profile.get("target", ""))
+                except (TypeError, ValueError):
+                    same_source = False
+                if same_source:
+                    raise ValueError("This creator is already being captured in Live Studio. Stop that capture before starting a background monitor.")
             if worker and worker.is_alive():
                 raise ValueError("This creator is already being monitored.")
             active = sum(1 for thread in self.creator_workers.values() if thread.is_alive())
@@ -2882,6 +2911,21 @@ class Core:
                 if not t or not pathlib.Path(t).is_file():
                     raise ValueError("That video file doesn't exist.")
             cfg = dict(cfg, target=t)
+            creator_id = str(cfg.get("creator_id") or "").strip()
+            if creator_id:
+                profile = getattr(self, "creators", {}).get(creator_id)
+                if not profile:
+                    raise ValueError("The selected creator is no longer configured. Choose it again.")
+                creator_worker = getattr(self, "creator_workers", {}).get(creator_id)
+                if creator_worker and creator_worker.is_alive():
+                    raise ValueError("This creator already has a background monitor. Stop that monitor before starting a Live Studio capture.")
+                if cfg.get("mode") != "live":
+                    raise ValueError("Saved creator folders are only available for live streams.")
+                if normalize_stream_target(profile.get("target", "")) != t:
+                    raise ValueError("The selected creator does not match the live stream URL.")
+                paths = self._ensure_creator_paths(creator_id)
+                cfg["creator_out_dir"] = str(paths["live_clips"])
+                cfg["creator_rec_dir"] = str(paths["live_recordings"])
             self.settings = cfg
             apply_storage_paths(cfg)
             save_settings(cfg)

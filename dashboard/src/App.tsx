@@ -98,6 +98,24 @@ const sizeLabel = (value?: number) => {
   const mb = num(value);
   return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb.toFixed(mb < 10 ? 1 : 0) + " MB";
 };
+const creatorTargetKey = (value: string) => {
+  const target = value.trim();
+  if (!target) return "";
+  try {
+    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(target) ? target : "https://" + target);
+    return url.hostname.toLowerCase().replace(/^www\./, "") + url.pathname.replace(/\/+$/, "").toLowerCase();
+  } catch {
+    return target.replace(/\/+$/, "").toLowerCase();
+  }
+};
+const isCreatorCaptureActive = (creator: Creator, workspace: Workspace) => {
+  if (creator.capture_active) return true;
+  const activeTarget = String(workspace.settings?.target || "");
+  return workspace.state.running
+    && workspace.state.mode === "live"
+    && !!activeTarget
+    && creatorTargetKey(activeTarget) === creatorTargetKey(creator.target);
+};
 const inferCreatorTag = (value: string) => {
   const target = value.trim();
   if (!target) return "";
@@ -127,7 +145,7 @@ const inferCreatorTag = (value: string) => {
   return "";
 };
 const phaseLabel = (phase: string) => ({
-  idle: "Idle", waiting: "Connecting", recording: "Recording", stopping: "Stopping",
+  idle: "Idle", offline: "Offline", waiting: "Connecting", recording: "Recording", stopping: "Stopping",
   transcribing: "Transcribing", analyzing: "Finding highlights", rendering: "Rendering clips",
   queued: "Queued", done: "Complete", error: "Error",
 } as Record<string, string>)[phase] || (phase ? phase.replace(/[_-]/g, " ") : "Idle");
@@ -295,7 +313,7 @@ export default function App() {
       <main className="page-content">
         {page === "overview" ? <OverviewPage workspace={workspace} navigate={navigate} openClip={(clip) => { setSelectedClip(clip); navigate("clips"); }} /> : null}
         {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
-        {page === "creators" ? <CreatorsPage creators={workspace.creators} busy={busy} post={post} /> : null}
+        {page === "creators" ? <CreatorsPage workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
         {page === "clips" || page === "published" ? <ClipLibraryPage key={page + "|" + workspace.clipOffset} workspace={workspace} published={page === "published"} navigate={navigate} query={clipSearch} setQuery={setClipSearch} selectedClip={selectedClip} setSelectedClip={setSelectedClip} openForPublishing={openForPublishing} openBulkPublishing={openBulkPublishing} busy={busy} post={post} /> : null}
         {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} browserStatus={browserStatus} setBrowserStatus={setBrowserStatus} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
         {page === "words" ? <HypeWordsPage key={workspace.words.text} workspace={workspace} /> : null}
@@ -383,7 +401,7 @@ function OverviewPage({ workspace, navigate, openClip }: { workspace: Workspace;
   const state = workspace.state;
   const recent = state.clips.slice(0, 5);
   const creators = workspace.creators;
-  const active = creators.filter((creator) => creator.running);
+  const active = creators.filter((creator) => creator.running || isCreatorCaptureActive(creator, workspace));
   return <div className="page-stack">
     <PageHeading title="Studio overview" description="Monitor sources, review the latest clips, and keep your workflow moving." actions={<Button kind="primary" onClick={() => navigate("live")}><Radio size={16} />Open Live Studio</Button>} />
     <div className="summary-strip">
@@ -397,7 +415,7 @@ function OverviewPage({ workspace, navigate, openClip }: { workspace: Workspace;
         <Panel title="Capture status" description="Your local engine and current source." action={<StatusPill tone={toneFor(state.phase, state.running)}>{phaseLabel(state.phase)}</StatusPill>}>
           <div className="capture-status">
             <span className={"capture-symbol" + (state.running ? " capture-symbol-live" : "")}><RadioTower size={23} /></span>
-            <span className="capture-copy"><strong>{state.running ? state.status : "No active capture"}</strong><small>{state.running ? (state.mode === "file" ? "Processing a video file" : "Monitoring a live stream") + " · " + duration(state.session.elapsed) : "Choose a live source or a recorded video to begin."}</small></span>
+            <span className="capture-copy"><strong>{state.running ? state.status : "No active capture"}</strong><small>{state.running ? (state.mode === "file" ? "Processing a video file" : "Recording a live stream") + " · " + duration(state.session.elapsed) : "Choose a live source or a recorded video to begin."}</small></span>
             <Button kind="primary" onClick={() => navigate("live")}>{state.running ? "View session" : "Configure capture"}<ArrowRight size={15} /></Button>
           </div>
           <WorkflowStrip phase={state.phase} running={state.running} />
@@ -408,12 +426,16 @@ function OverviewPage({ workspace, navigate, openClip }: { workspace: Workspace;
         </Panel>
       </div>
       <aside className="overview-side">
-        <Panel title="Creator monitors" description="Independent live sources." action={<Button kind="quiet" size="small" onClick={() => navigate("creators")}>Manage<ArrowUpRight size={14} /></Button>}>
-          {creators.length ? <div className="monitor-compact-list">{creators.slice(0, 5).map((creator) => <div className="monitor-compact-row" key={creator.id}>
-            <span className="creator-initial">{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span>
-            <span className="creator-compact-copy"><strong>{creator.name}</strong><small>{creator.status || creator.phase || "Saved source"}</small></span>
-            <StatusPill tone={creator.running ? "live" : "neutral"}>{creator.running ? "Live" : "Idle"}</StatusPill>
-          </div>)}</div> : <EmptyState icon={Users} title="No creator sources" description="Add a channel to monitor live streams and recorded VODs." action={<Button onClick={() => navigate("creators")}>Add creator</Button>} />}
+        <Panel title="Creator activity" description="Live Studio captures and background monitors." action={<Button kind="quiet" size="small" onClick={() => navigate("creators")}>Manage<ArrowUpRight size={14} /></Button>}>
+          {creators.length ? <div className="monitor-compact-list">{creators.slice(0, 5).map((creator) => {
+            const captureActive = isCreatorCaptureActive(creator, workspace);
+            const activeNow = creator.running || captureActive;
+            return <div className="monitor-compact-row" key={creator.id}>
+              <span className="creator-initial">{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span>
+              <span className="creator-compact-copy"><strong>{creator.name}</strong><small>{captureActive ? "Recording in Live Studio" : creator.status || creator.phase || "Saved source"}</small></span>
+              <StatusPill tone={activeNow ? "live" : "neutral"}>{captureActive ? "Recording" : creator.running ? "Monitoring" : "Idle"}</StatusPill>
+            </div>;
+          })}</div> : <EmptyState icon={Users} title="No creator sources" description="Add a channel to monitor live streams and recorded VODs." action={<Button onClick={() => navigate("creators")}>Add creator</Button>} />}
         </Panel>
         <Panel title="Latest activity" description="Recent local engine events." action={<Button kind="quiet" size="small" onClick={() => navigate("activity")}>Full activity<ArrowUpRight size={14} /></Button>}>
           {workspace.logs.length ? <div className="mini-log-list">{workspace.logs.slice(-6).reverse().map((log) => <div className="mini-log-row" key={log.id}><time>{log.t}</time><span>{log.m}</span></div>)}</div> : <div className="inline-empty">Engine events appear here when work begins.</div>}
@@ -463,10 +485,11 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
   const [facecamResult, setFacecamResult] = useState<RecordLike | null>(null);
   const [detectingFacecam, setDetectingFacecam] = useState(false);
   const [drag, setDrag] = useState<{ region: "facecam" | "game"; mode: "move" | "resize"; startX: number; startY: number; box: typeof facecamBox } | null>(null);
-  const [selectedCreatorId, setSelectedCreatorId] = useState(() => workspace.creators.find((creator) => creator.target === String(settings.target || ""))?.id || "");
+  const [selectedCreatorId, setSelectedCreatorId] = useState(() => workspace.creators.find((creator) => creator.id === String(settings.creator_id || "") || creatorTargetKey(creator.target) === creatorTargetKey(String(settings.target || "")))?.id || "");
   const selectedCreator = workspace.creators.find((creator) => creator.id === selectedCreatorId)
-    || workspace.creators.find((creator) => creator.target === target)
-    || workspace.creators[0] || null;
+    || workspace.creators.find((creator) => creator.id === String(settings.creator_id || ""))
+    || workspace.creators.find((creator) => creatorTargetKey(creator.target) === creatorTargetKey(target))
+    || null;
   const sourceTarget = mode === "live" ? (target.trim() || selectedCreator?.target || "") : target;
   const running = workspace.state.running;
   const update = (patch: Partial<AppSettings>) => { setOutputPreview(""); workspace.updateSettings(patch); };
@@ -494,6 +517,12 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
   const start = async () => {
     const source = sourceTarget.trim();
     if (!source || running || busy || !workspace.configLoaded) return;
+    const matchingCreator = mode === "live"
+      ? workspace.creators.find((creator) => creatorTargetKey(creator.target) === creatorTargetKey(source))
+      : undefined;
+    const captureConfig: AppSettings = { ...(workspace.settings || settings), mode, target: source };
+    delete captureConfig.creator_id;
+    if (matchingCreator) captureConfig.creator_id = matchingCreator.id;
     if (workspace.ai.provider === "gemini" && !workspace.ai.gemini_key_set) {
       setSetupTab("ai");
       window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: {
@@ -504,7 +533,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
       return;
     }
     try {
-      await workspace.saveSettings({ ...(workspace.settings || {}), mode, target: source });
+      await workspace.saveSettings(captureConfig);
       await workspace.saveAI();
     } catch {
       window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: {
@@ -514,7 +543,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
       } }));
       return;
     }
-    await post("start-capture", "/api/start", { ...(workspace.settings || settings), mode, target: source });
+    await post("start-capture", "/api/start", captureConfig);
   };
   const stop = async () => { await post("stop-capture", "/api/stop", { force: false }); };
   const preview = async () => {
@@ -556,13 +585,13 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
         <button className={mode === "file" ? "selected" : ""} onClick={() => changeMode("file")} disabled={running}><Video size={15} />Video file / VOD</button>
       </div>
       {mode === "live" ? <div className="live-creator-picker">
-        <div className="live-creator-picker-heading"><div><strong>Choose a creator</strong><small>Select one of your saved channels to capture or monitor.</small></div><Button size="small" onClick={() => navigate("creators")}><Users size={14} />Manage creators</Button></div>
+        <div className="live-creator-picker-heading"><div><strong>Choose a creator</strong><small>Saved creators keep their live recordings and clips in their own folders.</small></div><Button size="small" onClick={() => navigate("creators")}><Users size={14} />Manage creators</Button></div>
         {workspace.creators.length ? <div className="live-creator-list" role="listbox" aria-label="Saved creators">
           {workspace.creators.map((creator) => <button type="button" role="option" aria-selected={selectedCreator?.id === creator.id} key={creator.id} className={"live-creator-option" + (selectedCreator?.id === creator.id ? " selected" : "")} onClick={() => { setSelectedCreatorId(creator.id); changeTarget(creator.target); setOutputPreview(""); setFacecamResult(null); }}>
-            <span className="creator-initial">{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span><span className="live-creator-option-copy"><strong>{creator.name}</strong><small>{creator.status || creator.phase || creator.target}</small></span><StatusPill tone={creator.running ? "live" : "neutral"}>{creator.running ? "Live" : "Saved"}</StatusPill><span className="creator-select-mark"><Check size={15}/></span>
+            <span className="creator-initial">{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span><span className="live-creator-option-copy"><strong>{creator.name}</strong><small>{isCreatorCaptureActive(creator, workspace) ? "Recording in Live Studio" : creator.status || creator.phase || creator.target}</small></span><StatusPill tone={isCreatorCaptureActive(creator, workspace) || creator.running ? "live" : "neutral"}>{isCreatorCaptureActive(creator, workspace) ? "Recording" : creator.running ? "Monitoring" : "Saved"}</StatusPill><span className="creator-select-mark"><Check size={15}/></span>
           </button>)}
         </div> : <EmptyState icon={Users} title="No saved creators yet" description="Add a Twitch or YouTube creator first. Your saved channels will appear here." action={<Button onClick={() => navigate("creators")}>Add a creator</Button>} />}
-        {selectedCreator ? <div className="studio-source-meta"><div className="studio-channel-detection"><span>Selected creator</span><strong>{selectedCreator.name}</strong><small>{selectedCreator.target}</small></div><StatusPill tone={selectedCreator.running ? "live" : "success"}>{selectedCreator.running ? "Monitoring" : "Ready"}</StatusPill></div> : null}
+        {selectedCreator ? <div className="studio-source-meta"><div className="studio-channel-detection"><span>Selected creator</span><strong>{selectedCreator.name}</strong><small>{selectedCreator.target}</small></div><StatusPill tone={isCreatorCaptureActive(selectedCreator, workspace) || selectedCreator.running ? "live" : "success"}>{isCreatorCaptureActive(selectedCreator, workspace) ? "Capture active" : selectedCreator.running ? "Monitoring" : "Ready"}</StatusPill></div> : null}
       </div> : <Field label="Video file path" hint="Choose a local video supported by FFmpeg.">
         <div className="field-with-action"><input value={target} onChange={(event) => changeTarget(event.target.value)} disabled={running} placeholder="Choose a video file" /><Button onClick={() => void browse()} disabled={running || !!busy}><FolderOpen size={15} />Browse</Button></div>
       </Field>}
@@ -648,7 +677,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
         <Panel title="Session status" description="Live progress reported by the local engine.">
           <div className="session-state">
             <span className={"session-state-icon" + (running ? " is-active" : "")}><RadioTower size={22} /></span>
-            <span><strong>{running ? workspace.state.status : "No active session"}</strong><small>{running ? (workspace.state.mode === "file" ? "Processing a video file" : "Monitoring a live stream") + " · " + duration(workspace.state.session.elapsed) : "Progress appears here after capture starts."}</small></span>
+            <span><strong>{running ? workspace.state.status : "No active session"}</strong><small>{running ? (workspace.state.mode === "file" ? "Processing a video file" : "Recording a live stream") + " · " + duration(workspace.state.session.elapsed) : "Progress appears here after capture starts."}</small></span>
             <StatusPill tone={toneFor(workspace.state.phase, running)}>{phaseLabel(workspace.state.phase)}</StatusPill>
           </div>
           {running ? <><WorkflowStrip phase={workspace.state.phase} running={running} /><div className="progress-line"><div><span>{workspace.state.status}</span><b>{Math.max(0, Math.min(100, workspace.state.progress))}%</b></div><i><span style={{ width: Math.max(2, Math.min(100, workspace.state.progress)) + "%" }} /></i></div></> : null}
@@ -666,7 +695,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
     <div className="studio-runbar" role="region" aria-label="Capture actions">
       <div className="studio-runbar-copy">
         <span className={"studio-runbar-indicator" + (running ? " running" : "")} />
-        <span><strong>{running ? "Capture is running" : "Ready when you are"}</strong><small>{running ? (workspace.state.mode === "file" ? "Processing the selected video" : "Monitoring " + (detectedCreator || "the selected stream")) : (detectedCreator || (target.trim() ? "Source added" : "Choose a source")) + " · " + providerLabel + " · " + (workspace.saving ? "Saving settings" : "Settings ready")}</small></span>
+        <span><strong>{running ? "Capture is running" : "Ready when you are"}</strong><small>{running ? (workspace.state.mode === "file" ? "Processing the selected video" : "Recording " + (detectedCreator || "the selected stream")) : (detectedCreator || (target.trim() ? "Source added" : "Choose a source")) + " · " + providerLabel + " · " + (workspace.saving ? "Saving settings" : "Settings ready")}</small></span>
       </div>
       <div className="studio-runbar-actions">
         <span className="studio-runbar-save">{workspace.saving ? "Saving..." : workspace.saveError || ""}</span>
@@ -692,7 +721,8 @@ function ToolRow({ icon: Icon, title, detail }: { icon: LucideIcon; title: strin
   return <div className="tool-row"><Icon size={17} /><span><strong>{title}</strong><small>{detail}</small></span></div>;
 }
 
-function CreatorsPage({ creators, busy, post }: { creators: Creator[]; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
+function CreatorsPage({ workspace, busy, post, navigate }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
+  const creators = workspace.creators;
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
   const [nameEdited, setNameEdited] = useState(false);
@@ -700,35 +730,43 @@ function CreatorsPage({ creators, busy, post }: { creators: Creator[]; busy: str
   const [folderOpen, setFolderOpen] = useState("");
   const [removing, setRemoving] = useState<Creator | null>(null);
   const folders = [["live_clips", "Live clips"], ["live_recordings", "Live recordings"], ["vod_inbox", "Recorded VOD inbox"], ["vod_clips", "VOD clips"], ["vod_processed", "Processed VODs"], ["vod_failed", "Failed VODs"]];
+  const activeSources = creators.filter((creator) => creator.running || isCreatorCaptureActive(creator, workspace)).length;
   const add = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const result = await post<{ creator?: Creator }>("add-creator", "/api/creators/add", { name, target });
     if (result) { setName(""); setNameEdited(false); setTarget(""); setFormOpen(false); }
   };
   return <div className="page-stack">
-    <PageHeading title="Creators" description="Monitor live channels and process recorded VODs in separate folders." actions={<Button kind="primary" onClick={() => setFormOpen((value) => !value)}><Plus size={16} />Add creator</Button>} />
+    <PageHeading title="Creators" description="Track Live Studio captures, background monitors, and recorded-VOD folders for each creator." actions={<Button kind="primary" onClick={() => setFormOpen((value) => !value)}><Plus size={16} />Add creator</Button>} />
     {formOpen ? <Panel title="Add a creator" description="Paste a Twitch or YouTube channel or stream URL."><form className="add-creator-form" onSubmit={(event) => void add(event)}>
       <Field label="Creator name" hint={nameEdited ? "Name entered manually." : "Filled from supported Twitch and YouTube channel links; you can edit it."}><input value={name} onChange={(event) => { setName(event.target.value); setNameEdited(true); }} maxLength={80} required placeholder="Auto-detected from channel URL" /></Field>
       <Field label="Twitch or YouTube URL"><input value={target} onChange={(event) => { const value = event.target.value; setTarget(value); if (!nameEdited) setName(inferCreatorTag(value).replace(/^@/, "")); }} required placeholder="https://www.twitch.tv/channel" /></Field>
       <div className="form-actions"><Button kind="primary" type="submit" disabled={!name.trim() || !target.trim() || !!busy}><Plus size={15} />Save creator</Button><Button onClick={() => { setFormOpen(false); setName(""); setNameEdited(false); setTarget(""); }}>Cancel</Button></div>
     </form></Panel> : null}
-    <div className="creator-toolbar"><span>{count(creators.length)} configured creator{creators.length === 1 ? "" : "s"}</span><span>{count(creators.filter((creator) => creator.running).length)} live monitors active</span></div>
+    <div className="creator-toolbar"><span>{count(creators.length)} configured creator{creators.length === 1 ? "" : "s"}</span><span>{count(activeSources)} active live source{activeSources === 1 ? "" : "s"}</span></div>
     {creators.length ? <div className="creator-table">
-      <div className="creator-table-head"><span>Creator</span><span>Live monitor</span><span>VOD inbox</span><span>Library</span><span>Actions</span></div>
-      {creators.map((creator) => <div className="creator-table-row" key={creator.id}>
-        <div className="creator-identity"><span className={"creator-avatar" + (creator.running ? " active" : "")}>{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span><span><strong>{creator.name}</strong><small title={creator.target}>{creator.target}</small></span></div>
-        <div className="creator-status-cell"><StatusPill tone={creator.running ? "live" : creator.phase === "stopping" ? "warning" : "neutral"}>{creator.running ? "Monitoring" : phaseLabel(creator.phase || "idle")}</StatusPill><small>{creator.status || "Saved source"}</small></div>
-        <div className="creator-status-cell"><StatusPill tone={creator.watching_vods ? "success" : "neutral"}>{creator.watching_vods ? "Watching" : "Paused"}</StatusPill><small>{creator.vod_status || count(creator.vod_pending) + " files waiting"}</small></div>
-        <div className="creator-counts"><span>{count(creator.live_clips)} live</span><span>{count(creator.vod_clips)} VOD</span></div>
-        <div className="creator-actions">
-          {creator.running ? <Button size="small" kind="danger" onClick={() => void post("stop-" + creator.id, "/api/creators/stop", { id: creator.id })} disabled={!!busy}><Square size={13} />Stop</Button> : <Button size="small" kind="primary" onClick={() => void post("start-" + creator.id, "/api/creators/start", { id: creator.id })} disabled={!!busy}><Play size={13} />Monitor</Button>}
-          {creator.watching_vods ? <Button size="small" onClick={() => void post("stop-vod-" + creator.id, "/api/creators/stop-vod-watch", { id: creator.id })} disabled={!!busy}><Pause size={13} />Stop VOD</Button> : <Button size="small" onClick={() => void post("watch-vod-" + creator.id, "/api/creators/watch-vods", { id: creator.id })} disabled={!!busy}><FolderOpen size={13} />Watch VODs</Button>}
-          <div className="folder-menu"><button className="icon-button" aria-label={"Open " + creator.name + " folders"} aria-expanded={folderOpen === creator.id} onClick={() => setFolderOpen(folderOpen === creator.id ? "" : creator.id)}><MoreHorizontal size={17} /></button>
-            {folderOpen === creator.id ? <div className="folder-popover">{folders.map(([folder, label]) => <button key={folder} onClick={() => { void post("folder-" + creator.id, "/api/creators/open", { id: creator.id, folder }); setFolderOpen(""); }}><FolderOpen size={14} />{label}</button>)}<button className="folder-danger" onClick={() => { setRemoving(creator); setFolderOpen(""); }}><Trash2 size={14} />Remove creator</button></div> : null}
+      <div className="creator-table-head"><span>Creator</span><span>Live activity</span><span>VOD inbox</span><span>Library</span><span>Actions</span></div>
+      {creators.map((creator) => {
+        const captureActive = isCreatorCaptureActive(creator, workspace);
+        const activeNow = creator.running || captureActive;
+        const liveDetail = captureActive
+          ? (creator.running ? "Live Studio capture and background monitor are active." : "Recording in Live Studio · Background monitor stopped.")
+          : creator.status || "Saved source";
+        return <div className="creator-table-row" key={creator.id}>
+          <div className="creator-identity"><span className={"creator-avatar" + (activeNow ? " active" : "")}>{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span><span><strong>{creator.name}</strong><small title={creator.target}>{creator.target}</small></span></div>
+          <div className="creator-status-cell"><StatusPill tone={activeNow ? "live" : creator.phase === "stopping" ? "warning" : "neutral"}>{captureActive ? "Capture active" : creator.running ? "Monitoring" : phaseLabel(creator.phase || "idle")}</StatusPill><small>{liveDetail}</small></div>
+          <div className="creator-status-cell"><StatusPill tone={creator.watching_vods ? "success" : "neutral"}>{creator.watching_vods ? "Watching" : "Paused"}</StatusPill><small>{creator.vod_status || count(creator.vod_pending) + " files waiting"}</small></div>
+          <div className="creator-counts"><span>{count(creator.live_clips)} live</span><span>{count(creator.vod_clips)} VOD</span></div>
+          <div className="creator-actions">
+            {creator.running ? <Button size="small" kind="danger" onClick={() => void post("stop-" + creator.id, "/api/creators/stop", { id: creator.id })} disabled={!!busy}><Square size={13} />Stop monitor</Button> : captureActive ? <Button size="small" kind="primary" onClick={() => navigate("live")}><Radio size={13} />View capture</Button> : <Button size="small" kind="primary" onClick={() => void post("start-" + creator.id, "/api/creators/start", { id: creator.id })} disabled={!!busy}><Play size={13} />Monitor</Button>}
+            {creator.watching_vods ? <Button size="small" onClick={() => void post("stop-vod-" + creator.id, "/api/creators/stop-vod-watch", { id: creator.id })} disabled={!!busy}><Pause size={13} />Stop VOD</Button> : <Button size="small" onClick={() => void post("watch-vod-" + creator.id, "/api/creators/watch-vods", { id: creator.id })} disabled={!!busy}><FolderOpen size={13} />Watch VODs</Button>}
+            <div className="folder-menu"><button className="icon-button" aria-label={"Open " + creator.name + " folders"} aria-expanded={folderOpen === creator.id} onClick={() => setFolderOpen(folderOpen === creator.id ? "" : creator.id)}><MoreHorizontal size={17} /></button>
+              {folderOpen === creator.id ? <div className="folder-popover">{folders.map(([folder, label]) => <button key={folder} onClick={() => { void post("folder-" + creator.id, "/api/creators/open", { id: creator.id, folder }); setFolderOpen(""); }}><FolderOpen size={14} />{label}</button>)}<button className="folder-danger" onClick={() => { setRemoving(creator); setFolderOpen(""); }}><Trash2 size={14} />Remove creator</button></div> : null}
+            </div>
           </div>
-        </div>
-      </div>)}
-    </div> : <EmptyState icon={Users} title="No creator monitors yet" description="Add a Twitch or YouTube source. Live clips and recorded-VOD clips will be kept in separate folders." action={<Button kind="primary" onClick={() => setFormOpen(true)}><Plus size={15} />Add creator</Button>} />}
+        </div>;
+      })}
+    </div> : <EmptyState icon={Users} title="No creator sources yet" description="Add a Twitch or YouTube channel. Live Studio captures, background monitors, and recorded-VOD clips will be tracked separately." action={<Button kind="primary" onClick={() => setFormOpen(true)}><Plus size={15} />Add creator</Button>} />}
     {removing ? <div className="inline-confirm"><span>Remove {removing.name}? Existing recordings and clips will be kept.</span><Button size="small" kind="danger" onClick={() => { void post("remove-" + removing.id, "/api/creators/remove", { id: removing.id }).then(() => setRemoving(null)); }}>Remove creator</Button><Button size="small" onClick={() => setRemoving(null)}>Cancel</Button></div> : null}
   </div>;
 }

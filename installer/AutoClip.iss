@@ -1,5 +1,5 @@
 ﻿#define MyAppName "StreamSnip AI"
-#define MyAppVersion "4.0.3"
+#define MyAppVersion "4.0.4"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 

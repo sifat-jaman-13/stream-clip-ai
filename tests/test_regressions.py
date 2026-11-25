@@ -1981,6 +1981,71 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(autoclip.asset_file("brand-logo.png"), logo.resolve())
                 self.assertIsNone(autoclip.asset_file("../settings.json"))
 
+    def test_post_close_message_targets_only_the_visible_owned_app_window(self):
+        import ctypes
+        from ctypes import wintypes
+
+        class User32:
+            def __init__(self):
+                self.messages = []
+            def EnumWindows(self, callback, _):
+                callback(101, 0)
+                callback(202, 0)
+            def GetWindowThreadProcessId(self, hwnd, target):
+                ctypes.cast(target, ctypes.POINTER(wintypes.DWORD)).contents.value = (
+                    4321 if hwnd == 101 else 9999
+                )
+                return 1
+            def IsWindowVisible(self, hwnd):
+                return True
+            def PostMessageW(self, hwnd, message, wparam, lparam):
+                self.messages.append((hwnd, message, wparam, lparam))
+                return True
+
+        user32 = User32()
+        self.assertTrue(autoclip.post_close_message_to_process_windows(4321, user32))
+        self.assertEqual(user32.messages, [(101, 0x0010, 0, 0)])
+
+    def test_app_window_close_requests_graceful_process_tree_exit(self):
+        process = MagicMock()
+        process.poll.return_value = None
+        process.pid = 4321
+        with patch.object(autoclip.subprocess, "run") as run:
+            self.assertTrue(autoclip.request_app_window_close(process, timeout=0.1))
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], ["taskkill.exe", "/PID", "4321"])
+        self.assertNotIn("/F", command)
+        process.wait.assert_called_once_with(timeout=0.1)
+
+    def test_open_window_launches_an_isolated_tracked_browser_app(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile = root / "StreamSnip AI" / "app-window-profile" / "msedge"
+            child = MagicMock()
+            exists = lambda candidate: str(candidate).lower().endswith("msedge.exe")
+            with patch.dict(autoclip.os.environ, {
+                "PROGRAMFILES(X86)": str(root),
+                "PROGRAMFILES": str(root),
+                "LOCALAPPDATA": str(root),
+            }), patch.object(autoclip.os.path, "exists", side_effect=exists), \
+                 patch.object(autoclip.shutil, "which", return_value=None), \
+                 patch.object(autoclip, "popen", return_value=child) as launch, \
+                 patch.object(autoclip, "_data_root", root):
+                autoclip.open_window("http://127.0.0.1:45678/dashboard/")
+
+            launch.assert_called_once()
+            arguments = launch.call_args.args[0]
+            self.assertIn("--app=http://127.0.0.1:45678/dashboard/", arguments)
+            self.assertIn("--user-data-dir=" + str(profile), arguments)
+            self.assertTrue(profile.is_dir())
+
+    def test_creator_studio_quit_shows_a_shutdown_overlay(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "dashboard" / "src" / "App.tsx").read_text(encoding="utf-8")
+        self.assertIn("shutdown-overlay", app_source)
+        self.assertIn("Closing StreamSnip AI", app_source)
+        self.assertIn("Your finished clips stay safe.", app_source)
+
     def test_react_creator_studio_owns_a_named_server_window_lease(self):
         root = Path(__file__).resolve().parents[1]
         api_source = (root / "dashboard" / "src" / "api.ts").read_text(encoding="utf-8")
@@ -2285,6 +2350,21 @@ class RegressionTests(unittest.TestCase):
     def test_api_json_body_parser_rejects_invalid_utf8(self):
         with self.assertRaisesRegex(ValueError, "invalid JSON body"):
             autoclip.parse_json_object(b"\xff")
+
+
+    def test_installer_reuses_python_315_without_unsupported_vad_runtime_dependency(self):
+        root = Path(__file__).resolve().parents[1]
+        setup_script = (root / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
+        python_support = (root / "installer" / "python315_support.ps1").read_text(encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.assertIn("New-StreamSnipRequirementsProfile", setup_script)
+        self.assertIn("Install-StreamSnipDependencies", setup_script)
+        self.assertIn("faster-whisper==1.2.1", python_support)
+        self.assertIn("--no-deps", python_support)
+        self.assertIn("onnxruntime", python_support)
+        self.assertIn("3.15", python_support)
+        self.assertIn('RuntimeSchema = "5"', setup_script)
+        self.assertIn("Python 3.15", readme)
 
 
 if __name__ == "__main__":

@@ -1133,3 +1133,14 @@ input, textarea { caret-color: var(--accent); }
 .post-result span { color:var(--ink); font-weight:700; text-transform:capitalize; }
 .post-result small { color:var(--muted); }
 @media(max-width:640px){.post-clip-card{grid-template-columns:1fr}.post-clip-preview{max-height:200px;aspect-ratio:16/9}}
+
+/* Deliberate app shutdown feedback */
+.shutdown-overlay { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:24px; background:rgb(3 7 13 / 76%); backdrop-filter:blur(9px); }
+.shutdown-card { width:min(100%,390px); display:grid; justify-items:center; gap:12px; padding:30px 28px 26px; border:1px solid var(--line); border-radius:16px; background:var(--surface); color:var(--text); text-align:center; box-shadow:0 24px 80px rgb(0 0 0 / 42%); }
+.shutdown-icon { width:48px; height:48px; display:grid; place-items:center; border:1px solid var(--line); border-radius:13px; color:var(--accent); background:var(--surface); }
+.shutdown-card > strong { font-size:16px; letter-spacing:-.02em; }
+.shutdown-card > p { max-width:300px; margin:0; color:var(--muted); font-size:12px; line-height:1.6; }
+.shutdown-card > small { color:var(--muted); font-size:10px; }
+.shutdown-progress { width:min(100%,260px); height:4px; overflow:hidden; border-radius:99px; background:var(--line); }
+.shutdown-progress > span { display:block; width:42%; height:100%; border-radius:inherit; background:var(--accent); animation:shutdown-progress 1.15s ease-in-out infinite; }
+@keyframes shutdown-progress { 0% { transform:translateX(-110%); } 100% { transform:translateX(250%); } }

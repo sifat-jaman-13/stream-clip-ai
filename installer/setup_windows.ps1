@@ -7,7 +7,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$RuntimeSchema = "4"
+. (Join-Path $PSScriptRoot "python315_support.ps1")
+$RuntimeSchema = "5"
 $transcriptStarted = $false
 $exitCode = 0
 
@@ -70,6 +71,7 @@ function Test-SupportedPython([string]$File, [string[]]$Prefix = @()) {
 function Test-PythonDependencyCompatibility($Python, [string]$RequirementsPath) {
     # Resolve requirements in a disposable venv so the check never installs
     # or upgrades packages in a user's global Python environment.
+    $profilePath = New-StreamSnipRequirementsProfile $Python.Version $RequirementsPath
     $probeRoot = Join-Path $env:TEMP ("streamsnip-python-probe-" + [guid]::NewGuid().ToString("N"))
     $probePython = Join-Path $probeRoot "Scripts\python.exe"
     $ErrorActionPreference = "Continue"
@@ -87,7 +89,7 @@ function Test-PythonDependencyCompatibility($Python, [string]$RequirementsPath) 
             return $false
         }
 
-        $resolution = & $probePython -m pip install --dry-run --prefer-binary --disable-pip-version-check -r $RequirementsPath 2>&1
+        $resolution = & $probePython -m pip install --dry-run --prefer-binary --disable-pip-version-check -r $profilePath 2>&1
         $resolutionExitCode = $LASTEXITCODE
         if ($resolutionExitCode -ne 0) {
             $detail = @($resolution | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() } | Select-Object -Last 1)
@@ -99,6 +101,7 @@ function Test-PythonDependencyCompatibility($Python, [string]$RequirementsPath) 
         Write-Host "Skipping Python $($Python.Version): $($_.Exception.Message)" -ForegroundColor DarkYellow
         return $false
     } finally {
+        if ($profilePath -and $profilePath -ne $RequirementsPath) { Remove-Item -LiteralPath $profilePath -Force -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $probeRoot) {
             Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -518,10 +521,9 @@ try {
             Write-Host "Installing StreamSnip AI dependencies. The first setup can take several minutes..." -ForegroundColor Cyan
             & $runtimePython -m pip install --upgrade pip
             if ($LASTEXITCODE -ne 0) { throw "Could not upgrade pip in the StreamSnip AI runtime." }
-            & $runtimePython -m pip install --prefer-binary -r $requirements
+            Install-StreamSnipDependencies $runtimePython $requirements $python.Version
             if ($LASTEXITCODE -ne 0) { throw "Could not install StreamSnip AI dependencies." }
-            & $runtimePython -m pip check
-            if ($LASTEXITCODE -ne 0) { throw "The installed Python dependencies are inconsistent." }
+            Test-StreamSnipDependencyConsistency $runtimePython $python.Version
             & $runtimePython -c "import numpy, faster_whisper, streamlink, cv2"
             if ($LASTEXITCODE -ne 0) { throw "A required StreamSnip AI package could not be loaded after installation." }
             Set-Content -Path $runtimeMarker -Value $expectedMarker -Encoding ASCII

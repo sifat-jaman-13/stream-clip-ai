@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
+import socket
 import re
 import secrets
 from pathlib import Path
@@ -17,6 +19,65 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
+
+
+def patch_windows_proactor_connection_reset() -> bool:
+    """Backport CPython's guarded Proactor socket shutdown on Windows.
+
+    A peer reset (WSAECONNRESET / WinError 10054) can occur while a browser
+    connection is being torn down. Some Python builds let that expected
+    ConnectionError escape from _call_connection_lost before socket.close()
+    and server detachment run. Match CPython's newer guarded cleanup behavior
+    while leaving every unrelated transport error visible.
+    """
+    if os.name != "nt":
+        return False
+
+    try:
+        import inspect
+        from asyncio import proactor_events
+        transport_base = proactor_events._ProactorBasePipeTransport
+        original = transport_base._call_connection_lost
+    except (AttributeError, ImportError):
+        return False
+
+    if getattr(original, "_streamsnip_connection_reset_compat", False):
+        return True
+
+    try:
+        if "except ConnectionError" in inspect.getsource(original):
+            return True
+    except (OSError, TypeError):
+        pass
+
+    def streamsnip_call_connection_lost(self, exc):
+        if self._called_connection_lost:
+            return
+        try:
+            self._protocol.connection_lost(exc)
+        finally:
+            if hasattr(self._sock, "shutdown") and self._sock.fileno() != -1:
+                try:
+                    self._sock.shutdown(socket.SHUT_RDWR)
+                except ConnectionError:
+                    # The browser/client already reset this connection.
+                    # Continue closing and detaching the dead transport.
+                    pass
+            self._sock.close()
+            self._sock = None
+            server = self._server
+            if server is not None:
+                server._detach(self)
+                self._server = None
+            self._called_connection_lost = True
+
+    streamsnip_call_connection_lost.__name__ = original.__name__
+    streamsnip_call_connection_lost.__qualname__ = original.__qualname__
+    streamsnip_call_connection_lost.__module__ = original.__module__
+    streamsnip_call_connection_lost.__doc__ = original.__doc__
+    streamsnip_call_connection_lost._streamsnip_connection_reset_compat = True
+    transport_base._call_connection_lost = streamsnip_call_connection_lost
+    return True
 
 
 class _HeaderMap:

@@ -1,4 +1,4 @@
-﻿#define MyAppName "StreamSnip AI"
+#define MyAppName "StreamSnip AI"
 #define MyAppVersion "4.0.4"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
@@ -36,6 +36,7 @@ Source: "..\LICENSE-NeonClipping.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE-YuNet.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\installer\setup_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\installer\python315_support.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\installer\uninstall_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

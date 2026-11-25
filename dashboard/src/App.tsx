@@ -331,6 +331,17 @@ export default function App() {
       <footer className="app-footer"><span>StreamSnip AI</span><i>·</i><span>Capture and rendering stay on this PC.</span><span className="footer-spacer" /><span>{workspace.saving ? "Saving settings…" : workspace.saveError || "Local workspace"}</span></footer>
     </div>
     {toast ? <Toast toast={toast} close={() => setToast(null)} /> : null}
+    {quitting ? (
+      <div className="shutdown-overlay" role="status" aria-live="polite">
+        <div className="shutdown-card">
+          <span className="shutdown-icon"><Clapperboard size={22} /></span>
+          <strong>Closing StreamSnip AI</strong>
+          <p>Stopping active capture and creator monitors. Your finished clips stay safe.</p>
+          <div className="shutdown-progress" aria-hidden="true"><span /></div>
+          <small>Closing the app window…</small>
+        </div>
+      </div>
+    ) : null}
   </div>;
 }
 

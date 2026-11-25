@@ -7,7 +7,7 @@ analysis providers, and Zernio is the optional publishing integration.
 
 Windows/source setup:
     winget install Gyan.FFmpeg
-    py -3.12 -m venv .venv ; .\.venv\Scripts\Activate.ps1
+    py -3 -m venv .venv ; .\.venv\Scripts\Activate.ps1
     python -m pip install --upgrade pip
     python -m pip install -r requirements.txt
 
@@ -321,11 +321,70 @@ STORAGE_PATH_WARNING = ""
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
 _CHILD_PROCESS_LOCK = threading.RLock()
 _CHILD_PROCESSES = set()
+_APP_WINDOW_PROCESSES = set()
 _PROCESS_SHUTDOWN = threading.Event()
 
 def _forget_child_process(process):
     with _CHILD_PROCESS_LOCK:
         _CHILD_PROCESSES.discard(process)
+        _APP_WINDOW_PROCESSES.discard(process)
+
+def post_close_message_to_process_windows(pid, user32=None):
+    """Send WM_CLOSE only to visible top-level windows owned by the app browser PID."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = user32 or ctypes.windll.user32
+        closed = []
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        @callback_type
+        def visit_window(hwnd, _):
+            owner_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+            if owner_pid.value == pid and user32.IsWindowVisible(hwnd):
+                if user32.PostMessageW(hwnd, 0x0010, 0, 0):  # WM_CLOSE
+                    closed.append(hwnd)
+            return True
+
+        user32.EnumWindows(visit_window, 0)
+        return bool(closed)
+    except Exception:
+        return False
+
+def request_app_window_close(process, timeout=3.0):
+    """Ask the app-owned browser window to close normally before force termination."""
+    if process is None:
+        return True
+    try:
+        if process.poll() is not None:
+            _forget_child_process(process)
+            return True
+    except Exception:
+        pass
+    pid = getattr(process, "pid", None)
+    if os.name == "nt" and isinstance(pid, int) and pid > 0 and pid != os.getpid():
+        posted = post_close_message_to_process_windows(pid)
+        if not posted:
+            try:
+                subprocess.run(["taskkill.exe", "/PID", str(pid), "/T"], capture_output=True,
+                               timeout=max(1.0, timeout), creationflags=CF)
+            except Exception:
+                pass
+    try:
+        process.wait(timeout=timeout)
+    except (subprocess.TimeoutExpired, TimeoutError):
+        return False
+    except Exception:
+        try:
+            if process.poll() is None:
+                return False
+        except Exception:
+            return False
+    _forget_child_process(process)
+    return True
 
 def terminate_process_tree(process, force=True, timeout=2.0):
     """Stop a tracked child and its descendants, escalating when necessary."""
@@ -357,8 +416,12 @@ def terminate_process_tree(process, force=True, timeout=2.0):
         _forget_child_process(process)
 
 def shutdown_child_processes():
-    """Prevent new children and synchronously remove every tracked app process."""
+    """Close the app-owned browser normally, then remove remaining child processes."""
     _PROCESS_SHUTDOWN.set()
+    with _CHILD_PROCESS_LOCK:
+        app_windows = list(_APP_WINDOW_PROCESSES)
+    for process in app_windows:
+        request_app_window_close(process, timeout=3.0)
     with _CHILD_PROCESS_LOCK:
         processes = list(_CHILD_PROCESSES)
     for process in processes:
@@ -4066,7 +4129,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception: pass
 
 def open_window(url):
-    """Open as a clean app window (Edge/Chrome --app) when possible, else the default browser."""
+    """Open a dedicated, tracked browser app window without borrowing the user's profile."""
     cands = []
     if os.name == "nt":
         for env in ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA"):
@@ -4075,10 +4138,17 @@ def open_window(url):
                 cands += [os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"),
                           os.path.join(base, "Google", "Chrome", "Application", "chrome.exe")]
     cands += [shutil.which(x) for x in ("msedge", "google-chrome", "chrome", "chromium")]
+    local = pathlib.Path(os.environ.get("LOCALAPPDATA") or (pathlib.Path.home() / "AppData" / "Local"))
     for exe in cands:
         if exe and os.path.exists(exe):
+            browser = "msedge" if pathlib.Path(exe).stem.lower() == "msedge" else "chrome"
+            profile = local / PRODUCT_NAME / "app-window-profile" / browser
             try:
-                subprocess.Popen([exe, f"--app={url}", "--start-maximized"])
+                profile.mkdir(parents=True, exist_ok=True)
+                process = popen([exe, f"--user-data-dir={profile}", "--no-first-run",
+                                 "--no-default-browser-check", f"--app={url}", "--start-maximized"])
+                with _CHILD_PROCESS_LOCK:
+                    _APP_WINDOW_PROCESSES.add(process)
                 return
             except Exception:
                 pass
@@ -4109,7 +4179,7 @@ def main():
         return
     try:
         import uvicorn
-        from api_server import create_app
+        from api_server import create_app, patch_windows_proactor_connection_reset
     except ImportError as exc:
         print(f"FastAPI server dependencies are missing: {exc}. Run: python -m pip install -r requirements.txt", file=sys.stderr)
         return
@@ -4136,6 +4206,7 @@ def main():
         lifespan="off",
         workers=1,
     ))
+    patch_windows_proactor_connection_reset()
     server_thread = threading.Thread(target=server.run, daemon=True, name="streamsnip-api")
     server_thread.start()
     startup_deadline = time.monotonic() + 15.0

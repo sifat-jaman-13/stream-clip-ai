@@ -258,5 +258,73 @@ class APIServerTests(unittest.TestCase):
         self.assertEqual(body, b"2345")
 
 
+    def test_proactor_connection_reset_patch_is_windows_only(self):
+        import asyncio.proactor_events
+        import api_server
+
+        transport_base = asyncio.proactor_events._ProactorBasePipeTransport
+        original = transport_base._call_connection_lost
+        with patch.object(api_server.os, "name", "posix"):
+            self.assertFalse(api_server.patch_windows_proactor_connection_reset())
+        self.assertIs(transport_base._call_connection_lost, original)
+
+    def test_windows_proactor_peer_reset_finishes_transport_cleanup(self):
+        import asyncio.proactor_events
+        import api_server
+
+        transport_base = asyncio.proactor_events._ProactorBasePipeTransport
+        original = transport_base._call_connection_lost
+        self.addCleanup(setattr, transport_base, "_call_connection_lost", original)
+
+        class FakeSocket:
+            closed = False
+
+            def fileno(self):
+                return 123
+
+            def shutdown(self, _how):
+                raise ConnectionResetError(10054, "peer reset during shutdown")
+
+            def close(self):
+                self.closed = True
+
+        class FakeProtocol:
+            error = None
+
+            def connection_lost(self, error):
+                self.error = error
+
+        class FakeServer:
+            detached = False
+
+            def _detach(self, _transport):
+                self.detached = True
+
+        class FakeTransport(transport_base):
+            def __del__(self):
+                pass
+
+        transport = object.__new__(FakeTransport)
+        fake_protocol = FakeProtocol()
+        fake_socket = FakeSocket()
+        fake_server = FakeServer()
+        transport._called_connection_lost = False
+        transport._protocol = fake_protocol
+        transport._sock = fake_socket
+        transport._server = fake_server
+
+        with patch.object(api_server.os, "name", "nt"):
+            self.assertTrue(api_server.patch_windows_proactor_connection_reset())
+
+        transport_base._call_connection_lost(transport, None)
+
+        self.assertTrue(fake_socket.closed)
+        self.assertTrue(fake_protocol.error is None)
+        self.assertTrue(fake_server.detached)
+        self.assertTrue(transport._sock is None)
+        self.assertTrue(transport._server is None)
+        self.assertTrue(transport._called_connection_lost)
+        self.assertTrue(transport_base._call_connection_lost is not original)
+
 if __name__ == "__main__":
     unittest.main()

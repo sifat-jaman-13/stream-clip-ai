@@ -3,6 +3,7 @@
 **A local-first creator studio for capturing streams, finding moments, rendering clips, and preparing posts.**
 
 [![Latest release](https://img.shields.io/github/v/release/sifat-jaman-13/stream-clip-ai)](https://github.com/sifat-jaman-13/stream-clip-ai/releases)
+[![Website](https://img.shields.io/badge/website-live-16a34a)](https://sifat-jaman-13.github.io/stream-clip-ai/)
 [![Windows](https://img.shields.io/badge/platform-Windows-2563eb)](https://github.com/sifat-jaman-13/stream-clip-ai)
 [![Tests](https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml/badge.svg)](https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-proprietary%20non--commercial-orange)](LICENSE)

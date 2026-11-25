@@ -1981,6 +1981,7 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(autoclip.asset_file("brand-logo.png"), logo.resolve())
                 self.assertIsNone(autoclip.asset_file("../settings.json"))
 
+    @unittest.skipUnless(autoclip.os.name == "nt", "Windows-only window API")
     def test_post_close_message_targets_only_the_visible_owned_app_window(self):
         import ctypes
         from ctypes import wintypes
@@ -2006,6 +2007,7 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(autoclip.post_close_message_to_process_windows(4321, user32))
         self.assertEqual(user32.messages, [(101, 0x0010, 0, 0)])
 
+    @unittest.skipUnless(autoclip.os.name == "nt", "Windows-only process shutdown")
     def test_app_window_close_requests_graceful_process_tree_exit(self):
         process = MagicMock()
         process.poll.return_value = None
@@ -2017,6 +2019,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("/F", command)
         process.wait.assert_called_once_with(timeout=0.1)
 
+    @unittest.skipUnless(autoclip.os.name == "nt", "Windows-only browser app launch")
     def test_open_window_launches_an_isolated_tracked_browser_app(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

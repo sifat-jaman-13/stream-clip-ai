@@ -29,8 +29,8 @@ class FacecamDetectionTests(unittest.TestCase):
             ffprobe.touch()
             app = SimpleNamespace(ffmpeg_exe=lambda: str(ffmpeg))
             with patch.dict(sys.modules, {"autoclip": app}):
-                self.assertEqual(facecam_detect._media_tool("ffmpeg"), str(ffmpeg))
-                self.assertEqual(facecam_detect._media_tool("ffprobe"), str(ffprobe))
+                self.assertTrue(Path(facecam_detect._media_tool("ffmpeg")).samefile(ffmpeg))
+                self.assertTrue(Path(facecam_detect._media_tool("ffprobe")).samefile(ffprobe))
 
     def test_static_avatar_is_not_considered_live_camera(self):
         self.assertFalse(facecam_detect.is_live(0.10))

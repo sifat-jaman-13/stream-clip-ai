@@ -4,6 +4,7 @@ export interface Creator {
   target: string;
   running?: boolean;
   capture_active?: boolean;
+  capture_stopping?: boolean;
   watching_vods?: boolean;
   phase?: string;
   status?: string;

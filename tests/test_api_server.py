@@ -6,7 +6,7 @@ import re
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -150,6 +150,42 @@ class APIServerTests(unittest.TestCase):
         asyncio.run(consume_until_shutdown())
         self.assertEqual(started, ["window-abc"])
         self.assertEqual(ended, ["window-abc"])
+
+    def test_quit_response_is_returned_before_shutdown_is_scheduled(self):
+        app = create_app(
+            autoclip.Handler,
+            token=autoclip.TOKEN,
+            quit_event=autoclip.QUIT,
+            begin_window_lease=autoclip.begin_window_lease,
+            end_window_lease=autoclip.end_window_lease,
+            find_clip_path=autoclip.find_clip_path,
+            clip_regex=autoclip.CLIP_RE,
+            product_name=autoclip.PRODUCT_NAME,
+            version=autoclip.APP_VERSION,
+        )
+        autoclip.QUIT.clear()
+        core = SimpleNamespace(stop=MagicMock(return_value={"ok": True}),
+                               stop_all_creators=MagicMock())
+        timer = MagicMock()
+        with patch.object(autoclip, "CORE", core), \
+             patch.object(autoclip, "cancel_window_close_shutdown"), \
+             patch.object(autoclip.threading, "Timer", return_value=timer) as timer_factory:
+            status, _headers, body = asyncio.run(asgi_request(
+                app,
+                method="POST",
+                path="/api/quit",
+                headers={"X-Token": autoclip.TOKEN, "Content-Type": "application/json"},
+                body=b"{}",
+            ))
+
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"ok": True, "shutting_down": True})
+        core.stop.assert_called_once_with(True)
+        core.stop_all_creators.assert_called_once_with()
+        timer_factory.assert_called_once_with(0.8, autoclip.QUIT.set)
+        timer.start.assert_called_once_with()
+        self.assertFalse(autoclip.QUIT.is_set())
+        autoclip.QUIT.clear()
 
     def test_window_closing_route_releases_the_specific_browser_window(self):
         app = create_app(

@@ -189,6 +189,7 @@ export default function App() {
   const [publishClip, setPublishClip] = useState<Clip | null>(null);
   const [bulkNames, setBulkNames] = useState<string[]>([]);
   const [busy, setBusy] = useState("");
+  const [quitting, setQuitting] = useState(false);
   const [toast, setToast] = useState<ToastDetail | null>(null);
   const [browserStatus, setBrowserStatus] = useState<RecordLike>({});
 
@@ -254,6 +255,17 @@ export default function App() {
     } finally { setBusy(""); }
   }, [refreshWorkspace]);
 
+  const requestQuit = useCallback(async () => {
+    if (quitting || !window.confirm("Quit StreamSnip AI? Active capture and creator monitors will be stopped.")) return;
+    setQuitting(true);
+    try {
+      // Do not refresh the workspace after this request: the API is intentionally shutting down.
+      await apiPost("/api/quit", {});
+    } catch {
+      setQuitting(false);
+    }
+  }, [quitting]);
+
   const openForPublishing = (clip: Clip) => {
     setPublishClip(clip);
     setBulkNames([]);
@@ -306,7 +318,7 @@ export default function App() {
             </div> : null}
           </div>
           <button className="icon-button" aria-label="Help" onClick={() => navigate("help")}><CircleHelp size={17} /></button>
-          <button className="topbar-quit" onClick={() => { if (window.confirm("Quit StreamSnip AI? Active capture and creator monitors will be stopped.")) void post("quit", "/api/quit", {}); }}>Quit</button>
+          <button className="topbar-quit" onClick={() => void requestQuit()} disabled={quitting}>{quitting ? "Shutting down..." : "Quit"}</button>
         </div>
       </header>
 
@@ -495,10 +507,11 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
     || null;
   const sourceTarget = mode === "live" ? (target.trim() || selectedCreator?.target || "") : target;
   const running = workspace.state.running;
+  const loadCreatorSettings = workspace.loadCreatorSettings;
   useEffect(() => {
     if (!selectedCreatorId || running) return;
-    void workspace.loadCreatorSettings(selectedCreatorId).catch(() => undefined);
-  }, [selectedCreatorId, running, workspace.loadCreatorSettings]);
+    void loadCreatorSettings(selectedCreatorId).catch(() => undefined);
+  }, [selectedCreatorId, running, loadCreatorSettings]);
   const update = (patch: Partial<AppSettings>) => { setOutputPreview(""); workspace.updateSettings(patch); };
   const detectedCreator = mode === "live" ? (selectedCreator?.name || inferCreatorTag(sourceTarget)) : "";
   const providerLabel = ({ gemini: "Gemini API", ollama: "Ollama", hooks: "Built-in hooks", huggingface: "Hugging Face", custom: "Custom API" } as Record<string, string>)[workspace.ai.provider] || "AI provider";
@@ -552,7 +565,10 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
     }
     await post("start-capture", "/api/start", captureConfig);
   };
-  const stop = async () => { await post("stop-capture", "/api/stop", { force: false }); };
+  const stop = async () => {
+    if (workspace.state.stopping || !running) return;
+    await post("stop-capture", "/api/stop", { force: false });
+  };
   const preview = async () => {
     const result = await post<{ image: string }>("preview-source", "/api/frame", { mode, target: sourceTarget });
     if (result?.image) setFrame(result.image);
@@ -707,7 +723,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
       <div className="studio-runbar-actions">
         <span className="studio-runbar-save">{workspace.saving ? "Saving..." : workspace.saveError || ""}</span>
         <Button onClick={() => void previewOutput()} disabled={!sourceTarget.trim() || !!busy}><Eye size={15} />Preview clip</Button>
-        {!running ? <Button kind="primary" onClick={() => void start()} disabled={!sourceTarget.trim() || !!busy || workspace.saving || !workspace.configLoaded}><Play size={15} fill="currentColor" />Start capture</Button> : <Button kind="danger" onClick={() => void stop()} disabled={!!busy}><Square size={14} fill="currentColor" />Stop capture</Button>}
+        {!running ? <Button kind="primary" onClick={() => void start()} disabled={!sourceTarget.trim() || !!busy || workspace.saving || !workspace.configLoaded}><Play size={15} fill="currentColor" />Start capture</Button> : <Button kind="danger" onClick={() => void stop()} disabled={!!busy || workspace.state.stopping}><Square size={14} fill="currentColor" />{workspace.state.stopping ? "Finishing..." : "Stop capture"}</Button>}
       </div>
     </div>
     {outputPreview ? <Panel title={outputPreviewCreator + " · Rendered clip preview"} action={<Button kind="quiet" size="small" onClick={() => setOutputPreview("")}>Close</Button>}>
@@ -765,7 +781,8 @@ function CreatorsPage({ workspace, busy, post, navigate }: { workspace: Workspac
           <div className="creator-status-cell"><StatusPill tone={creator.watching_vods ? "success" : "neutral"}>{creator.watching_vods ? "Watching" : "Paused"}</StatusPill><small>{creator.vod_status || count(creator.vod_pending) + " files waiting"}</small></div>
           <div className="creator-counts"><span>{count(creator.live_clips)} live</span><span>{count(creator.vod_clips)} VOD</span></div>
           <div className="creator-actions">
-            {creator.running ? <Button size="small" kind="danger" onClick={() => void post("stop-" + creator.id, "/api/creators/stop", { id: creator.id })} disabled={!!busy}><Square size={13} />Stop monitor</Button> : captureActive ? <Button size="small" kind="primary" onClick={() => navigate("live")}><Radio size={13} />View capture</Button> : <Button size="small" kind="primary" onClick={() => void post("start-" + creator.id, "/api/creators/start", { id: creator.id })} disabled={!!busy}><Play size={13} />Monitor</Button>}
+            {creator.running ? <Button size="small" kind="danger" onClick={() => void post("stop-" + creator.id, "/api/creators/stop", { id: creator.id })} disabled={!!busy || creator.phase === "stopping"}><Square size={13} />{creator.phase === "stopping" ? "Finishing..." : "Stop monitor"}</Button> : <Button size="small" kind="primary" onClick={() => void post("start-" + creator.id, "/api/creators/start", { id: creator.id })} disabled={!!busy}><Play size={13} />Monitor</Button>}
+            {captureActive ? <><Button size="small" onClick={() => navigate("live")}><Radio size={13} />View capture</Button><Button size="small" kind="danger" onClick={() => void post("stop-capture-" + creator.id, "/api/creators/stop-capture", { id: creator.id, force: false })} disabled={!!busy || !!creator.capture_stopping}><Square size={13} />{creator.capture_stopping ? "Finishing..." : "Stop capture"}</Button></> : null}
             {creator.watching_vods ? <Button size="small" onClick={() => void post("stop-vod-" + creator.id, "/api/creators/stop-vod-watch", { id: creator.id })} disabled={!!busy}><Pause size={13} />Stop VOD</Button> : <Button size="small" onClick={() => void post("watch-vod-" + creator.id, "/api/creators/watch-vods", { id: creator.id })} disabled={!!busy}><FolderOpen size={13} />Watch VODs</Button>}
             <div className="folder-menu"><button className="icon-button" aria-label={"Open " + creator.name + " folders"} aria-expanded={folderOpen === creator.id} onClick={() => setFolderOpen(folderOpen === creator.id ? "" : creator.id)}><MoreHorizontal size={17} /></button>
               {folderOpen === creator.id ? <div className="folder-popover">{folders.map(([folder, label]) => <button key={folder} onClick={() => { void post("folder-" + creator.id, "/api/creators/open", { id: creator.id, folder }); setFolderOpen(""); }}><FolderOpen size={14} />{label}</button>)}<button className="folder-danger" onClick={() => { setRemoving(creator); setFolderOpen(""); }}><Trash2 size={14} />Remove creator</button></div> : null}
@@ -1267,7 +1284,7 @@ function HelpPage({ navigate }: { navigate: (page: PageId) => void }) {
     <div className="help-grid">
       <Panel title="Live stream capture" description="Monitor a live Twitch or YouTube stream."><p>Paste the channel or stream URL. The engine records in chunks, transcribes each chunk, scores highlight moments, and renders clips with your caption layout. Stop capture from Live Studio; graceful stop finishes current work where possible.</p><Button onClick={() => navigate("live")}>Live Studio</Button></Panel>
       <Panel title="Recorded video / VOD" description="Process a local video file."><p>Choose the file source, set the desired processing options, and start. The engine transcribes the video, analyzes transcript windows, then renders selected moments. Keep enough disk space for source and output files.</p><Button onClick={() => navigate("live")}>File processing setup</Button></Panel>
-      <Panel title="Gemini model rotation & fallback" description="A working model stays preferred; failures trigger recovery."><p>Gemini is tried first. The engine retries a model, rotates through available Gemini API models after repeated failures, and remembers the model that succeeds for later windows and future videos. Only when Gemini rotation is exhausted does it try configured fallback providers (local Ollama first, then configured Hugging Face or custom API). A fallback is announced in Activity and is temporary: Gemini remains your selected provider and is retried on the next video/task.</p><p>For the best fallback coverage, install Ollama and download a model, or configure another provider in AI settings.</p></Panel>
+      <Panel title="Selected Gemini model & automatic fallback" description="Your selected model is always tried first. Temporary failures are retried, then the engine moves to the next available model."><p>The exact Gemini model selected in AI settings gets up to three attempts first. If it keeps failing, StreamSnip moves to the next available Gemini model and tries that model up to three times. It makes one ordered pass through available Gemini models, then uses configured fallback providers (local Ollama first, followed by configured Hugging Face or custom API). A fallback is announced in Activity and does not overwrite your selection: your chosen Gemini model is tried first again on the next clip/task.</p><p>For the best fallback coverage, install Ollama and download a model, or configure another provider in AI settings.</p></Panel>
       <Panel title="Creators & multi-monitor" description="Save channels and run independent monitor jobs."><p>Add a Twitch or YouTube channel in Creators. Each creator has isolated live/VOD folders and status. Start or stop each monitor individually; stop all before closing the app. Removing a profile does not delete its existing media.</p><Button onClick={() => navigate("creators")}>Manage creators</Button></Panel>
       <Panel title="Transcription & captions" description="Speech recognition and visual subtitle rendering."><p>Faster-Whisper uses your PC and compatible NVIDIA GPU acceleration. Larger models can improve recognition but use more VRAM and time. Facecam (pink) and game capture (cyan) are independent source-frame regions in Live Studio. Caption placement offers Top, Upper third, Lower third, and Bottom presets; Custom caption exposes manual size, color, stroke, alignment, and nudge controls.</p><Button onClick={() => navigate("live")}>Configure framing and captions</Button></Panel>
       <Panel title="Clip library & metadata" description="Find, edit, and organize generated clips."><p>Clips include a video and matching text metadata. Gemini, Ollama, Hugging Face, and compatible custom models generate both title and description from the clip transcript. Built-in Hook words mode uses its strongest matched phrase as the title and a conservative transcript-based description. Search the library, preview, edit title/description, open the containing folder, download, or mark a clip published. Published is a local registry; it does not prove a platform post unless publishing reports success.</p><Button onClick={() => navigate("clips")}>Open clip library</Button></Panel>

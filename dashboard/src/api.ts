@@ -146,6 +146,7 @@ const actionLabels: Record<string, string> = {
   "/api/creators/remove": "Remove creator monitor",
   "/api/creators/start": "Start creator monitor",
   "/api/creators/stop": "Stop creator monitor",
+  "/api/creators/stop-capture": "Stop creator capture",
   "/api/creators/watch-vods": "Start VOD folder watch",
   "/api/creators/stop-vod-watch": "Stop VOD folder watch",
   "/api/delete": "Delete clip",

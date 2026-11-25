@@ -246,6 +246,104 @@ class RegressionTests(unittest.TestCase):
                         "creator_id": "creator_a",
                     })
 
+    def test_live_capture_stop_is_idempotent_while_finishing(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        engine = MagicMock()
+        engine.cfg = {"mode": "live"}
+        engine.stop_flag = False
+        engine.stop_calls = []
+
+        def stop_once(force=False):
+            engine.stop_flag = True
+            engine.stop_calls.append(force)
+
+        engine.stop.side_effect = stop_once
+        core.engine = engine
+        core.running = True
+        core.push = MagicMock()
+
+        self.assertEqual(core.stop(False), {"ok": True, "stopping": True})
+        self.assertEqual(core.stop(False), {"ok": True, "stopping": True})
+        self.assertEqual(engine.stop_calls, [False])
+        core.push.assert_called_once()
+
+    def test_selected_gemini_model_precedes_cached_successful_alternate(self):
+        selected = "gemini-3.1-flash-lite"
+        alternate = "gemini-3.8-flash"
+        key = "selected-model-order-test"
+        cache_id = __import__("hashlib").sha256(key.encode("utf-8")).hexdigest()
+        calls = []
+
+        def fake_request(url, payload=None, headers=None, timeout=90):
+            calls.append(url)
+            return {"candidates": [{"content": {"parts": [{"text": '{"moments": []}'}]}}]}
+
+        with patch.dict(ai_highlights._GEMINI_ACTIVE_CACHE,
+                        {cache_id: (selected, alternate)}, clear=True), \
+             patch.object(ai_highlights, "_gemini_available_models", return_value=[alternate, selected]), \
+             patch.object(ai_highlights, "_json_request", side_effect=fake_request):
+            result = ai_highlights._gemini("transcript", {
+                "gemini_api_key": key,
+                "gemini_model": selected,
+                "_gemini_active_model": alternate,
+            })
+
+        self.assertEqual(result, {"moments": []})
+        self.assertEqual(len(calls), 1)
+        self.assertIn("/" + selected + ":generateContent", calls[0])
+        self.assertNotIn("/" + alternate + ":generateContent", calls[0])
+
+    def test_creator_capture_can_be_stopped_without_stopping_another_creator(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.creators = {
+            "creator_a": {"id": "creator_a", "name": "Creator A", "target": "https://twitch.tv/creator_a"},
+            "creator_b": {"id": "creator_b", "name": "Creator B", "target": "https://twitch.tv/creator_b"},
+        }
+        engine = MagicMock()
+        engine.cfg = {"mode": "live", "creator_id": "creator_a", "target": "https://twitch.tv/creator_a"}
+        engine.stop_flag = False
+        engine.stop.side_effect = lambda force=False: setattr(engine, "stop_flag", True)
+        core.engine = engine
+        core.running = True
+        core.push = MagicMock()
+
+        self.assertEqual(core.stop_creator_capture("creator_a"), {"ok": True, "stopping": True})
+        self.assertEqual(core.stop_creator_capture("creator_a"), {"ok": True, "stopping": True})
+        engine.stop.assert_called_once_with(force=False)
+        self.assertTrue(any("Creator A" in str(call) for call in core.push.call_args_list))
+        with self.assertRaisesRegex(ValueError, "not the active Live Studio capture"):
+            core.stop_creator_capture("creator_b")
+        engine.stop.assert_called_once_with(force=False)
+
+    def test_creator_capture_stop_matches_legacy_sessions_by_stream_target(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.creators = {
+            "creator_a": {"id": "creator_a", "name": "Creator A", "target": "https://www.twitch.tv/creator_a"},
+        }
+        engine = MagicMock()
+        engine.cfg = {"mode": "live", "target": "https://twitch.tv/creator_a"}
+        engine.stop_flag = False
+        engine.stop.side_effect = lambda force=False: setattr(engine, "stop_flag", True)
+        core.engine = engine
+        core.running = True
+        core.push = MagicMock()
+
+        self.assertEqual(core.stop_creator_capture("creator_a"), {"ok": True, "stopping": True})
+        engine.stop.assert_called_once_with(force=False)
+
+    def test_creator_capture_stop_endpoint_and_ui_are_exposed_per_creator(self):
+        root = Path(__file__).resolve().parents[1]
+        api_source = (root / "autoclip.py").read_text(encoding="utf-8")
+        app_source = (root / "dashboard" / "src" / "App.tsx").read_text(encoding="utf-8")
+        client_source = (root / "dashboard" / "src" / "api.ts").read_text(encoding="utf-8")
+        self.assertIn('path == "/api/creators/stop-capture"', api_source)
+        self.assertIn('"/api/creators/stop-capture"', client_source)
+        self.assertIn("Stop capture", app_source)
+        self.assertIn('"/api/creators/stop-capture"', app_source)
+
     def test_creator_list_marks_matching_live_studio_capture_without_claiming_monitor_is_running(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(autoclip, "_data_root", Path(directory)):
             core = object.__new__(autoclip.Core)
@@ -1311,6 +1409,45 @@ class RegressionTests(unittest.TestCase):
             "tiktok": "tt-account", "facebook": "fb-account"
         })
 
+    def test_render_retries_video_only_when_aac_has_no_packets(self):
+        engine = autoclip.Engine(autoclip.clean_cfg({"compute_device": "cpu"}), lambda *_: None)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.mp4"
+            source.write_bytes(b"test source")
+            output = root / "out"
+            output.mkdir()
+            commands = []
+
+            ass_path = output / "audio-empty-fallback.ass"
+
+            def write_ass(_words, _start, _end, path, _cfg):
+                Path(path).write_text("[Script Info]\\n", encoding="utf-8")
+
+            def fake_run(command, cwd, **_kwargs):
+                commands.append(command)
+                if len(commands) == 1:
+                    return types.SimpleNamespace(
+                        returncode=1,
+                        stderr="[aac] Could not open encoder before EOF; Nothing was written into output file, because at least one of its streams received no packets.",
+                    )
+                self.assertTrue(ass_path.is_file(), "The subtitle sidecar must remain available for the retry.")
+                (Path(cwd) / command[-1]).write_bytes(b"video")
+                return types.SimpleNamespace(returncode=0, stderr="")
+
+            with patch.object(autoclip, "OUT", output), patch.object(autoclip, "make_ass", side_effect=write_ass), \
+                 patch.object(autoclip, "run", side_effect=fake_run), \
+                 patch.object(autoclip, "has_nvenc", return_value=False), \
+                 patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"):
+                engine.render(source, 5, 8, [], "audio-empty-fallback")
+
+            self.assertFalse(ass_path.exists())
+            self.assertEqual(len(commands), 2)
+            self.assertIn("0:a?", commands[0])
+            self.assertIn("-an", commands[1])
+            self.assertNotIn("0:a?", commands[1])
+            self.assertTrue((output / "audio-empty-fallback.mp4").is_file())
+
     def test_render_uses_frame_accurate_input_seeking_for_captions(self):
         engine = autoclip.Engine(autoclip.clean_cfg({"compute_device": "cpu"}), lambda *_: None)
         with tempfile.TemporaryDirectory() as directory:
@@ -1393,13 +1530,13 @@ class RegressionTests(unittest.TestCase):
 
         with patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
              patch.object(ai_highlights.time, "sleep"):
-            with self.assertRaisesRegex(ai_highlights.AIProviderError, "12 attempts across 2 model"):
+            with self.assertRaisesRegex(ai_highlights.AIProviderError, "6 attempts across 2 model"):
                 ai_highlights._gemini("transcript", {
                     "gemini_api_key": "test-key", "gemini_model": "gemini-3.8-flash",
                 })
-        self.assertEqual(len(generation_urls), 12)
-        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 6)
-        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 6)
+        self.assertEqual(len(generation_urls), 6)
+        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 3)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 3)
 
     @unittest.skipUnless(autoclip.shutil.which("ffmpeg") or autoclip.ffmpeg_exe() != "ffmpeg", "FFmpeg is not installed")
     def test_render_burns_relative_captions_after_input_seek(self):
@@ -1429,6 +1566,61 @@ class RegressionTests(unittest.TestCase):
                                    "-frames:v", "1", "-f", "rawvideo", "-"], capture_output=True)
             self.assertGreater(sum(value > 60 for value in visible.stdout), 1000)
             self.assertLess(sum(value > 220 for value in absent.stdout), 100)
+
+    @unittest.skipUnless(autoclip.shutil.which("ffmpeg") or autoclip.ffmpeg_exe() != "ffmpeg", "FFmpeg is not installed")
+    def test_render_audio_eof_fallback_keeps_subtitles_and_outputs_video(self):
+        ffmpeg = autoclip.ffmpeg_exe()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "video-with-short-audio.mp4"
+            output = root / "out"
+            output.mkdir()
+            created = autoclip.run([
+                ffmpeg, "-y", "-v", "error",
+                "-f", "lavfi", "-i", "color=c=black:s=320x240:r=25:d=8",
+                "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1",
+                "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264",
+                "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-t", "8", str(source),
+            ], capture_output=True, text=True)
+            self.assertEqual(created.returncode, 0, created.stderr)
+
+            logs = []
+            attempts = []
+            cfg = autoclip.clean_cfg({
+                "compute_device": "cpu", "layout": "Fill (crop center)",
+                "output_format": "16:9", "caption_size": 150,
+            })
+            with patch.object(autoclip, "OUT", output), \
+                 patch.dict(autoclip.OUTPUT_FORMATS, {"16:9": (320, 240)}):
+                engine = autoclip.Engine(cfg, lambda kind, payload: logs.append((kind, payload)))
+                real_run = autoclip.run
+
+                def fail_first_audio_attempt(command, **kwargs):
+                    # Let has_nvenc() run its independent FFmpeg probe normally.
+                    if "cwd" not in kwargs:
+                        return real_run(command, **kwargs)
+                    attempts.append(command)
+                    if "-an" not in command:
+                        return types.SimpleNamespace(
+                            returncode=1,
+                            stderr="[aac] Could not open encoder before EOF; Nothing was written into output file, because at least one of its streams received no packets.",
+                        )
+                    self.assertTrue((output / "audio-eof-recovery.ass").is_file())
+                    return real_run(command, **kwargs)
+
+                with patch.object(autoclip, "run", side_effect=fail_first_audio_attempt):
+                    engine.render(source, 5, 8, [(5.1, 6.8, "CAPTION VISIBLE")], "audio-eof-recovery")
+
+            rendered = output / "audio-eof-recovery.mp4"
+            self.assertTrue(rendered.is_file())
+            self.assertGreater(rendered.stat().st_size, 1000)
+            self.assertFalse((output / "audio-eof-recovery.ass").exists())
+            self.assertEqual(len(attempts), 2)
+            self.assertIn("0:a?", attempts[0])
+            self.assertIn("-an", attempts[1])
+            self.assertTrue(any("Retrying the render without an audio stream" in str(payload)
+                                for _kind, payload in logs))
 
     def test_gemini_quota_exhaustion_falls_back_to_ollama(self):
         logs = []
@@ -1462,9 +1654,9 @@ class RegressionTests(unittest.TestCase):
                 logs.append,
             )
         self.assertEqual(moments, [(24, 85.8)])
-        self.assertEqual(len(generation_urls), 12)
-        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 6)
-        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 6)
+        self.assertEqual(len(generation_urls), 6)
+        self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 3)
+        self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 3)
         ollama.assert_called_once()
         self.assertTrue(any("Remaining transcript windows were analyzed with Ollama" in line for line in logs))
 

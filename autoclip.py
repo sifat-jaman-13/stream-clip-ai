@@ -217,6 +217,17 @@ def ffmpeg_exe():
             return str(bundled)
     return shutil.which("ffmpeg") or "ffmpeg"
 
+def ffmpeg_empty_audio_packets_error(message):
+    """Identify FFmpeg's AAC EOF failure when a selected clip range has no audio packets."""
+    text = str(message or "").lower()
+    return (
+        "could not open encoder before eof" in text
+        and (
+            "received no packets" in text
+            or "nothing was written into output file" in text
+        )
+    )
+
 def check_updates():
     """Check local runtime versions against public release metadata without changing anything."""
     result = []
@@ -2004,16 +2015,36 @@ class Engine:
         )
         audio_filter = ((profanity_filter + ",") if profanity_filter else "") + "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS"
         tmp = f"{name}.tmp.mp4"
-        cmd = [ffmpeg_exe(), "-y", "-v", "error", "-fflags", "+genpts", "-ss", f"{start:.2f}", "-accurate_seek",
-               "-t", f"{end - start:.2f}", "-i", str(pathlib.Path(src).resolve()),
-               "-filter_complex", vf, "-map", "[v]", "-map", "0:a?",
-               *enc, "-pix_fmt", "yuv420p", "-af", audio_filter,
-               "-c:a", "aac", "-b:a", "160k", "-r", "30", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", tmp]
-        r = run(cmd, cwd=self.out_dir, capture_output=True, text=True)
-        (self.out_dir / f"{name}.ass").unlink(missing_ok=True)
-        if r.returncode != 0:
+        render_prefix = [
+            ffmpeg_exe(), "-y", "-v", "error", "-fflags", "+genpts",
+            "-ss", f"{start:.2f}", "-accurate_seek",
+            "-t", f"{end - start:.2f}", "-i", str(pathlib.Path(src).resolve()),
+            "-filter_complex", vf, "-map", "[v]",
+            *enc, "-pix_fmt", "yuv420p",
+        ]
+        render_suffix = [
+            "-r", "30", "-avoid_negative_ts", "make_zero",
+            "-movflags", "+faststart", tmp,
+        ]
+        audio_args = ["-map", "0:a?", "-af", audio_filter, "-c:a", "aac", "-b:a", "160k"]
+        ass_path = self.out_dir / f"{name}.ass"
+        cmd = render_prefix + audio_args + render_suffix
+        try:
+            r = run(cmd, cwd=self.out_dir, capture_output=True, text=True)
+            if r.returncode != 0 and ffmpeg_empty_audio_packets_error(r.stderr):
+                # Keep the ASS file alive: the retry uses the same subtitle filter graph.
+                # Removing it before retry makes FFmpeg fail with "Unable to open .ass".
+                self.log("This clip range contains no usable audio packets. Retrying the render without an audio stream.")
+                (self.out_dir / tmp).unlink(missing_ok=True)
+                cmd = render_prefix + ["-an"] + render_suffix
+                r = run(cmd, cwd=self.out_dir, capture_output=True, text=True)
+            if r.returncode != 0:
+                raise RuntimeError((r.stderr or "ffmpeg failed").strip()[-400:])
+        except Exception:
             (self.out_dir / tmp).unlink(missing_ok=True)
-            raise RuntimeError((r.stderr or "ffmpeg failed").strip()[-400:])
+            raise
+        finally:
+            ass_path.unlink(missing_ok=True)
         transcript = " ".join(
             str(word).strip() for word_start, _word_end, word in words
             if start <= word_start <= end
@@ -2635,6 +2666,7 @@ class Core:
                 result.append({**profile, **status,
                                "running": bool(self.creator_workers.get(creator_id) and self.creator_workers[creator_id].is_alive()),
                                "capture_active": bool(capture_active),
+                               "capture_stopping": bool(capture_active and getattr(active_engine, "stop_flag", False)),
                                "watching_vods": bool(watcher and watcher.is_alive())})
             return result
 
@@ -2841,10 +2873,54 @@ class Core:
             worker = self.creator_workers.get(creator_id)
             if not engine or not worker or not worker.is_alive():
                 raise ValueError("This creator monitor is not running.")
+            if getattr(engine, "stop_flag", False):
+                return {"ok": True, "stopping": True}
             engine.stop(force=bool(force))
             self.creator_status[creator_id] = {"phase": "stopping", "status": "Stopping monitor...",
                                                "clips": self.creator_status.get(creator_id, {}).get("clips", 0)}
-        return {"ok": True}
+        return {"ok": True, "stopping": True}
+
+    def stop_creator_capture(self, creator_id, force=False):
+        """Stop Live Studio capture only when it belongs to the requested saved creator."""
+        creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
+        with self.lock:
+            profile = self.creators.get(creator_id)
+            if not profile:
+                raise ValueError("Creator monitor not found.")
+            engine = getattr(self, "engine", None)
+            cfg = getattr(engine, "cfg", {}) or {}
+            if not engine or not getattr(self, "running", False) or cfg.get("mode") != "live":
+                raise ValueError("This creator does not have an active Live Studio capture.")
+            active_creator_id = str(cfg.get("creator_id") or "").strip()
+            if active_creator_id:
+                matches_creator = active_creator_id == creator_id
+            else:
+                # Older sessions may not have stored creator_id. Match their canonical URL.
+                try:
+                    def target_key(value):
+                        parsed = urllib.parse.urlsplit(normalize_stream_target(str(value or "")))
+                        host = (parsed.hostname or "").lower()
+                        if host.startswith("www."):
+                            host = host[4:]
+                        path = parsed.path.rstrip("/")
+                        if host.endswith("twitch.tv"):
+                            path = path.lower()
+                        return parsed.scheme.lower(), host, parsed.port, path, parsed.query
+
+                    matches_creator = target_key(cfg.get("target")) == target_key(profile.get("target"))
+                except (TypeError, ValueError):
+                    matches_creator = False
+            if not matches_creator:
+                raise ValueError("This creator is not the active Live Studio capture.")
+            if getattr(engine, "stop_flag", False):
+                return {"ok": True, "stopping": True}
+            engine.stop(force=bool(force))
+            self.push(
+                f"Stopping the Live Studio capture for {profile['name']}."
+                if force else
+                f"Stopping the Live Studio capture for {profile['name']} and finishing clips already captured."
+            )
+        return {"ok": True, "stopping": True}
 
     def stop_all_creators(self):
         with self.lock:
@@ -3037,9 +3113,13 @@ class Core:
     def stop(self, force):
         with self.lock:
             if self.engine and self.running:
+                if getattr(self.engine, "stop_flag", False):
+                    return {"ok": True, "stopping": True}
                 self.engine.stop(force=force)
                 self.push("Stopping now." if (force or self.engine.cfg["mode"] != "live")
                           else "Stopping the recording - finishing the clips already captured.")
+                return {"ok": True, "stopping": True}
+        return {"ok": True, "stopping": False}
 
     def state(self, since, clip_offset=0, clip_tab="clips"):
         clips = list_clips(offset=clip_offset, clip_tab=clip_tab)
@@ -3533,6 +3613,15 @@ def parse_json_object(raw):
     return body
 
 
+def schedule_quit_after_response(delay=0.8):
+    """Signal application shutdown after the API response has been returned to ASGI."""
+    timer = threading.Timer(max(0.25, float(delay)), QUIT.set)
+    timer.daemon = True
+    timer.name = "streamsnip-quit-after-response"
+    timer.start()
+    return timer
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = PRODUCT_NAME
     protocol_version = "HTTP/1.1"
@@ -3800,6 +3889,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, CORE.start_creator(body.get("id")))
                 if path == "/api/creators/stop":
                     return self._send(200, CORE.stop_creator(body.get("id"), body.get("force", False)))
+                if path == "/api/creators/stop-capture":
+                    return self._send(200, CORE.stop_creator_capture(body.get("id"), body.get("force", False)))
                 if path == "/api/settings":
                     cfg = clean_cfg(body)
                     if CORE.running and (cfg.get("rec_dir") != CORE.settings.get("rec_dir") or cfg.get("out_dir") != CORE.settings.get("out_dir")):
@@ -3983,7 +4074,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/quit":
                     CORE.stop(True)
                     CORE.stop_all_creators()
-                    cancel_window_close_shutdown(); self._send(200, {"ok": True}); QUIT.set(); return
+                    cancel_window_close_shutdown()
+                    self._send(200, {"ok": True, "shutting_down": True})
+                    schedule_quit_after_response()
+                    return
             except (ValueError, AIProviderError) as e:
                 CORE.push(f"API VALIDATION ERROR [POST {path}]: {e}")
                 return self._send(400, {"error": str(e)})

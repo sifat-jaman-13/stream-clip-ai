@@ -14,7 +14,8 @@ _GEMINI_ACTIVE_CACHE = {}
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 RETIRED_GEMINI_MODELS = {"gemini-2.5-flash"}
 GEMINI_ATTEMPTS_PER_MODEL = 3
-GEMINI_ROTATION_ROUNDS = 2
+# Each available Gemini model is tried up to three times, then the next model is used once.
+GEMINI_ROTATION_ROUNDS = 1
 DEFAULT_HUGGINGFACE_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash:fastest"
 
 
@@ -277,13 +278,13 @@ def _gemini(prompt, config):
             _GEMINI_MODEL_CACHE.pop(next(iter(_GEMINI_MODEL_CACHE)))
         _GEMINI_MODEL_CACHE[cache_id] = cached_models
     active = str(config.get("_gemini_active_model", "")).strip()
-    # Keep the last proven-working Gemini model sticky across separate analyses
-    # (live windows, new clips, titles/descriptions, and monitoring jobs). A
-    # manual model change resets this preference; a later failure rotates away.
+    # The user's explicitly selected model must always get first refusal.
+    # A previously successful alternate is useful only after the selected model
+    # exhausts its retries, and must never silently outrank the current setting.
     cached_choice = _GEMINI_ACTIVE_CACHE.get(cache_id)
     sticky_model = cached_choice[1] if cached_choice and cached_choice[0] == selected else ""
     models = list(dict.fromkeys(
-        model for model in [sticky_model, active, selected, DEFAULT_GEMINI_MODEL, *(cached_models or [])]
+        model for model in [selected, sticky_model, active, DEFAULT_GEMINI_MODEL, *(cached_models or [])]
         if model and model not in RETIRED_GEMINI_MODELS
     ))
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}

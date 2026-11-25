@@ -13,7 +13,7 @@ import { useWorkspace, type AppSettings, type Workspace } from "./workspace";
 import type { Clip, Creator, LogEntry } from "./types";
 import "./App.css";
 
-type PageId = "overview" | "live" | "creators" | "clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
+type PageId = "overview" | "live" | "creators" | "clips" | "post-clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
 type ThemeId = "odysseus" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseas";
 type FontId = "google-sans" | "inter" | "roboto" | "open-sans" | "montserrat" | "poppins" | "lato" | "nunito-sans" | "dm-sans" | "ibm-plex-sans" | "space-grotesk" | "fira-code" | "jetbrains-mono";
 type StudioSetupTab = "capture" | "ai" | "speech" | "captions";
@@ -49,7 +49,8 @@ const pageInfo: Record<PageId, { title: string; description: string }> = {
   overview: { title: "Studio overview", description: "Your capture activity, creator sources, and clips in one place." },
   live: { title: "Live Studio", description: "Choose a source and control capture from your local engine." },
   creators: { title: "Creators", description: "Manage independent live monitors and recorded-VOD folders." },
-  clips: { title: "Clip library", description: "Review generated clips, edit metadata, and prepare a post." },
+  clips: { title: "Clip library", description: "Review generated clips and edit metadata." },
+  "post-clips": { title: "Post Your Clips", description: "Choose destinations for finished clips and prepare each upload." },
   published: { title: "Published", description: "Clips recorded in your local posted registry." },
   publishing: { title: "Publishing", description: "Connect Zernio or prepare a manual upload in your browser." },
   words: { title: "Hype words", description: "Tune the phrase list used by the local highlight scorer." },
@@ -67,6 +68,7 @@ const navGroups: Array<{ label: string; items: Array<{ id: PageId; label: string
   ] },
   { label: "Content", items: [
     { id: "clips", label: "Clip library", icon: Clapperboard },
+    { id: "post-clips", label: "Post Your Clips", icon: CloudUpload },
     { id: "published", label: "Published", icon: BadgeCheck },
     { id: "words", label: "Hype words", icon: WandSparkles },
   ] },
@@ -314,6 +316,7 @@ export default function App() {
         {page === "overview" ? <OverviewPage workspace={workspace} navigate={navigate} openClip={(clip) => { setSelectedClip(clip); navigate("clips"); }} /> : null}
         {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
         {page === "creators" ? <CreatorsPage workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
+        {page === "post-clips" ? <PostYourClipsPage workspace={workspace} busy={busy} post={post} /> : null}
         {page === "clips" || page === "published" ? <ClipLibraryPage key={page + "|" + workspace.clipOffset} workspace={workspace} published={page === "published"} navigate={navigate} query={clipSearch} setQuery={setClipSearch} selectedClip={selectedClip} setSelectedClip={setSelectedClip} openForPublishing={openForPublishing} openBulkPublishing={openBulkPublishing} busy={busy} post={post} /> : null}
         {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} browserStatus={browserStatus} setBrowserStatus={setBrowserStatus} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
         {page === "words" ? <HypeWordsPage key={workspace.words.text} workspace={workspace} /> : null}
@@ -949,6 +952,55 @@ function PublishingPage({ workspace, clip, bulkNames, browserStatus, setBrowserS
   </div>;
 }
 
+function PostYourClipsPage({ workspace, busy, post }: {
+  workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>;
+}) {
+  const platforms = [
+    { id: "youtube", label: "YouTube" },
+    { id: "facebook", label: "Facebook" },
+    { id: "instagram", label: "Instagram" },
+    { id: "tiktok", label: "TikTok" },
+  ];
+  const clips = workspace.state.clips.filter((item) => !item.posted);
+  const [destinations, setDestinations] = useState<Record<string, string[]>>({});
+  const [activeClip, setActiveClip] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, string>>({});
+  const toggle = (name: string, platform: string) => setDestinations((current) => {
+    const selected = current[name] || [];
+    return { ...current, [name]: selected.includes(platform) ? selected.filter((value) => value !== platform) : [...selected, platform] };
+  });
+  const selectedTotal = Object.values(destinations).reduce((sum, values) => sum + values.length, 0);
+  const prepare = async (clip: Clip) => {
+    const selected = destinations[clip.name] || [];
+    if (!selected.length) return;
+    setActiveClip(clip.name);
+    for (const platform of selected) {
+      const key = clip.name + "::" + platform;
+      setResults((current) => ({ ...current, [key]: "Opening upload and attaching clip…" }));
+      const result = await post<RecordLike>("post-clip-" + platform, "/api/browser/prepare", {
+        name: clip.name, platform, title: clip.title || clip.name, description: clip.description || "",
+      });
+      setResults((current) => ({ ...current, [key]: result?.ready_for_review && result?.file_selected && result?.title_filled && result?.description_filled ? "Video attached and metadata verified — review, then Publish" : result?.error || "Automation could not confirm the upload" }));
+    }
+    setActiveClip(null);
+  };
+  return <div className="page-stack">
+    <PageHeading title="Post Your Clips" description="Every finished clip appears here. Choose one or more destinations, then prepare its upload." actions={<Button onClick={() => void workspace.refresh()}><RefreshCw size={15} />Refresh clips</Button>} />
+    <div className="storage-note"><ShieldCheck size={17} /><span><strong>Your final say stays yours</strong><small>A dedicated browser profile keeps your platform sign-in. StreamSnip attaches the clip and verifies the title/caption before showing Ready. You click Publish yourself.</small></span></div>
+    <Panel title="Ready to post" description={count(clips.length) + " clips available · " + count(selectedTotal) + " destinations selected"}>
+      {clips.length ? <div className="post-clip-list">{clips.map((clip) => <article className="post-clip-card" key={clip.name}>
+        <video className="post-clip-preview" src={clipUrl(clip.name)} muted playsInline preload="metadata" />
+        <div className="post-clip-details"><strong>{clip.title || clip.name}</strong><small>{clip.name} · {sizeLabel(clip.size_mb)}</small>
+          <div className="post-platforms">{platforms.map((platform) => <label key={platform.id} className="post-platform-option"><input type="checkbox" checked={(destinations[clip.name] || []).includes(platform.id)} onChange={() => toggle(clip.name, platform.id)} /><span>{platform.label}</span></label>)}</div>
+          <small className="post-metadata-preview">Title: {clip.title || "No generated title yet"}<br />Description: {clip.description || "No generated description yet"}</small>
+          <Button kind="primary" onClick={() => void prepare(clip)} disabled={!!busy || activeClip !== null || !(destinations[clip.name] || []).length}><ExternalLink size={14} />{activeClip === clip.name ? "Preparing…" : "Attach video + fill details"}</Button>
+          {(destinations[clip.name] || []).map((platform) => results[clip.name + "::" + platform] ? <div className="post-result" key={platform}><span>{platforms.find((item) => item.id === platform)?.label}</span><small>{results[clip.name + "::" + platform]}</small></div> : null)}
+        </div>
+      </article>)}</div> : <EmptyState icon={Clapperboard} title="No clips ready to post" description="Newly rendered clips will appear here automatically." />}
+    </Panel>
+  </div>;
+}
+
 function HypeWordsPage({ workspace }: { workspace: Workspace }) {
   const [text, setText] = useState(workspace.words.text);
   const [saving, setSaving] = useState(false);
@@ -1121,6 +1173,10 @@ function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mo
   const cropW = num(settings.crop_w, 31.6);
   const cropH = num(settings.crop_h, 100);
   const detectedTag = mode === "live" ? inferCreatorTag(target) : "";
+  const highlightColors: Record<string, string> = {
+    Yellow: "#EFFF43", Green: "#7CFF5B", Cyan: "#50E8FF", Orange: "#FF9B42", Pink: "#FF45A8",
+  };
+  const previewHighlightColor = highlightColors[String(settings.color || "Yellow")] || highlightColors.Yellow;
   const setRange = (key: string, value: number) => update({ [key]: value });
   return <div className="page-stack compact-stack">
     <Panel title="Video layout" description="Set the output aspect ratio and framing preset used when rendering clips.">
@@ -1169,7 +1225,7 @@ function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mo
           <div className="caption-preview-game"><span>GAME CAPTURE</span></div>
           <div className={"caption-preview-words style-" + String(settings.subtitle_style || "GTA Neon").toLowerCase().replace(/\s+/g, "-") + " location-" + (settings.subtitle_custom ? String(settings.subtitle_position || "Bottom").toLowerCase() : String(settings.position || "Lower third").toLowerCase().replace(/\s+/g, "-"))}
             style={{ color: settings.subtitle_custom ? String(settings.subtitle_text_color || "#FFFFFF") : "inherit", WebkitTextStroke: settings.subtitle_custom ? "0.5px " + String(settings.subtitle_stroke_color || "#000000") : "0.5px #301045", fontFamily: String(settings.font || "Impact"), fontSize: Math.max(11, num(settings.subtitle_custom ? settings.subtitle_font_size : settings.caption_size, 82) * 0.15) + "px" }}>
-            <span>NO WAY</span> <b>THAT JUST HAPPENED</b>
+            <span>NO WAY</span> <b style={{ color: settings.subtitle_custom ? String(settings.subtitle_text_color || "#FFFFFF") : previewHighlightColor }}>THAT JUST HAPPENED</b>
           </div>
         </div>
       </div>

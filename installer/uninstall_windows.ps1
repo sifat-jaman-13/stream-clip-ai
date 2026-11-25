@@ -37,6 +37,7 @@ function Remove-AppDependency([string]$Path, [string]$Label) {
 
 # These are app-owned generated dependencies. User clips, recordings, and settings are kept.
 Remove-AppDependency (Join-Path $AppDir "runtime") "isolated Python runtime and pip packages"
+Remove-AppDependency (Join-Path $AppDir "python-base") "app-local fallback Python installation"
 Remove-AppDependency (Join-Path $AppDir "source\models") "downloaded Whisper speech models"
 
 if (-not $DependencyStatePath) {

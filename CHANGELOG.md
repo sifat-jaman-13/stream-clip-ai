@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.0.3] - 2026-11-25
+
+### Fixed
+- Python discovery now considers all registered and commonly installed stable 64-bit Python interpreters from 3.10 onward, orders them newest-first, and validates real StreamSnip dependency resolution in a disposable virtual environment before selection.
+- Skips a Python version when the current Windows dependency stack cannot resolve its required wheels (currently Python 3.15 is skipped because ONNX Runtime has no matching Windows distribution); selects the newest compatible installed Python instead.
+- When no compatible system interpreter exists, installs verified Python 3.14.10 privately under the StreamSnip install directory without changing global Python installations or PATH.
+- Rebuilds the app virtual environment when the selected Python major/minor changes, preserving the previous runtime until the new dependencies and speech-model checks succeed. Failed migrations restore the previous runtime.
+- The app-local Python fallback is removed by the StreamSnip uninstaller; user-installed system Python versions are never claimed or removed.
+
+### Verification
+- 184 Python unit tests passed, including both Gemini retry/rotation tests and installer/launcher regression coverage.
+- Python compilation passed; frontend lint reported 0 warnings/errors; TypeScript and Vite production build passed.
+- PowerShell setup script parsed successfully, real Windows discovery selected Python 3.14.10 after rejecting 3.15.2 for its unavailable Windows ONNX Runtime distribution, and the 4.0.3 Windows installer compiled successfully with Inno Setup 6.7.3.
+
 ## [4.0.2] - 2026-11-25
 
 ### Fixed

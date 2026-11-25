@@ -1510,7 +1510,7 @@ class RegressionTests(unittest.TestCase):
             self.assertIn("secret", stored)
             self.assertIn("custom-secret", stored)
 
-    def test_installer_tracks_and_removes_only_its_owned_global_dependencies(self):
+    def test_installer_tracks_only_global_dependencies_and_keeps_user_python(self):
         root = Path(__file__).resolve().parents[1]
         setup_script = (root / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
         uninstall_script = (root / "installer" / "uninstall_windows.ps1").read_text(encoding="utf-8")
@@ -1524,8 +1524,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('Source: "..\\api_server.py"; DestDir: "{app}\\source"', installer_script)
         self.assertIn("-SkipLaunch", installer_script)
         self.assertIn('Filename: "{app}\\StreamSnipAI.exe"', installer_script)
-        self.assertIn('Mark-DependencyInstalled "python"', setup_script)
+        self.assertNotIn('Mark-DependencyInstalled "python"', setup_script)
         self.assertIn('Mark-DependencyInstalled "ffmpeg"', setup_script)
+        self.assertIn('Remove-AppDependency (Join-Path $AppDir "python-base")', uninstall_script)
         self.assertIn('python_installed_by_streamsnip', uninstall_script)
         self.assertIn('ffmpeg_installed_by_streamsnip', uninstall_script)
         self.assertIn('Python.Python.3.12', uninstall_script)
@@ -1533,6 +1534,29 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('source\\models', uninstall_script)
         self.assertIn('uninstall_windows.ps1', installer_script)
         self.assertIn('[UninstallRun]', installer_script)
+
+    def test_installer_accepts_python_310_plus_and_installs_only_when_none_exists(self):
+        root = Path(__file__).resolve().parents[1]
+        setup_script = (root / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
+        uninstall_script = (root / "installer" / "uninstall_windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("sys.version_info[:2] >= (3,10)", setup_script)
+        self.assertIn("sys.version_info.releaselevel == 'final'", setup_script)
+        self.assertIn("$launcher.Source -0p", setup_script)
+        self.assertIn("Sort-Object", setup_script)
+        self.assertIn("Install-PythonStable", setup_script)
+        self.assertIn("python-base", setup_script)
+        self.assertIn("if (-not $python -and -not $CheckOnly) { $python = Install-PythonStable $requirements }", setup_script)
+        self.assertIn("Test-PythonDependencyCompatibility", setup_script)
+        self.assertIn("--dry-run", setup_script)
+        self.assertIn("Sort-Object -Property @{ Expression = { [version]$_.Version }; Descending = $true }", setup_script)
+        self.assertIn("python-3.14.10-amd64.exe", setup_script)
+        self.assertNotIn("python-3.15.2-amd64.exe", setup_script)
+        self.assertNotIn('Mark-DependencyInstalled "python"', setup_script)
+        self.assertIn('Remove-AppDependency (Join-Path $AppDir "python-base")', uninstall_script)
+        self.assertNotIn("Install-Python312", setup_script)
+        self.assertIn('runtime.previous', setup_script)
+        self.assertIn('Runtime migration failed. The previous working Python runtime was restored.', setup_script)
+        self.assertIn('The new Python runtime does not match the selected Python', setup_script)
 
     def test_ai_settings_preserve_one_time_huggingface_setup_choice(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -7,11 +7,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$RuntimeSchema = "3"
+$RuntimeSchema = "4"
 $transcriptStarted = $false
 $exitCode = 0
 
 $script:DependencyStatePath = $null
+$script:RuntimeBackupPath = $null
 $script:DependencyOwnership = @{
     python_installed_by_streamsnip = $false
     ffmpeg_installed_by_streamsnip = $false
@@ -48,7 +49,7 @@ function Test-SupportedPython([string]$File, [string[]]$Prefix = @()) {
     try {
         $commandArgs = @($Prefix) + @(
             "-c",
-            "import sys; ok=(3,10) <= sys.version_info[:2] <= (3,12) and sys.maxsize > 2**32; print(('OK|' if ok else 'NO|') + sys.executable + '|' + '.'.join(map(str, sys.version_info[:3]))); raise SystemExit(0 if ok else 2)"
+            "import sys; ok=sys.version_info[:2] >= (3,10) and sys.version_info.releaselevel == 'final' and sys.maxsize > 2**32; print(('OK|' if ok else 'NO|') + sys.executable + '|' + '.'.join(map(str, sys.version_info[:3]))); raise SystemExit(0 if ok else 2)"
         )
         $output = & $File @commandArgs 2>$null
         if ($LASTEXITCODE -ne 0) { return $null }
@@ -66,72 +67,174 @@ function Test-SupportedPython([string]$File, [string[]]$Prefix = @()) {
     }
 }
 
-function Find-SupportedPython {
+function Test-PythonDependencyCompatibility($Python, [string]$RequirementsPath) {
+    # Resolve requirements in a disposable venv so the check never installs
+    # or upgrades packages in a user's global Python environment.
+    $probeRoot = Join-Path $env:TEMP ("streamsnip-python-probe-" + [guid]::NewGuid().ToString("N"))
+    $probePython = Join-Path $probeRoot "Scripts\python.exe"
+    $ErrorActionPreference = "Continue"
+    try {
+        $venvArgs = @($Python.Prefix) + @("-m", "venv", $probeRoot)
+        & $Python.File @venvArgs *> $null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $probePython)) {
+            Write-Host "Skipping Python $($Python.Version): could not create a clean test environment." -ForegroundColor DarkYellow
+            return $false
+        }
+
+        & $probePython -m pip install --upgrade pip --disable-pip-version-check --quiet *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Skipping Python $($Python.Version): pip could not be prepared in the temporary test environment." -ForegroundColor DarkYellow
+            return $false
+        }
+
+        $resolution = & $probePython -m pip install --dry-run --prefer-binary --disable-pip-version-check -r $RequirementsPath 2>&1
+        $resolutionExitCode = $LASTEXITCODE
+        if ($resolutionExitCode -ne 0) {
+            $detail = @($resolution | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() } | Select-Object -Last 1)
+            Write-Host "Skipping Python $($Python.Version): $($detail -join '')" -ForegroundColor DarkYellow
+            return $false
+        }
+        return $true
+    } catch {
+        Write-Host "Skipping Python $($Python.Version): $($_.Exception.Message)" -ForegroundColor DarkYellow
+        return $false
+    } finally {
+        if (Test-Path -LiteralPath $probeRoot) {
+            Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Find-SupportedPython([string]$RequirementsPath) {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($AppDir) {
+        $candidates.Add((Join-Path $AppDir "python-base\python.exe"))
+    }
+
+    # The Python launcher knows about registered installations even when they
+    # are not on PATH. -0p lists every interpreter with its full executable path.
     $launcher = Get-Command py.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($launcher) {
-        foreach ($version in ("3.12", "3.11", "3.10")) {
-            $found = Test-SupportedPython $launcher.Source @("-$version")
-            if ($found) { return $found }
+        $launcherOutput = & $launcher.Source -0p 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($line in $launcherOutput) {
+                if ([string]$line -match '(?i)([A-Z]:\\.*?pythonw?\.exe)\s*$') {
+                    $candidates.Add($Matches[1].Trim())
+                }
+            }
         }
     }
 
-    $candidates = New-Object System.Collections.Generic.List[string]
-    $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($pythonCommand -and $pythonCommand.Source -notlike "*\WindowsApps\python.exe") {
-        $candidates.Add($pythonCommand.Source)
+    # Also inspect PATH, common python.org install locations, and registry
+    # registrations so embedded or per-user installs are not missed.
+    foreach ($commandName in @("python.exe", "python3.exe")) {
+        Get-Command $commandName -All -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                if ($_.Source -and $_.Source -notlike "*\WindowsApps\*") {
+                    $candidates.Add($_.Source)
+                }
+            }
     }
+
+    $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
     foreach ($pattern in @(
         (Join-Path $env:LOCALAPPDATA "Programs\Python\Python*\python.exe"),
         (Join-Path $env:ProgramFiles "Python*\python.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Python*\python.exe")
+        (Join-Path $programFilesX86 "Python*\python.exe"),
+        "C:\Python*\python.exe"
     )) {
         if (-not $pattern) { continue }
         Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue |
             ForEach-Object { $candidates.Add($_.FullName) }
     }
 
+    foreach ($registryRoot in @(
+        "HKCU:\SOFTWARE\Python\PythonCore",
+        "HKLM:\SOFTWARE\Python\PythonCore"
+    )) {
+        if (-not (Test-Path $registryRoot)) { continue }
+        foreach ($entry in (Get-ChildItem -Path $registryRoot -ErrorAction SilentlyContinue)) {
+            $installKey = Join-Path $entry.PSPath "InstallPath"
+            if (-not (Test-Path $installKey)) { continue }
+            $key = Get-Item -LiteralPath $installKey -ErrorAction SilentlyContinue
+            if (-not $key) { continue }
+            $executable = [string]$key.GetValue("ExecutablePath")
+            if (-not $executable) {
+                $directory = [string]$key.GetValue("")
+                if ($directory) { $executable = Join-Path $directory "python.exe" }
+            }
+            if ($executable) { $candidates.Add($executable) }
+        }
+    }
+
     $seen = @{}
+    $supported = New-Object System.Collections.Generic.List[object]
     foreach ($candidate in $candidates) {
         $key = [string]$candidate
         if (-not $key -or $seen.ContainsKey($key.ToLowerInvariant())) { continue }
         $seen[$key.ToLowerInvariant()] = $true
-        $found = Test-SupportedPython $candidate
-        if ($found) { return $found }
+        if (-not (Test-Path -LiteralPath $key)) { continue }
+        $found = Test-SupportedPython $key
+        if ($found) { $supported.Add($found) }
+    }
+
+    if ($supported.Count -eq 0) { return $null }
+    $ordered = @($supported | Sort-Object -Property @{ Expression = { [version]$_.Version }; Descending = $true })
+    foreach ($candidate in $ordered) {
+        if (Test-PythonDependencyCompatibility $candidate $RequirementsPath) {
+            Write-Host "Using compatible Python $($candidate.Version): $($candidate.Executable)" -ForegroundColor Green
+            return $candidate
+        }
     }
     return $null
 }
+function Install-PythonStable([string]$RequirementsPath) {
+    # Keep the fallback interpreter app-local. This avoids modifying PATH or
+    # replacing/side-by-siding with a Python installation owned by the user.
+    $pythonBase = Join-Path $AppDir "python-base"
+    $pythonExecutable = Join-Path $pythonBase "python.exe"
+    $installerPath = Join-Path $env:TEMP "streamsnip-python-3.14.10-amd64.exe"
+    $downloadUrl = "https://www.python.org/ftp/python/3.14.10/python-3.14.10-amd64.exe"
+    $expectedSha256 = "92480239264744fe0386a1bd8275786fefa126e3129e56a68e22b52c73329965"
 
-function Install-Python312 {
-    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $winget) {
-        throw "64-bit Python 3.10-3.12 was not found and WinGet is unavailable. Install 64-bit Python 3.12 from python.org, then launch StreamSnip AI again."
-    }
-    Write-Host "A supported Python was not found. Installing Python 3.12..." -ForegroundColor Yellow
-    $installArgs = @(
-        "install", "--id", "Python.Python.3.12", "--exact", "--source", "winget",
-        "--scope", "user", "--accept-package-agreements", "--accept-source-agreements",
-        "--disable-interactivity"
-    )
-    & $winget.Source @installArgs | ForEach-Object { Write-Host $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "The per-user Python install did not complete; retrying with WinGet defaults..." -ForegroundColor Yellow
-        $installArgs = @(
-            "install", "--id", "Python.Python.3.12", "--exact", "--source", "winget",
-            "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"
+    Write-Host "No compatible 64-bit Python 3.10+ installation was found." -ForegroundColor Yellow
+    Write-Host "Installing the stable Python 3.14.10 runtime privately for StreamSnip AI..." -ForegroundColor Cyan
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing
+        $actualSha256 = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualSha256 -ne $expectedSha256) {
+            throw "The downloaded Python installer failed its SHA-256 verification."
+        }
+
+        New-Item -ItemType Directory -Force -Path $pythonBase | Out-Null
+        $targetArgument = 'TargetDir="' + $pythonBase + '"'
+        $installArguments = @(
+            "/quiet",
+            "InstallAllUsers=0",
+            $targetArgument,
+            "Include_pip=1",
+            "Include_launcher=0",
+            "Include_doc=0",
+            "Include_test=0",
+            "PrependPath=0",
+            "Shortcuts=0"
         )
-        & $winget.Source @installArgs | ForEach-Object { Write-Host $_ }
-        if ($LASTEXITCODE -ne 0) { throw "Python 3.12 installation failed." }
+        $process = Start-Process -FilePath $installerPath -ArgumentList $installArguments -Wait -PassThru
+        if ($process.ExitCode -ne 0) {
+            throw "Python 3.14.10 installation failed with exit code $($process.ExitCode)."
+        }
+    } finally {
+        Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
     }
-    Mark-DependencyInstalled "python"
-    Refresh-ProcessPath
-    $python = Find-SupportedPython
+
+    $python = Test-SupportedPython $pythonExecutable
     if (-not $python) {
-        $known = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
-        if (Test-Path $known) { $python = Test-SupportedPython $known }
+        throw "Python 3.14.10 was installed, but the private interpreter failed validation."
     }
-    if (-not $python) {
-        throw "Python 3.12 was installed, but this setup could not locate it. Restart Windows and launch StreamSnip AI again."
+    if (-not (Test-PythonDependencyCompatibility $python $RequirementsPath)) {
+        throw "The private Python fallback does not have compatible distributions for every StreamSnip AI requirement."
     }
+    Write-Host "Installed app-local Python $($python.Version): $($python.Executable)" -ForegroundColor Green
     return $python
 }
 
@@ -343,9 +446,9 @@ try {
         throw ("The StreamSnip AI package is incomplete. Missing: " + ($missingSourceFiles -join ", ") + ". Reinstall the application.")
     }
 
-    $python = Find-SupportedPython
-    if (-not $python -and -not $CheckOnly) { $python = Install-Python312 }
-    if (-not $python) { throw "64-bit Python 3.10, 3.11, or 3.12 is required." }
+    $python = Find-SupportedPython $requirements
+    if (-not $python -and -not $CheckOnly) { $python = Install-PythonStable $requirements }
+    if (-not $python) { throw "A stable 64-bit Python 3.10 or newer is required." }
     Write-Host "Python $($python.Version): $($python.Executable)" -ForegroundColor Green
 
     $ffmpeg = Ensure-FFmpeg
@@ -355,15 +458,56 @@ try {
     } else {
         $runtimeInfo = $null
         if (Test-Path $runtimePython) { $runtimeInfo = Test-SupportedPython $runtimePython }
-        if (-not $runtimeInfo) {
-            if (Test-Path $runtime) { Remove-Item -LiteralPath $runtime -Recurse -Force }
-            Write-Host "Creating StreamSnip AI's isolated Python runtime..." -ForegroundColor Cyan
-            $venvResult = Invoke-Python $python @("-m", "venv", $runtime)
-            if ($venvResult -ne 0 -or -not (Test-Path $runtimePython)) {
-                throw "Could not create the StreamSnip AI Python runtime."
+
+        $selectedPythonVersion = [version]$python.Version
+        $runtimeMatchesSelectedPython = $false
+        if ($runtimeInfo) {
+            $installedRuntimeVersion = [version]$runtimeInfo.Version
+            $runtimeMatchesSelectedPython = (
+                $installedRuntimeVersion.Major -eq $selectedPythonVersion.Major -and
+                $installedRuntimeVersion.Minor -eq $selectedPythonVersion.Minor
+            )
+        }
+
+        $runtimeBackup = Join-Path $AppDir "runtime.previous"
+        if (Test-Path -LiteralPath $runtimeBackup) {
+            if (-not (Test-Path -LiteralPath $runtime)) {
+                Move-Item -LiteralPath $runtimeBackup -Destination $runtime
+                Write-Host "Recovered the previous working Python runtime after an interrupted update." -ForegroundColor Yellow
+                $runtimeInfo = Test-SupportedPython $runtimePython
+            } else {
+                throw "A previous runtime backup exists at $runtimeBackup. Both runtime folders were preserved; remove the stale backup only after verifying the current runtime."
             }
-            $runtimeInfo = Test-SupportedPython $runtimePython
-            if (-not $runtimeInfo) { throw "The StreamSnip AI Python runtime is invalid." }
+        }
+
+        if (-not $runtimeMatchesSelectedPython) {
+            if (Test-Path -LiteralPath $runtime) {
+                Move-Item -LiteralPath $runtime -Destination $runtimeBackup
+                $script:RuntimeBackupPath = $runtimeBackup
+            }
+            try {
+                Write-Host "Creating StreamSnip AI's isolated runtime with Python $($python.Version)..." -ForegroundColor Cyan
+                $venvResult = Invoke-Python $python @("-m", "venv", $runtime)
+                if ($venvResult -ne 0 -or -not (Test-Path $runtimePython)) {
+                    throw "Could not create the StreamSnip AI Python runtime."
+                }
+                $runtimeInfo = Test-SupportedPython $runtimePython
+                if (-not $runtimeInfo) { throw "The StreamSnip AI Python runtime is invalid." }
+                $runtimeVersion = [version]$runtimeInfo.Version
+                if ($runtimeVersion.Major -ne $selectedPythonVersion.Major -or $runtimeVersion.Minor -ne $selectedPythonVersion.Minor) {
+                    throw "The new Python runtime does not match the selected Python $($python.Version)."
+                }
+            } catch {
+                if (Test-Path -LiteralPath $runtime) {
+                    Remove-Item -LiteralPath $runtime -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                if ($script:RuntimeBackupPath -and (Test-Path -LiteralPath $script:RuntimeBackupPath)) {
+                    Move-Item -LiteralPath $script:RuntimeBackupPath -Destination $runtime -Force
+                    $script:RuntimeBackupPath = $null
+                    Write-Host "Restored the previous Python runtime after the new runtime could not be created." -ForegroundColor Yellow
+                }
+                throw
+            }
         }
 
         $requirementsHash = (Get-FileHash $requirements -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -390,6 +534,13 @@ try {
         Write-Host "Downloading and verifying StreamSnip AI speech models. This can take a while and needs an internet connection..." -ForegroundColor Cyan
         Ensure-SpeechModels $runtimePython $speechModelRoot
 
+        # Commit the runtime migration only after dependencies and speech models are verified.
+        if ($script:RuntimeBackupPath -and (Test-Path -LiteralPath $script:RuntimeBackupPath)) {
+            Remove-Item -LiteralPath $script:RuntimeBackupPath -Recurse -Force
+            $script:RuntimeBackupPath = $null
+            Write-Host "New Python runtime verified; previous runtime backup removed." -ForegroundColor Green
+        }
+
         if (-not $SkipLaunch) {
             Write-Host "Launching StreamSnip AI..." -ForegroundColor Cyan
             $quotedMain = '"' + $main.Replace('"', '\"') + '"'
@@ -399,6 +550,18 @@ try {
     }
 } catch {
     $exitCode = 1
+    if ($script:RuntimeBackupPath -and (Test-Path -LiteralPath $script:RuntimeBackupPath)) {
+        try {
+            if (Test-Path -LiteralPath $runtime) {
+                Remove-Item -LiteralPath $runtime -Recurse -Force -ErrorAction Stop
+            }
+            Move-Item -LiteralPath $script:RuntimeBackupPath -Destination $runtime -Force -ErrorAction Stop
+            $script:RuntimeBackupPath = $null
+            Write-Host "Runtime migration failed. The previous working Python runtime was restored." -ForegroundColor Yellow
+        } catch {
+            Write-Host "Automatic runtime rollback failed. The previous runtime backup is preserved at $script:RuntimeBackupPath" -ForegroundColor Red
+        }
+    }
     Write-Host ""
     Write-Host ("Setup failed: " + $_.Exception.Message) -ForegroundColor Red
     if ($logPath) { Write-Host "Details were saved to: $logPath" -ForegroundColor Yellow }

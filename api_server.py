@@ -115,7 +115,10 @@ def create_app(
             raise HTTPException(status_code=403, detail="forbidden")
 
         async def stream():
-            lease = begin_window_lease()
+            lease_id = request.query_params.get("id", "")
+            lease = begin_window_lease(lease_id or None)
+            if lease is None:
+                return
             try:
                 yield b": connected\n\n"
                 while not quit_event.is_set():

@@ -3,7 +3,8 @@ param(
     [string]$AppDir,
     [switch]$CheckOnly,
     [switch]$SkipLaunch,
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$WaitForApp
 )
 
 $ErrorActionPreference = "Stop"
@@ -328,6 +329,7 @@ try {
     Request-HuggingFaceToken
     $requiredSourceFiles = @(
         "autoclip.py",
+        "api_server.py",
         "ai_highlights.py",
         "post_metadata.py",
         "zernio_poster.py",
@@ -391,10 +393,19 @@ try {
 
         if (-not $SkipLaunch) {
             Write-Host "Launching StreamSnip AI..." -ForegroundColor Cyan
-            $quotedMain = '"' + $main.Replace('"', '\"') + '"'
-            $process = Start-Process -FilePath $runtimePython -ArgumentList $quotedMain -WorkingDirectory $source -PassThru
-            if (-not $process) { throw "StreamSnip AI could not be launched." }
-            Write-Host "StreamSnip AI started successfully." -ForegroundColor Green
+            if ($WaitForApp) {
+                Write-Host "This support window stays open while StreamSnip AI runs and closes with the app." -ForegroundColor Yellow
+                & $runtimePython $main
+                $appExitCode = $LASTEXITCODE
+                if ($appExitCode -ne 0) {
+                    throw "StreamSnip AI exited with code $appExitCode."
+                }
+            } else {
+                $quotedMain = '"' + $main.Replace('"', '\"') + '"'
+                $process = Start-Process -FilePath $runtimePython -ArgumentList $quotedMain -WorkingDirectory $source -PassThru
+                if (-not $process) { throw "StreamSnip AI could not be launched." }
+            }
+            Write-Host "StreamSnip AI has stopped." -ForegroundColor Green
         }
     }
 } catch {

@@ -1515,6 +1515,12 @@ class RegressionTests(unittest.TestCase):
         setup_script = (root / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
         uninstall_script = (root / "installer" / "uninstall_windows.ps1").read_text(encoding="utf-8")
         installer_script = (root / "installer" / "AutoClip.iss").read_text(encoding="utf-8")
+        launcher_source = (root / "installer" / "StreamSnipAILauncher.cs").read_text(encoding="utf-8")
+        self.assertIn("api_server.py", setup_script)
+        self.assertIn("WaitForApp", setup_script)
+        self.assertIn("& $runtimePython $main", setup_script)
+        self.assertIn("-WaitForApp", launcher_source)
+        self.assertIn('Source: "..\\api_server.py"; DestDir: "{app}\\source"', installer_script)
         self.assertIn('Mark-DependencyInstalled "python"', setup_script)
         self.assertIn('Mark-DependencyInstalled "ffmpeg"', setup_script)
         self.assertIn('python_installed_by_streamsnip', uninstall_script)
@@ -1638,16 +1644,94 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(autoclip.asset_file("brand-logo.png"), logo.resolve())
                 self.assertIsNone(autoclip.asset_file("../settings.json"))
 
+    def test_react_creator_studio_owns_a_named_server_window_lease(self):
+        root = Path(__file__).resolve().parents[1]
+        api_source = (root / "dashboard" / "src" / "api.ts").read_text(encoding="utf-8")
+        app_source = (root / "dashboard" / "src" / "App.tsx").read_text(encoding="utf-8")
+        self.assertIn("installWindowLeaseLifecycle", api_source)
+        self.assertIn("installWindowLeaseLifecycle()", app_source)
+        self.assertIn("/api/window/lease?id=", api_source)
+        self.assertIn("/api/window/closing?id=", api_source)
+
     def test_window_close_quits_but_page_reload_can_reconnect(self):
         self.assertIn('window.addEventListener("pagehide"', autoclip.HTML)
         self.assertIn('api("/api/window/open")', autoclip.HTML)
-        self.assertIn('fetch("/api/window/lease"', autoclip.HTML)
-        self.assertIn('fetch("/api/window/closing"', autoclip.HTML)
+        self.assertIn('windowLeaseId', autoclip.HTML)
+        self.assertIn('/api/window/lease?id=', autoclip.HTML)
+        self.assertIn('/api/window/closing?id=', autoclip.HTML)
         self.assertIn('api("/api/quit")', autoclip.HTML)
         self.assertIn('const center=h("button",{class:"btn ghost"},"Center segment")', autoclip.HTML)
         self.assertIn('id="ai-test-provider"', autoclip.HTML)
         self.assertIn('id="gemini-key-clear"', autoclip.HTML)
         self.assertIn('id="hf-token-clear"', autoclip.HTML)
+
+    def test_pagehide_releases_its_named_lease_without_waiting_for_sse_disconnect(self):
+        timer = MagicMock()
+        original_leases = set(autoclip._WINDOW_LEASES)
+        try:
+            autoclip._WINDOW_LEASES.clear()
+            with patch.object(autoclip.threading, "Timer", return_value=timer):
+                lease = autoclip.begin_window_lease("test-window-close")
+                self.assertEqual(lease, "test-window-close")
+                self.assertTrue(autoclip.close_window_lease("test-window-close"))
+                self.assertNotIn("test-window-close", autoclip._WINDOW_LEASES)
+                timer.start.assert_called_once_with()
+                # The late SSE finally callback must be harmless and idempotent.
+                autoclip.end_window_lease(lease)
+        finally:
+            autoclip.cancel_window_close_shutdown()
+            autoclip._WINDOW_LEASES.clear()
+            autoclip._WINDOW_LEASES.update(original_leases)
+
+    def test_closing_one_window_does_not_close_other_window_leases(self):
+        timer = MagicMock()
+        original_leases = set(autoclip._WINDOW_LEASES)
+        original_closed = set(autoclip._WINDOW_CLOSED_LEASES)
+        was_quit = autoclip.QUIT.is_set()
+        try:
+            autoclip._WINDOW_LEASES.clear()
+            autoclip._WINDOW_CLOSED_LEASES.clear()
+            autoclip.QUIT.clear()
+            with patch.object(autoclip.threading, "Timer", return_value=timer):
+                first = autoclip.begin_window_lease("window-one")
+                second = autoclip.begin_window_lease("window-two")
+                self.assertTrue(autoclip.close_window_lease(first))
+                self.assertNotIn(first, autoclip._WINDOW_LEASES)
+                self.assertIn(second, autoclip._WINDOW_LEASES)
+                timer.start.assert_not_called()
+                autoclip.end_window_lease(second)
+                timer.start.assert_called_once_with()
+        finally:
+            autoclip.cancel_window_close_shutdown()
+            autoclip._WINDOW_LEASES.clear()
+            autoclip._WINDOW_LEASES.update(original_leases)
+            autoclip._WINDOW_CLOSED_LEASES.clear()
+            autoclip._WINDOW_CLOSED_LEASES.update(original_closed)
+            if was_quit:
+                autoclip.QUIT.set()
+
+    def test_close_received_before_stream_start_cannot_resurrect_window(self):
+        timer = MagicMock()
+        original_leases = set(autoclip._WINDOW_LEASES)
+        original_closed = set(autoclip._WINDOW_CLOSED_LEASES)
+        was_quit = autoclip.QUIT.is_set()
+        try:
+            autoclip._WINDOW_LEASES.clear()
+            autoclip._WINDOW_CLOSED_LEASES.clear()
+            autoclip.QUIT.clear()
+            with patch.object(autoclip.threading, "Timer", return_value=timer):
+                self.assertFalse(autoclip.close_window_lease("late-window"))
+                self.assertIsNone(autoclip.begin_window_lease("late-window"))
+                self.assertNotIn("late-window", autoclip._WINDOW_LEASES)
+                timer.start.assert_called_once_with()
+        finally:
+            autoclip.cancel_window_close_shutdown()
+            autoclip._WINDOW_LEASES.clear()
+            autoclip._WINDOW_LEASES.update(original_leases)
+            autoclip._WINDOW_CLOSED_LEASES.clear()
+            autoclip._WINDOW_CLOSED_LEASES.update(original_closed)
+            if was_quit:
+                autoclip.QUIT.set()
 
     def test_window_reload_cancels_pending_close_shutdown(self):
         timer = MagicMock()

@@ -26,6 +26,106 @@ async function getToken(): Promise<string> {
   return tokenPromise;
 }
 
+const makeWindowLeaseId = () =>
+  typeof window.crypto?.randomUUID === "function"
+    ? window.crypto.randomUUID()
+    : "window-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+
+export function installWindowLeaseLifecycle(): () => void {
+  if (typeof window === "undefined") return () => undefined;
+
+  let leaseId = makeWindowLeaseId();
+  let active = false;
+  let disposed = false;
+  let controller: AbortController | null = null;
+  let sessionToken = window.__STREAMSNIP_TOKEN__ || "";
+
+  const reportWindowOpen = () => {
+    void apiPost("/api/window/open", {}).catch(() => undefined);
+  };
+
+  const stopLeaseStream = () => {
+    active = false;
+    controller?.abort();
+    controller = null;
+  };
+
+  const reportWindowClosed = (closingLeaseId: string) => {
+    const token = sessionToken || window.__STREAMSNIP_TOKEN__ || "";
+    if (!token) return;
+    void fetch("/api/window/closing?id=" + encodeURIComponent(closingLeaseId), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Token": token },
+      body: JSON.stringify({ id: closingLeaseId }),
+      keepalive: true,
+    }).catch(() => undefined);
+  };
+
+  const startLeaseStream = () => {
+    if (active || disposed) return;
+    active = true;
+    const streamController = new AbortController();
+    controller = streamController;
+
+    void (async () => {
+      try {
+        sessionToken = sessionToken || await getToken();
+        while (active && !disposed && controller === streamController) {
+          try {
+            const response = await fetch(
+              "/api/window/lease?id=" + encodeURIComponent(leaseId),
+              {
+                headers: { "X-Token": sessionToken },
+                cache: "no-store",
+                signal: streamController.signal,
+              },
+            );
+            if (!response.ok || !response.body) {
+              throw new Error("The app window lease could not be established.");
+            }
+            const reader = response.body.getReader();
+            while (active && !disposed && controller === streamController) {
+              const part = await reader.read();
+              if (part.done) break;
+            }
+          } catch {
+            if (!active || disposed || streamController.signal.aborted) break;
+            await new Promise((resolve) => window.setTimeout(resolve, 350));
+          }
+        }
+      } catch {
+        // The normal session bootstrap will retry on the next page show.
+      }
+    })();
+  };
+
+  const onPageShow = () => {
+    if (!active) leaseId = makeWindowLeaseId();
+    reportWindowOpen();
+    startLeaseStream();
+  };
+
+  const onPageHide = () => {
+    const closingLeaseId = leaseId;
+    stopLeaseStream();
+    reportWindowClosed(closingLeaseId);
+  };
+
+  reportWindowOpen();
+  startLeaseStream();
+  window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("pagehide", onPageHide);
+
+  return () => {
+    const closingLeaseId = leaseId;
+    disposed = true;
+    stopLeaseStream();
+    window.removeEventListener("pageshow", onPageShow);
+    window.removeEventListener("pagehide", onPageHide);
+    reportWindowClosed(closingLeaseId);
+  };
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(path, { cache: "no-store" });
   const payload = await response.json().catch(() => ({}));

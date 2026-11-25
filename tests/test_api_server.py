@@ -6,7 +6,9 @@ import re
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from api_server import create_app
@@ -115,6 +117,64 @@ class APIServerTests(unittest.TestCase):
         status, _headers, body = asyncio.run(asgi_request(app, path="/api/session"))
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["token"], autoclip.TOKEN)
+
+    def test_window_lease_registers_and_releases_the_browser_window_id(self):
+        started = []
+        ended = []
+        quit_event = threading.Event()
+        app = create_app(
+            FakeLegacyHandler,
+            token="test-token",
+            quit_event=quit_event,
+            begin_window_lease=lambda lease_id=None: started.append(lease_id) or lease_id,
+            end_window_lease=lambda lease_id: ended.append(lease_id),
+            find_clip_path=lambda _name: None,
+            clip_regex=re.compile(r"[A-Za-z0-9_-]+\.mp4"),
+            product_name="StreamSnip Test",
+            version="test",
+        )
+        route = next(item for item in app.routes if getattr(item, "path", None) == "/api/window/lease")
+        request = SimpleNamespace(
+            headers={"x-token": "test-token"},
+            query_params={"id": "window-abc"},
+        )
+        response = asyncio.run(route.endpoint(request))
+
+        async def consume_until_shutdown():
+            first = await response.body_iterator.__anext__()
+            self.assertEqual(first, b": connected\n\n")
+            quit_event.set()
+            with self.assertRaises(StopAsyncIteration):
+                await response.body_iterator.__anext__()
+
+        asyncio.run(consume_until_shutdown())
+        self.assertEqual(started, ["window-abc"])
+        self.assertEqual(ended, ["window-abc"])
+
+    def test_window_closing_route_releases_the_specific_browser_window(self):
+        app = create_app(
+            autoclip.Handler,
+            token=autoclip.TOKEN,
+            quit_event=autoclip.QUIT,
+            begin_window_lease=autoclip.begin_window_lease,
+            end_window_lease=autoclip.end_window_lease,
+            find_clip_path=autoclip.find_clip_path,
+            clip_regex=autoclip.CLIP_RE,
+            product_name=autoclip.PRODUCT_NAME,
+            version=autoclip.APP_VERSION,
+        )
+        payload = json.dumps({"id": "window-close-route"}).encode("utf-8")
+        with patch.object(autoclip, "close_window_lease") as close_lease:
+            status, _headers, body = asyncio.run(asgi_request(
+                app,
+                method="POST",
+                path="/api/window/closing?id=window-close-route",
+                headers={"X-Token": autoclip.TOKEN, "Content-Type": "application/json"},
+                body=payload,
+            ))
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"ok": True})
+        close_lease.assert_called_once_with("window-close-route")
 
     def test_health_endpoint_reports_running_api(self):
         app = self.create_app()

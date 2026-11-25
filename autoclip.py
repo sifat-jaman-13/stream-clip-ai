@@ -33,7 +33,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
 from browser_automation import BrowserAutomationManager, BrowserAutomationError
-APP_VERSION = "4.0.0"
+APP_VERSION = "4.0.1"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -2349,6 +2349,10 @@ QUIT = threading.Event()
 _WINDOW_CLOSE_LOCK = threading.RLock()
 _WINDOW_CLOSE_TIMER = None
 _WINDOW_LEASES = set()
+# A close request may arrive just before its streaming lease starts. Keep a
+# bounded tombstone set so that late requests cannot resurrect a closed window.
+_WINDOW_CLOSED_LEASES = set()
+_WINDOW_CLOSED_LEASE_LIMIT = 512
 
 def cancel_window_close_shutdown():
     global _WINDOW_CLOSE_TIMER
@@ -2358,7 +2362,7 @@ def cancel_window_close_shutdown():
         timer.cancel()
 
 def schedule_window_close_shutdown(delay=3.0):
-    """Quit after an app-window close, unless a quick page reload reconnects."""
+    """Quit after the final app window closes, unless a quick reload reconnects."""
     global _WINDOW_CLOSE_TIMER
     cancel_window_close_shutdown()
     def close_if_still_gone():
@@ -2382,19 +2386,44 @@ def schedule_window_close_shutdown(delay=3.0):
         _WINDOW_CLOSE_TIMER = timer
     timer.start()
 
-def begin_window_lease():
-    lease = object()
+def begin_window_lease(lease_id=None):
+    """Register one browser window; return None if that window already closed."""
+    lease = str(lease_id or secrets.token_urlsafe(18)).strip()[:128]
+    if not lease:
+        lease = secrets.token_urlsafe(18)
     with _WINDOW_CLOSE_LOCK:
+        if lease in _WINDOW_CLOSED_LEASES:
+            return None
         _WINDOW_LEASES.add(lease)
     cancel_window_close_shutdown()
     return lease
 
 def end_window_lease(lease):
+    """Release a streaming lease. Safe to call after an explicit close request."""
+    if lease is None:
+        return
     with _WINDOW_CLOSE_LOCK:
+        _WINDOW_CLOSED_LEASES.discard(lease)
         _WINDOW_LEASES.discard(lease)
         empty = not _WINDOW_LEASES
     if empty and not QUIT.is_set():
         schedule_window_close_shutdown()
+
+def close_window_lease(lease_id):
+    """Release the exact browser window immediately when pagehide is reported."""
+    lease = str(lease_id or "").strip()[:128]
+    if not lease:
+        return False
+    with _WINDOW_CLOSE_LOCK:
+        was_active = lease in _WINDOW_LEASES
+        _WINDOW_LEASES.discard(lease)
+        _WINDOW_CLOSED_LEASES.add(lease)
+        while len(_WINDOW_CLOSED_LEASES) > _WINDOW_CLOSED_LEASE_LIMIT:
+            _WINDOW_CLOSED_LEASES.pop()
+        empty = not _WINDOW_LEASES
+    if empty and not QUIT.is_set():
+        schedule_window_close_shutdown()
+    return was_active
 
 class Core:
     def __init__(self):
@@ -3698,7 +3727,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/window/open":
                     cancel_window_close_shutdown(); return self._send(200, {"ok": True})
                 if path == "/api/window/closing":
-                    schedule_window_close_shutdown(); return self._send(200, {"ok": True})
+                    lease_id = str(body.get("id", "")).strip()
+                    if lease_id:
+                        close_window_lease(lease_id)
+                    else:
+                        schedule_window_close_shutdown()
+                    return self._send(200, {"ok": True})
                 if path == "/api/delete_all":
                     tab = str(body.get("clip_tab", "clips"))
                     if tab not in {"clips", "posted"}: tab = "clips"
@@ -4519,11 +4553,12 @@ $("#creator-add").onclick=async()=>{
   button.disabled=false;
 };
 const markWindowOpen=()=>api("/api/window/open").catch(()=>{});
-let windowLeaseController=null,windowLeaseActive=false;
-function startWindowLease(){if(windowLeaseActive)return;windowLeaseActive=true;windowLeaseController=new AbortController();const controller=windowLeaseController;(async()=>{while(windowLeaseActive&&controller===windowLeaseController){try{const r=await fetch("/api/window/lease",{headers:{"X-Token":TOKEN},cache:"no-store",signal:controller.signal});if(!r.ok)throw new Error("Window lease failed");const reader=r.body.getReader();while(windowLeaseActive){const part=await reader.read();if(part.done)break}}catch(e){}if(windowLeaseActive)await new Promise(resolve=>setTimeout(resolve,350))}})()}
+const createWindowLeaseId=()=>window.crypto&&typeof window.crypto.randomUUID==="function"?window.crypto.randomUUID():"window-"+Date.now()+"-"+Math.random().toString(36).slice(2);
+let windowLeaseId=createWindowLeaseId(),windowLeaseController=null,windowLeaseActive=false;
+function startWindowLease(){if(windowLeaseActive)return;windowLeaseActive=true;windowLeaseController=new AbortController();const controller=windowLeaseController;(async()=>{while(windowLeaseActive&&controller===windowLeaseController){try{const r=await fetch("/api/window/lease?id="+encodeURIComponent(windowLeaseId),{headers:{"X-Token":TOKEN},cache:"no-store",signal:controller.signal});if(!r.ok)throw new Error("Window lease failed");const reader=r.body.getReader();while(windowLeaseActive){const part=await reader.read();if(part.done)break}}catch(e){}if(windowLeaseActive)await new Promise(resolve=>setTimeout(resolve,350))}})()}
 function stopWindowLease(){windowLeaseActive=false;if(windowLeaseController)windowLeaseController.abort();windowLeaseController=null}
-markWindowOpen();startWindowLease();window.addEventListener("pageshow",()=>{markWindowOpen();startWindowLease()});
-window.addEventListener("pagehide",()=>{stopWindowLease();if(appClosing)return;fetch("/api/window/closing",{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:"{}",keepalive:true}).catch(()=>{})});
+markWindowOpen();startWindowLease();window.addEventListener("pageshow",()=>{if(!windowLeaseActive)windowLeaseId=createWindowLeaseId();markWindowOpen();startWindowLease()});
+window.addEventListener("pagehide",()=>{const closingLeaseId=windowLeaseId;stopWindowLease();if(appClosing)return;fetch("/api/window/closing?id="+encodeURIComponent(closingLeaseId),{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:JSON.stringify({id:closingLeaseId}),keepalive:true}).catch(()=>{})});
 const AI=BOOT.ai||{provider:"gemini",ollama_url:"http://127.0.0.1:11434",ollama_model:""};
 $("#ai-provider").value=AI.provider||"gemini";
 $("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";

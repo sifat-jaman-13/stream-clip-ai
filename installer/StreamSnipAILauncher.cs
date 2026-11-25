@@ -17,7 +17,7 @@ internal static class StreamSnipAILauncher
 
         ProcessStartInfo start = new ProcessStartInfo();
         start.FileName = "powershell.exe";
-        start.Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + setup + "\" -AppDir \"" + appDir.TrimEnd('\\') + "\"";
+        start.Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + setup + "\" -AppDir \"" + appDir.TrimEnd('\\') + "\" -WaitForApp";
         start.WorkingDirectory = appDir;
         start.UseShellExecute = true;
         start.Verb = "open";

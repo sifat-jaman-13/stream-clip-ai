@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.0.1] - 2026-11-25
+
+### Fixed
+- Closing the Creator Studio window now releases its specific server-side window lease immediately rather than depending only on a streaming connection teardown. Late stream starts cannot resurrect a window after its close request, and closing one of multiple windows does not stop the remaining session.
+- Shortcut launches keep the backend attached to the supervised StreamSnip support-console session. The support console exits when the app exits instead of allowing the application process to become a detached background service.
+- Added `api_server.py` to the Windows installer payload and setup preflight; the installed source now includes the FastAPI module imported by the engine.
+
+### Verification
+- 183 Python unit tests passed, including named lease registration/release, close-before-stream-start races, multi-window behavior, React Creator Studio lifecycle wiring, Gemini retry/rotation, and Windows installer checks.
+- Frontend lint reported 0 warnings/errors; TypeScript and Vite production build passed.
+- PowerShell setup script parsed successfully; the Windows launcher compiled and Inno Setup 6.7.3 produced the 4.0.1 installer with `api_server.py` included.
+
 ## [4.0.0] - 2026-11-25
 
 ### Added

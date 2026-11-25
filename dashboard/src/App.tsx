@@ -8,7 +8,7 @@ import {
   Users, Video, WandSparkles, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiPost, installWindowLeaseLifecycle } from "./api";
 import { useWorkspace, type AppSettings, type Workspace } from "./workspace";
 import type { Clip, Creator, LogEntry } from "./types";
 import "./App.css";
@@ -171,6 +171,8 @@ export default function App() {
   const [busy, setBusy] = useState("");
   const [toast, setToast] = useState<ToastDetail | null>(null);
   const [browserStatus, setBrowserStatus] = useState<RecordLike>({});
+
+  useEffect(() => installWindowLeaseLifecycle(), []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

@@ -325,7 +325,7 @@ def detect_from_frames(frames):
 def detect(path):
     """Detect the facecam in a video file. When found the dict also carries a 'game' box (the whole frame)."""
     if cv2 is None:
-        return {'found': False, 'reason': 'OpenCV is not installed (pip install opencv-python-headless)', 'confidence': 0.0}
+        return {'found': False, 'reason': 'OpenCV is not installed (pip install opencv-contrib-python-headless)', 'confidence': 0.0}
     res = detect_from_frames(sample_frames(path))
     if res['found']:
         c = res['cam']

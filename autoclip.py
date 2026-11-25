@@ -33,7 +33,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
 from browser_automation import BrowserAutomationManager, BrowserAutomationError
-APP_VERSION = "4.0.1"
+APP_VERSION = "4.0.2"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"

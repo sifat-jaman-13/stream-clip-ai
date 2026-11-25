@@ -3,8 +3,7 @@ param(
     [string]$AppDir,
     [switch]$CheckOnly,
     [switch]$SkipLaunch,
-    [switch]$NoPause,
-    [switch]$WaitForApp
+    [switch]$NoPause
 )
 
 $ErrorActionPreference = "Stop"
@@ -393,19 +392,9 @@ try {
 
         if (-not $SkipLaunch) {
             Write-Host "Launching StreamSnip AI..." -ForegroundColor Cyan
-            if ($WaitForApp) {
-                Write-Host "This support window stays open while StreamSnip AI runs and closes with the app." -ForegroundColor Yellow
-                & $runtimePython $main
-                $appExitCode = $LASTEXITCODE
-                if ($appExitCode -ne 0) {
-                    throw "StreamSnip AI exited with code $appExitCode."
-                }
-            } else {
-                $quotedMain = '"' + $main.Replace('"', '\"') + '"'
-                $process = Start-Process -FilePath $runtimePython -ArgumentList $quotedMain -WorkingDirectory $source -PassThru
-                if (-not $process) { throw "StreamSnip AI could not be launched." }
-            }
-            Write-Host "StreamSnip AI has stopped." -ForegroundColor Green
+            $quotedMain = '"' + $main.Replace('"', '\"') + '"'
+            $process = Start-Process -FilePath $runtimePython -ArgumentList $quotedMain -WorkingDirectory $source -PassThru
+            if (-not $process) { throw "StreamSnip AI could not be launched." }
         }
     }
 } catch {

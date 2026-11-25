@@ -9,9 +9,9 @@
 
 StreamSnip AI is a desktop-hosted creator workspace. It combines Twitch and YouTube capture, creator monitoring, local transcription, AI-assisted highlight selection, captioned video rendering, clip review, and publishing handoff in one local application.
 
-The React Creator Studio is the default interface. The Python engine continues to handle capture and media processing; a loopback-only FastAPI server exposes the local application API.
+The React Creator Studio is the default interface. The Python engine continues to handle capture and media processing; a loopback-only FastAPI server exposes the local application API. The Windows installer prepares the isolated Python runtime, dependencies, and speech models during installation or repair. After that, the desktop shortcut starts the prepared runtime directly; normal app launches do not rerun setup or re-download models.
 
-> **Current release: 4.0.1.** The Windows installer is attached to the GitHub release. Verify the published SHA-256 checksum before installing.
+> **Current release: 4.0.2.** The Windows installer is attached to the GitHub release. Verify the published SHA-256 checksum before installing.
 
 ## The creator workflow
 

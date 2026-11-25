@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.0.2] - 2026-11-25
+
+### Fixed
+- Moved dependency installation and speech-model verification to the install/repair workflow only. Normal desktop shortcut launches now start the prepared app runtime directly and do not rerun setup or model checks.
+- The installer runs one-time preparation without launching the app from the setup script, then offers a separate post-install launch action.
+- The console launcher now directly supervises the installed Python app process and exits with it, preserving reliable shutdown without running the setup script on every launch.
+
+### Verification
+- Added regression checks that the normal launcher starts the preconfigured runtime directly, waits for the app process, and never invokes the setup script. Installer entries explicitly run one-time preparation and then launch the app.
+
 ## [4.0.1] - 2026-11-25
 
 ### Fixed

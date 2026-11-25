@@ -1,5 +1,5 @@
 ﻿#define MyAppName "StreamSnip AI"
-#define MyAppVersion "4.0.1"
+#define MyAppVersion "4.0.2"
 #define MyAppPublisher "ScarZero"
 #define MyAppExeName "StreamSnipAI.exe"
 
@@ -47,7 +47,8 @@ Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\StreamSnipAI.exe"; Tasks: 
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_windows.ps1"" -AppDir ""{app}"""; WorkingDir: "{app}"; Description: "Install dependencies and launch StreamSnip AI"; StatusMsg: "Preparing StreamSnip AI..."; Flags: waituntilterminated skipifsilent
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_windows.ps1"" -AppDir ""{app}"" -SkipLaunch"; WorkingDir: "{app}"; Description: "Prepare StreamSnip AI (one-time setup)"; StatusMsg: "Installing dependencies and verifying speech models..."; Flags: waituntilterminated skipifsilent
+Filename: "{app}\StreamSnipAI.exe"; Description: "Launch StreamSnip AI"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall_windows.ps1"" -AppDir ""{app}"""; WorkingDir: "{app}"; RunOnceId: "StreamSnipAIDependencyCleanup"; Flags: runhidden waituntilterminated

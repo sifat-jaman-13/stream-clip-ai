@@ -689,3 +689,33 @@ def build_transcript_fallback(transcript, creator_credit=""):
     if creator_credit:
         result["creator_credit"] = str(creator_credit)
     return result
+
+
+def build_hook_word_copy(transcript, creator_credit="", hook_terms=()):
+    """Use the strongest exact hook phrase as the title in offline hook-word mode."""
+    result = build_transcript_fallback(transcript, creator_credit)
+    source = re.sub(r"[^a-z0-9']+", " ", str(transcript or "").casefold()).strip()
+    if not source:
+        result["provider"] = "built-in hook words"
+        return result
+
+    items = hook_terms.items() if isinstance(hook_terms, dict) else ((term, 1.0) for term in hook_terms)
+    matches = []
+    for raw_term, raw_weight in items:
+        term = re.sub(r"[^a-z0-9']+", " ", str(raw_term or "").casefold()).strip()
+        if not term:
+            continue
+        try:
+            weight = max(0.0, min(5.0, float(raw_weight)))
+        except (TypeError, ValueError, OverflowError):
+            weight = 1.0
+        if f" {term} " in f" {source} ":
+            word_count = len(term.split())
+            matches.append((word_count * 2.0 + weight, word_count, term))
+
+    if matches:
+        _score, _length, chosen = max(matches, key=lambda item: (item[0], item[1], -source.find(item[2])))
+        result["title"] = _clean_title(_fallback_title_case(chosen))
+        result["hook_term"] = chosen
+    result["provider"] = "built-in hook words"
+    return result

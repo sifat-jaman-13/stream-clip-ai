@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — StreamSnip AI 4.0 development
+## [4.0.0] - 2026-11-25
 
 ### Added
 - Added direct per-clip Zernio publishing from the clip dialog, including editable title/description, per-post destination selection, multi-platform account mapping, and manual native-upload fallback.
@@ -15,6 +15,11 @@
 - Added automatic cleanup of temporary live recording chunks after successful clip rendering or a completed no-clip analysis. If all clip renders fail, the source recording is retained for retry; manually supplied VOD originals are never removed by this cleanup.
 - Added a persistent Posted tab backed by a local registry. Immediate Zernio posts and opt-in auto-post successes move automatically; manual platform uploads can be marked posted by the creator. Scheduled posts are not marked as posted prematurely.
 - Added per-clip delete, select-all across the entire current tab, delete-selected, and delete-all-current-tab actions for both Clips and Posted.
+- Added automatic multi-frame facecam detection for live streams and local VODs, with separate editable facecam and gameplay regions.
+- Added rendered MP4 output previews using the same crop, layout, and subtitle filter graph as final clips.
+- Added six caption animation modes, the GTA Neon style, five caption-location presets, and cleaner default caption sizing.
+- Expanded profanity matching and added word-level beep or mute processing for censored audio intervals.
+- Raised the default and minimum live-recording video bitrate to 8,000 Kbps.
 - Rewrote the README and updated the GitHub Pages site to announce the 4.0 roadmap, local-first credential requirements, creator workflow, and licence.
 
 ### Changed
@@ -23,10 +28,10 @@
 - Changed profanity handling so the original, uncensored transcript is used for viral-moment scoring. Optional censoring only changes rendered audio, captions, and generated post copy; it never rejects a clip or blocks publishing.
 - Clarified that no API key is required for local capture, local transcription, or rendering. Zernio credentials are only needed for direct publishing; hosted AI credentials are only needed when the user selects a hosted provider.
 - Corrected package metadata to identify the proprietary non-commercial licence rather than MIT.
-- Kept the current stable app version at 3.0.0 until the 4.0 installer and release are ready.
+- Promoted the Creator Studio, multi-creator workflow, editing, framing, and publishing improvements to the 4.0.0 major release.
 
 ### Verification
-- Windows PC: 133 tests passed in both unittest and pytest; one unrelated AnyIO / pytest deprecation warning remains.
+- Windows PC: 177 unittest tests passed; Python compilation passed; frontend lint reported 0 errors; React production build passed; the 4.0.0 Windows installer compiled successfully.
 - Compiled all application and test Python modules using the installed StreamSnip runtime.
 - Verified embedded app and GitHub Pages JavaScript with Node syntax checks; parsed the landing page and confirmed there are no duplicate IDs or broken in-page anchors.
 - Added regression coverage for live recording cleanup, retaining sources after render failures, persistent Posted state, and immediate-versus-scheduled Zernio posting callbacks.
@@ -327,7 +332,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Reused supported Python 3.10-3.12 installations and created an isolated app runtime.
 - Improved FFmpeg discovery, PATH refresh, repeat launches, setup diagnostics, and installer completion.
 
-[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.5...v3.0.0
 [2.1.5]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.4...v2.1.5
 [2.1.4]: https://github.com/sifat-jaman-13/stream-clip-ai/compare/v2.1.3...v2.1.4

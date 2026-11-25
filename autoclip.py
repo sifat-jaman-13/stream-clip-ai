@@ -30,9 +30,10 @@ import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
                            ollama_models, select_moments, test_provider)
-from post_metadata import DEFAULT_GEMINI_COPY_MODEL, build_transcript_fallback, generate_social_copy
+from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
+                            build_transcript_fallback, generate_social_copy)
 from browser_automation import BrowserAutomationManager, BrowserAutomationError
-APP_VERSION = "3.0.0"
+APP_VERSION = "4.0.0"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -256,8 +257,15 @@ def check_app_update():
     latest = str(data.get("tag_name", "")).lstrip("v") or APP_VERSION
     current_key = tuple(int(part) for part in re.findall(r"\d+", APP_VERSION))
     latest_key = tuple(int(part) for part in re.findall(r"\d+", latest))
+    assets = data.get("assets") if isinstance(data.get("assets"), list) else []
+    installer = next((asset for asset in assets
+                     if str(asset.get("name", "")).lower().endswith(".exe")
+                     and "setup" in str(asset.get("name", "")).lower()
+                     and asset.get("browser_download_url")), None)
     return {"current": APP_VERSION, "latest": latest, "update": latest_key > current_key,
             "url": data.get("html_url") or APP_RELEASES_URL,
+            "installer_url": installer.get("browser_download_url") if installer else "",
+            "installer_name": installer.get("name", "") if installer else "",
             "name": data.get("name") or ("StreamSnip AI v" + latest)}
 
 def update_components():
@@ -411,29 +419,36 @@ def acquire_instance_lock():
 DEFAULTS = {
     "mode": "live", "target": "",
     "rec_dir": "", "out_dir": "",
-    "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 70,
+    "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 80,
     "model": "distil-large-v3", "compute_device": "gpu",
     "transcriber_provider": "faster-whisper", "transcriber_command": "", "transcriber_language": "auto",
-    "color": "Yellow", "position": "Lower third", "caption_size": 100, "words_per_line": 3, "font": "Impact",
-    "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "Classic",
+    "color": "Yellow", "position": "Lower third", "caption_size": 82, "words_per_line": 3, "font": "Impact",
+    "subtitle_custom": False, "subtitle_mode": "Karaoke", "subtitle_style": "GTA Neon", "subtitle_animation": "highlight",
     "profanity_filter_enabled": True, "profanity_filter_words": "",
-    "subtitle_font_size": 100, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
+    "profanity_audio_mode": "beep",
+    "subtitle_font_size": 82, "subtitle_text_color": "#FFFFFF", "subtitle_stroke_color": "#000000",
     "subtitle_position": "Bottom", "subtitle_alignment": "Center", "subtitle_nudge": 0,
     "streamer_tag": "", "show_tag_video": True,
-    "capture_bitrate_kbps": 6000,
+    "capture_bitrate_kbps": 8000,
     "layout": "Facecam + game (Twitch)", "output_format": "9:16", "crop_x": 34.2, "crop_y": 0.0,
     "crop_w": 31.6, "crop_h": 100.0, "delete_rec": False,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
+    # Default game region matches the original centered 1080x1152 lower panel on 16:9 input.
+    "game_area_x": 23.6, "game_area_y": 0, "game_area_w": 52.8, "game_area_h": 100,
 }
 # ASS colours are BGR
 CAPTION_COLORS = {"Yellow": "00FFFF", "Green": "00FF00", "Cyan": "FFFF00", "Orange": "0080FF", "Pink": "FF40FF"}
-CAPTION_POS = {"Lower third": 520, "Middle": 800, "Low": 380}      # MarginV (px from bottom of 1920)
+# (ASS alignment, vertical margin in 1920px output coordinates). The four presets
+# cover top, upper third, lower third, and bottom without requiring custom mode.
+CAPTION_POS = {"Top": (8, 110), "Upper third": (8, 520),
+               "Middle": (5, 0), "Lower third": (2, 520), "Bottom": (2, 140)}
 LAYOUTS = ["Facecam + game (Twitch)", "Blur background", "Fill (crop center)", "Selected crop"]
 OUTPUT_FORMATS = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080), "4:5": (1080, 1350)}
 MODELS = ["distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base"]
 STREAM_QUALITY = "1080p60,1080p,720p60,720p,best"
 SUBTITLE_MODES = ["Karaoke", "Classic"]
-SUBTITLE_STYLES = ["Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"]
+SUBTITLE_STYLES = ["GTA Neon", "Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"]
+SUBTITLE_ANIMATIONS = ["highlight", "pop_in", "pop_in_line", "one_by_one", "build_up", "full_line"]
 SUBTITLE_POSITIONS = ["Top", "Center", "Bottom"]
 SUBTITLE_ALIGNMENTS = ["Left", "Center"]
 
@@ -448,16 +463,20 @@ def clean_cfg(raw):
         c[k] = max(lo, min(hi, v))
     num("clips_per_chunk", 0, 10, int); num("chunk_min", 3, 15, int)
     num("pre", 3, 90, int); num("post", 3, 90, int)
-    num("capture_bitrate_kbps", 6000, 50000, int)
+    num("capture_bitrate_kbps", 8000, 50000, int)
     num("min_score", 0, 100, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
     num("subtitle_font_size", 60, 180, int); num("subtitle_nudge", -400, 400, int)
     c["min_score"] = round(c["min_score"], 1)
     num("cam_x", 0, 90, float); num("cam_y", 0, 90, float); num("cam_w", 10, 100, float); num("cam_h", 10, 100, float)
-    num("game_x", 0, 100, float)
+    num("game_x", 0, 100, float)  # legacy horizontal alignment, retained for older settings files
+    num("game_area_x", 0, 90, float); num("game_area_y", 0, 90, float)
+    num("game_area_w", 10, 100, float); num("game_area_h", 10, 100, float)
     num("crop_x", 0, 90, float); num("crop_y", 0, 90, float); num("crop_w", 10, 100, float); num("crop_h", 10, 100, float)
     c["cam_w"] = min(c["cam_w"], 100 - c["cam_x"]); c["cam_h"] = min(c["cam_h"], 100 - c["cam_y"])
+    c["game_area_w"] = min(c["game_area_w"], 100 - c["game_area_x"])
+    c["game_area_h"] = min(c["game_area_h"], 100 - c["game_area_y"])
     c["crop_w"] = min(c["crop_w"], 100 - c["crop_x"]); c["crop_h"] = min(c["crop_h"], 100 - c["crop_y"])
-    for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x", "crop_x", "crop_y", "crop_w", "crop_h"): c[k] = round(c[k], 1)
+    for k in ("cam_x", "cam_y", "cam_w", "cam_h", "game_x", "game_area_x", "game_area_y", "game_area_w", "game_area_h", "crop_x", "crop_y", "crop_w", "crop_h"): c[k] = round(c[k], 1)
     if raw.get("mode") in ("live", "file"): c["mode"] = raw["mode"]
     c["target"] = str(raw.get("target", "")).strip()[:1000]
     transcriber = str(raw.get("transcriber_provider", "faster-whisper")).strip().lower()
@@ -471,10 +490,13 @@ def clean_cfg(raw):
                     ("output_format", OUTPUT_FORMATS), ("model", MODELS)):
         if raw.get(k) in opts: c[k] = raw[k]
     for k, opts in (("subtitle_mode", SUBTITLE_MODES), ("subtitle_style", SUBTITLE_STYLES),
-                    ("subtitle_position", SUBTITLE_POSITIONS), ("subtitle_alignment", SUBTITLE_ALIGNMENTS)):
+                    ("subtitle_animation", SUBTITLE_ANIMATIONS), ("subtitle_position", SUBTITLE_POSITIONS),
+                    ("subtitle_alignment", SUBTITLE_ALIGNMENTS)):
         if raw.get(k) in opts: c[k] = raw[k]
     c["subtitle_custom"] = bool(raw.get("subtitle_custom", False))
     c["profanity_filter_enabled"] = bool(raw.get("profanity_filter_enabled", c["profanity_filter_enabled"]))
+    audio_mode = str(raw.get("profanity_audio_mode", c["profanity_audio_mode"]) or "beep").strip().lower()
+    c["profanity_audio_mode"] = audio_mode if audio_mode in {"beep", "mute"} else "beep"
     extra_profanity = str(raw.get("profanity_filter_words", c["profanity_filter_words"]) or "")
     c["profanity_filter_words"] = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", extra_profanity)[:4000]
     for k, fallback in (("subtitle_text_color", "#FFFFFF"), ("subtitle_stroke_color", "#000000")):
@@ -956,24 +978,153 @@ def clean_word(w):
     return re.sub(r"[{}\\]", "", w).strip(" .,;:\"").upper()
 
 PROFANITY_FILTER_MASK = "****"
+# Broad, token-aware English/UK/American profanity and widely used gaming-chat variants.
+# Keep entries as whole words/phrases: filtering never matches harmless substrings.
 DEFAULT_PROFANITY_TERMS = (
-    "fuck", "fucking", "fucked", "fucker", "fuckers", "fucks", "fuckin",
+    # F-word family and common speech-to-text / typed variants
+    "fuck", "fucking", "fucked", "fucker", "fuckers", "fucks", "fuckin", "fuckin'",
+    "fuckwit", "fuckwits", "fuckface", "fuckfaces", "fuckhead", "fuckheads",
+    "fuckboy", "fuckboys", "fuckgirl", "fuckgirls", "fuckup", "fuckups",
+    "fucked up", "fuck off", "fuck you", "fuck it", "fuck this", "fuck that",
+    "fuck me", "fuck sake", "for fuck sake", "for fuck's sake", "what the fuck",
+    "who the fuck", "where the fuck", "why the fuck", "how the fuck",
+    "shut the fuck up", "go fuck yourself", "get fucked", "fuck around",
     "motherfucker", "motherfuckers", "motherfucking", "mother fucker",
-    "shit", "shits", "shitty", "bullshit", "horseshit", "shithead",
-    "bitch", "bitches", "bitching", "son of a bitch",
-    "asshole", "assholes", "arsehole", "arseholes", "dumbass", "jackass", "jackasses",
-    "bastard", "bastards", "dick", "dicks", "dickhead", "cock", "cocks",
-    "cunt", "cunts", "pussy", "pussies", "slut", "sluts", "whore", "whores",
-    "twat", "prick", "pricks", "wanker", "wankers", "bollocks",
-    "piss", "pissed", "pissing", "stfu", "wtf", "fml",
-    "damn", "damned", "dammit", "goddamn", "goddammit", "hell", "crap", "jesus christ",
+    "mother fuckers", "muthafucka", "muthafuckas", "muthafucker", "muthafuckers",
+    "fuk", "fuking", "fuked", "fuker", "fukker", "fukk", "fukker", "fuk off",
+    "fck", "fcking", "fcked", "fcker", "fck off", "fck you", "fvck", "phuck",
+    "fucc", "fucced", "fuccing", "fux", "fuxk", "fkin", "effing", "effed",
+
+    # S-word family and compounds
+    "shit", "shits", "shitty", "shittier", "shittiest", "shitting", "shitted",
+    "shithead", "shitheads", "shitbag", "shitbags", "shitshow", "shitstorm",
+    "shit stain", "shitstain", "shitface", "shitfaces", "shit for brains",
+    "shitbrain", "shitbrains", "shitbird", "shitbirds", "shitheel", "shitheels",
+    "shitbox", "shitboxes", "shitload", "shitloads", "shitless", "shitfaced",
+    "dipshit", "dipshits", "dumbshit", "dumbshits", "bullshit", "bullshits",
+    "horseshit", "dogshit", "chickenshit", "apeshit", "batshit", "bullsht",
+    "horsesht", "dogsht", "dipsht", "weak shit",
+    "no shit", "holy shit", "piece of shit", "full of shit", "eat shit",
+    "talk shit", "shit talk", "shit talking", "shit happens", "shit hit the fan",
+    "oh shit", "what the shit", "shite", "shites", "shitehawk", "shiteater",
+    "shiteating", "sheeit", "sheeeit", "shyt", "shitty", "sht", "shtty",
+    "shthead", "shtface", "shtshow", "shtbag", "shtstain", "shtforbrains",
+    # B-word family and common compounds
+    "bitch", "bitches", "bitching", "bitched", "bitchy", "bitchier", "bitchiest",
+    "bitchass", "bitch ass", "bitch slap", "bitchslap", "bitchfest",
+    "bitchmade", "bitch-made", "son of a bitch", "son of a bitches",
+    "little bitch", "basic bitch", "stupid bitch", "crying bitch", "you bitch",
+    "biatch", "biatch", "bytch", "btch", "betch", "bich", "b1tch",
+    # Ass / arse family
+    "ass", "arse", "asshole", "assholes", "arsehole", "arseholes",
+    "ass hat", "asshat", "ass wipe", "asswipe", "arse wipe", "arsewipe",
+    "ass clown", "assclown", "assface", "assfaces", "assbag", "assbags",
+    "asshead", "assheads", "ass kisser", "asskisser", "asslicker", "ass licker",
+    "dumbass", "dumbasses", "jackass", "jackasses", "badass", "smartass",
+    "smart asses", "hardass", "hardasses", "fatass", "fatasses", "lazyass",
+    "shitass", "pain in the ass", "kiss my ass", "my ass", "up your ass",
+    "arse about", "arse around", "arsehole", "arsewipe", "arsehat",
+    "a-hole", "a hole", "a55", "azz",
+    # D-word / C-word and sexual insults
+    "dick", "dicks", "dickhead", "dickheads", "dickwad", "dickwads",
+    "dickweed", "dickweeds", "dick face", "dickface", "dickbag", "dickbags",
+    "dickless", "dick move", "dickish", "dickishness", "dick sucking",
+    "dick sucker", "dicksucker", "dicksuckers", "cock", "cocks", "cockhead",
+    "cockheads", "cockface", "cockwomble", "cockwombles", "cocksucker",
+    "cocksuckers", "cocksucking", "cock sucker", "cock tease", "cocktease",
+    "cockup", "cock-up", "cocky bastard", "knob", "knobs", "knobhead",
+    "knobheads", "knob end", "knobend", "bellend", "bellends",
+    "cunt", "cunts", "cunting", "cunted", "cunty", "cuntish", "cuntface",
+    "cuntfaces", "cuntbag", "cuntbags", "cuntfuck", "cuntfucker",
+    "cunt punt", "cunt punted", "cuntwaffle", "cunt waffles",
+    "pussy", "pussies", "pussyhole", "pussy ass", "pussyass", "pussy whipped",
+    "pussywhipped", "prick", "pricks", "prickish",
+    "prickhead", "prickheads", "prick face", "prickface", "prickly bastard",
+    "twat", "twats", "twatting", "twatted", "twatwaffle", "twat waffle",
+    "twathead", "twatface", "twat faces", "slut", "sluts", "slutty", "slutbag",
+    "slutbags", "whore", "whores", "whoring", "whored", "whorehouse",
+    "whorebag", "whorebags", "skank", "skanks", "skanky", "hoe", "hoes",
+    "thot", "thots", "ho", "hos", "hooker", "hookers", "tramp", "tramps",
+    "slag", "slags", "slagging", "tart", "tarts",
+    # UK / Commonwealth slang and insults
+    "wanker", "wankers", "wanking", "wanked", "wank", "tosser", "tossers",
+    "tosspot", "bollocks", "bollocking", "bollock", "bollocksed",
+    "bugger", "buggers", "buggered", "buggering", "bugger off",
+    "bloody hell", "bloody bastard", "bloody idiot", "bloody bollocks",
+    "sod", "sod off", "sod it", "sod all", "sod you",
+    "minger", "mingers", "munter", "munters", "git", "gits", "plonker",
+    "plonkers", "pillock", "pillocks", "muppet", "muppets",
+    "bellend", "bellends", "knobhead", "knobheads", "arsehole",
+    "piss off", "piss off mate", "piss take", "pisstake", "piss-take",
+    "pisshead", "pissheads", "pissed", "pissing", "piss poor", "pissy",
+    "piss up", "take the piss", "taking the piss", "on the piss",
+    # General vulgar language and expletives
+    "damn", "damned", "dammit", "dammit", "goddamn", "goddammit", "god damn",
+    "god damn it", "goddamned", "damn it", "damn you", "damn fucking",
+    "hell", "hells", "hellish", "what the hell", "to hell", "go to hell",
+    "holy hell", "hell no", "hell yeah", "crap", "crappy", "crapped", "crapping",
+    "crapper", "crappers", "craphead", "crapload", "crapola", "craptastic",
+    "douche", "douches", "douchebag", "douchebags", "douchey", "douchy",
+    "scumbag", "scumbags", "dirtbag", "dirtbags", "sleazebag", "sleazebags",
+    "jackhole", "jackholes", "dumbfuck", "dumbfucks", "fucktard", "fucktards",
+    "shithead", "shitheads", "shit for brains", "asswipe", "asshat",
+    "motherless fuck", "son of a whore", "son of a gun", "son of a bitch",
+    "piece of crap", "piece of shit", "clusterfuck", "clusterfucks",
+    "what a dick", "what a prick", "what an asshole",
+    "screw you", "screw off", "screw that", "screw this", "screwed",
+    "screwing", "screwed up", "screw-up", "screwup", "screwups",
+    "damn straight", "for crying out loud", "jesus christ", "jesus fucking christ",
+    "christ almighty", "goddamn it", "god damn it",
+    # Internet / gaming chat shorthand and variants
+    "wtf", "wth", "stfu", "gtfo", "fml", "lmfao", "lmao", "af",
+    "pos", "piece of shit", "p.o.s", "ffs", "smfh", "fml", "smd",
+    "suck my dick", "suck my balls", "eat a dick", "eat a bag of dicks",
+    "eat shit", "go touch grass", "fuckboy", "dumbass", "dipshit",
+    "f u", "fu", "f u c k", "f u c k you", "sh1t", "5hit", "f0ck",
+    "fuk", "fck", "fvck", "phuck", "fucc", "fukk", "sht", "shyt",
+    "btch", "b1tch", "biatch", "bich", "azz", "a55",
+    # Widely recognized non-English profanity frequently heard in global streams
+    "puta", "puto", "putas", "putos", "mierda", "mierdas", "joder", "jodido",
+    "jodida", "jodete", "cabron", "cabrona", "cabrones", "coño",
+    "pendejo", "pendeja", "pendejos", "pendejas", "verga", "vergas",
+    "chingar", "chingada", "chingado", "chingate", "chinga", "chingon",
+    "hijo de puta", "hija de puta", "hijos de puta", "la puta madre",
+    "conchetumare", "concha tu madre", "merde", "putain", "connard",
+    "connasse", "bordel", "scheisse", "scheiße", "arschloch", "fick",
+    "ficken", "wichser", "verdammt",
+    # South Asian stream/chat profanity commonly spoken in Hindi, Urdu, and Bangla.
+    "chutiya", "chutya", "chutiye", "chutiyapa", "madarchod", "madarchodd",
+    "bhenchod", "behenchod", "benchod", "bhench*d", "banchod", "bonchod",
+    "gandu", "ganduu", "gaand", "gand", "gaand mara", "gand mara", "lodu",
+    "lodu", "lund", "l*nd", "randi", "randibaaz", "harami", "haraamzada",
+    "haramzada", "haramzadi", "bakchod", "bhosdike", "bhosdi", "bhosda",
+    "bhosdika", "bhosdike", "chodu", "chod", "choda", "chodna", "chodai",
+    "chodon", "maa ki chut", "ma ki chut", "teri maa", "teri ma", "teri behen",
+    "teri bahan", "teri gaand", "teri gand", "khanki", "khankir pola",
+    "bokachoda", "bal", "baal", "balchal", "shala", "magi", "magibaji",
+    # Russian profanity heard in multiplayer voice chat.
+    "blyat", "blyad", "blyadi", "suka", "suki", "sukablyat", "ebat",
+    "yebat", "nahui", "nahuy", "huy", "hui", "pizda", "pizdec",
+    "mudak", "mudaki", "pidor", "pidoras", "zalupa", "zasranets",
 )
-_PROFANITY_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)?")
+_PROFANITY_TOKEN_RE = re.compile(r"[\w]+(?:['’][\w]+)?", re.UNICODE)
+_PROFANITY_TEXT_TOKEN_RE = re.compile(
+    r"[\w]+(?:[*!._#-]+[\w]+)*(?:[$]+)?(?:['’][\w]+)?",
+    re.UNICODE,
+)
 
 def _profanity_tokens(value):
-    """Tokenize speech/text without matching profanity inside unrelated words."""
-    return [match.group(0).replace("’", "'").casefold()
-            for match in _PROFANITY_TOKEN_RE.finditer(str(value or ""))]
+    """Normalize common typed/ASR obfuscations, then tokenize whole words only."""
+    text = str(value or "").casefold().replace("’", "'")
+    # Translate symbols only when they appear inside a word, not sentence punctuation.
+    text = re.sub(r"(?<=\\w)!(?=\\w)", "i", text)
+    # Common keyboard substitutions: sh1t, a$$, f0ck and similar.
+    text = text.translate(str.maketrans({"1": "i", "0": "o", "3": "e",
+                                         "4": "a", "5": "s", "7": "t",
+                                         "@": "a", "$": "s"}))
+    # Strip decorative punctuation inserted inside a censored spelling (f*ck, b*tch).
+    text = re.sub(r"(?<=\w)[*._#-]+(?=\w)", "", text)
+    return [match.group(0) for match in _PROFANITY_TOKEN_RE.finditer(text)]
 
 def _profanity_matches(tokens, terms):
     matched = set()
@@ -1023,18 +1174,24 @@ def censor_profanity_text(value, enabled=True, extra_terms=""):
     text = str(value or "")
     if not enabled or not text:
         return text
-    matches = list(_PROFANITY_TOKEN_RE.finditer(text))
-    tokens = [match.group(0).replace("’", "'").casefold() for match in matches]
-    matched = _profanity_matches(tokens, _profanity_terms(extra_terms))
-    for index in sorted(matched, reverse=True):
+    matches = list(_PROFANITY_TEXT_TOKEN_RE.finditer(text))
+    tokens, owners = [], []
+    for index, match in enumerate(matches):
+        normalized = _profanity_tokens(match.group(0))
+        tokens.extend(normalized)
+        owners.extend([index] * len(normalized))
+    matched_tokens = _profanity_matches(tokens, _profanity_terms(extra_terms))
+    matched_words = {owners[index] for index in matched_tokens}
+    for index in sorted(matched_words, reverse=True):
         match = matches[index]
         text = text[:match.start()] + PROFANITY_FILTER_MASK + text[match.end():]
     return text
 
-def profanity_audio_filter(words, start, end, padding=0.10):
-    """Build an FFmpeg volume filter that mutes censored words in clip-relative time."""
+def profanity_audio_filter(words, start, end, padding=0.02, mode="beep"):
+    """Replace only censored word intervals with a tone or silence, using clip-relative timestamps."""
     try:
         clip_start, duration = float(start), max(0.0, float(end) - float(start))
+        padding = max(0.0, min(0.08, float(padding)))
     except (TypeError, ValueError, OverflowError):
         return ""
     if duration <= 0:
@@ -1059,7 +1216,16 @@ def profanity_audio_filter(words, start, end, padding=0.10):
     expression = "+".join(
         f"between(t,{left:.3f},{right:.3f})" for left, right in intervals
     )
-    return f"volume=0:enable='{expression}'"
+    if str(mode or "beep").strip().lower() == "mute":
+        return f"volume=0:enable='{expression}'"
+    # aeval preserves the incoming channel layout and original audio outside
+    # the censored word intervals. The beep replaces, rather than overlays,
+    # the speech inside those exact intervals.
+    return (
+        "aeval=exprs='if("
+        + expression
+        + ",0.18*sin(2*PI*1000*t),val(ch))'"
+    )
 
 def group_words(ws, max_words, max_chars, gap=0.7):
     groups, cur = [], []
@@ -1075,6 +1241,8 @@ def group_words(ws, max_words, max_chars, gap=0.7):
     return groups
 
 SUBTITLE_PRESETS = {
+    # NeonClipping-inspired GTA look, independently implemented for StreamSnip.
+    "GTA Neon": {"font": "Impact", "text": "#EFFF43", "highlight": "#FF45A8", "stroke": "#301045", "outline": 7, "shadow": 5, "pop": True},
     "Classic": {"font": "Impact", "text": "#FFFFFF", "stroke": "#000000", "outline": 9, "shadow": 4, "pop": True},
     "Hormozi": {"font": "Arial Black", "text": "#FFFFFF", "stroke": "#000000", "outline": 10, "shadow": 4, "pop": True},
     "Neon": {"font": "Arial Black", "text": "#FFFFFF", "stroke": "#FF40FF", "outline": 7, "shadow": 3, "pop": True},
@@ -1092,6 +1260,18 @@ def _ass_color(value, fallback):
 def output_size(cfg):
     return OUTPUT_FORMATS.get(cfg.get("output_format", "9:16"), OUTPUT_FORMATS["9:16"])
 
+def facecam_game_crop_filter(cfg):
+    """Build the crop/scale filter for the user-selected game-capture rectangle."""
+    x = float(cfg.get("game_area_x", DEFAULTS["game_area_x"])) / 100
+    y = float(cfg.get("game_area_y", DEFAULTS["game_area_y"])) / 100
+    w = float(cfg.get("game_area_w", DEFAULTS["game_area_w"])) / 100
+    h = float(cfg.get("game_area_h", DEFAULTS["game_area_h"])) / 100
+    return (
+        f"crop=iw*{w:.4f}:ih*{h:.4f}:iw*{x:.4f}:ih*{y:.4f},"
+        "scale=1080:1152:force_original_aspect_ratio=increase,crop=1080:1152"
+    )
+
+
 def make_ass(words, start, end, path, cfg):
     ws = []
     for s, e, w in words:
@@ -1101,10 +1281,11 @@ def make_ass(words, start, end, path, cfg):
                 ws.append((max(0.0, s - start), min(end - start, e - start), cw))
     custom = bool(cfg.get("subtitle_custom"))
     out_w, out_h = output_size(cfg)
-    preset = SUBTITLE_PRESETS.get(cfg.get("subtitle_style", "Classic"), SUBTITLE_PRESETS["Classic"])
-    stroke = _ass_color(cfg.get("subtitle_stroke_color"), "#000000") if custom else "000000"
+    preset = SUBTITLE_PRESETS.get(cfg.get("subtitle_style", "GTA Neon"), SUBTITLE_PRESETS["GTA Neon"])
+    stroke = (_ass_color(cfg.get("subtitle_stroke_color"), "#000000") if custom
+              else _ass_color(preset.get("stroke", "#000000"), "#000000"))
     size = int(cfg.get("subtitle_font_size", cfg["caption_size"])) if custom else int(cfg["caption_size"])
-    font = preset["font"] if custom else cfg["font"]
+    font = cfg.get("font", "Impact") if custom else preset["font"]
     if custom:
         pos = cfg.get("subtitle_position", "Bottom")
         align = cfg.get("subtitle_alignment", "Center")
@@ -1114,9 +1295,13 @@ def make_ass(words, start, end, path, cfg):
         mv = max(0, round(70 * out_h / 1920) + nudge) if pos != "Center" else nudge
         outline, shadow = preset["outline"], preset["shadow"]
     else:
-        alignment, mv, outline, shadow = 2, round(CAPTION_POS.get(cfg["position"], 520) * out_h / 1920), 9, 4
-    base_col = _ass_color(cfg.get("subtitle_text_color"), "#FFFFFF") if custom else "FFFFFF"
-    highlight_col = CAPTION_COLORS.get(cfg["color"], "00FFFF")
+        alignment, preset_margin = CAPTION_POS.get(cfg.get("position"), CAPTION_POS["Lower third"])
+        mv, outline, shadow = round(preset_margin * out_h / 1920), preset["outline"], preset["shadow"]
+    base_col = (_ass_color(cfg.get("subtitle_text_color"), "#FFFFFF") if custom
+                else _ass_color(preset.get("text", "#FFFFFF"), "#FFFFFF"))
+    highlight_col = (CAPTION_COLORS.get(cfg["color"], "00FFFF") if custom or not preset.get("highlight")
+                     else _ass_color(preset["highlight"], "#FFFF00"))
+    animation = cfg.get("subtitle_animation", "highlight")
     header = (
         f"[Script Info]\nScriptType: v4.00+\nPlayResX: {out_w}\nPlayResY: {out_h}\nWrapStyle: 0\n\n"
         "[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,"
@@ -1124,21 +1309,44 @@ def make_ass(words, start, end, path, cfg):
         "Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n"
         f"Style: Default,{font},{size},&H00{base_col},&H00{base_col},&H00{stroke},&H64000000,0,0,0,0,100,100,2,0,1,{outline},{shadow},{alignment},{round(70 * out_w / 1080)},{round(70 * out_w / 1080)},{mv},1\n\n"
         "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n")
-    pop = (r"{\1c&H" + highlight_col + r"&\fscx120\fscy120\t(0,90,\fscx100\fscy100)}"
-           if (not custom or (preset["pop"] and cfg.get("subtitle_mode", "Karaoke") == "Karaoke"))
-           else r"{\1c&H" + highlight_col + r"&}")
+    pop_enabled = cfg.get("subtitle_mode", "Karaoke") == "Karaoke" and bool(preset.get("pop", False))
     max_chars = max(8, int(1750 / size))
     lines = []
     groups = group_words(ws, int(cfg["words_per_line"]), max_chars)
     for gi, grp in enumerate(groups):
+        group_end = grp[-1][1] + 0.2
+        if gi + 1 < len(groups):
+            group_end = min(group_end, groups[gi + 1][0][0])
+        if animation == "full_line":
+            text = " ".join(w for _, _, w in grp)
+            lines.append(f"Dialogue: 0,{ts(grp[0][0])},{ts(max(group_end, grp[0][0] + 0.08))},Default,,0,0,0,,{text}")
+            continue
         for j, (s, e, _) in enumerate(grp):
             if j + 1 < len(grp):
                 end_t = grp[j + 1][0]
             else:                                   # last word: hold briefly, but never overlap the next line
-                end_t = e + 0.2
-                if gi + 1 < len(groups):
-                    end_t = min(end_t, groups[gi + 1][0][0])
-            text = " ".join((pop + w + r"{\r}") if k == j else w for k, (_, _, w) in enumerate(grp))
+                end_t = group_end
+            if animation == "one_by_one":
+                visible = [j]
+            elif animation in {"pop_in", "build_up"}:
+                visible = list(range(j + 1))
+            else:                                   # highlight and pop_in_line keep the phrase visible
+                visible = list(range(len(grp)))
+            chunks = []
+            for k in visible:
+                word = grp[k][2]
+                if k == j:
+                    active_tag = r"{\1c&H" + highlight_col + r"&}"
+                    if pop_enabled and animation in {"highlight", "pop_in", "one_by_one"}:
+                        active_tag = r"{\1c&H" + highlight_col + r"&\fscx118\fscy118\t(0,100,\fscx100\fscy100)}"
+                    chunks.append(active_tag + word + r"{\r}")
+                elif animation in {"pop_in", "build_up"}:
+                    chunks.append(r"{\1c&H" + base_col + r"&}" + word + r"{\r}")
+                else:
+                    chunks.append(word)
+            text = " ".join(chunks)
+            if animation == "pop_in_line" and j == 0:
+                text = r"{\fscx82\fscy82\t(0,140,\fscx100\fscy100)\fad(90,0)}" + text
             lines.append(f"Dialogue: 0,{ts(s)},{ts(max(end_t, s + 0.08))},Default,,0,0,0,,{text}")
     tag = streamer_credit(cfg)
     if cfg.get("show_tag_video") and tag:
@@ -1359,6 +1567,32 @@ def describe_file_lock(path, error):
     return {"message": message, "file_lock": {"name": target.name, "holders": owners} if owners else None}
 
 PROCESSING_LOCK = threading.Lock()
+
+
+def render_video_filter(cfg, ass_filename):
+    """Return the exact video filter graph used by both final clips and output previews."""
+    out_w, out_h = output_size(cfg)
+    subtitle_file = pathlib.Path(ass_filename).name
+    if cfg["layout"].startswith("Facecam") and cfg.get("output_format", "9:16") == "9:16":
+        cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("cam_x", "cam_y", "cam_w", "cam_h"))
+        game_crop = facecam_game_crop_filter(cfg)
+        return ("[0:v]setpts=PTS-STARTPTS,split=2[a][b];"
+                f"[a]crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f},"
+                "scale=1080:768:force_original_aspect_ratio=increase,crop=1080:768[cam];"
+                f"[b]{game_crop}[game];"
+                f"[cam][game]vstack=inputs=2,setsar=1,subtitles={subtitle_file}[v]")
+    if cfg["layout"].startswith("Blur"):
+        return ("[0:v]setpts=PTS-STARTPTS,split=2[a][b];"
+                f"[a]scale={round(out_w/4)}:{round(out_h/4)}:force_original_aspect_ratio=increase,crop={out_w//4}:{out_h//4},boxblur=8:2,scale={out_w}:{out_h}[bg];"
+                f"[b]scale={out_w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,"
+                f"setsar=1,subtitles={subtitle_file}[v]")
+    if cfg["layout"].startswith("Selected"):
+        cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("crop_x", "crop_y", "crop_w", "crop_h"))
+        crop = f"crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f},"
+    else:
+        crop = ""
+    return (f"[0:v]setpts=PTS-STARTPTS,{crop}scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
+            f"setsar=1,subtitles={subtitle_file}[v]")
 
 
 class Engine:
@@ -1758,33 +1992,15 @@ class Engine:
         )
         out_w, out_h = output_size(cfg)
         make_ass(words, start, end, self.out_dir / f"{name}.ass", cfg)
-        if cfg["layout"].startswith("Facecam") and cfg.get("output_format", "9:16") == "9:16":
-            # Twitch-style portrait: facecam on the top 40% (1080x768), game on the bottom 60% (1080x1152)
-            cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("cam_x", "cam_y", "cam_w", "cam_h"))
-            gx = float(cfg["game_x"]) / 100
-            vf = ("[0:v]setpts=PTS-STARTPTS,split=2[a][b];"
-                  f"[a]crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f},"
-                  "scale=1080:768:force_original_aspect_ratio=increase,crop=1080:768[cam];"
-                  f"[b]crop=min(iw\\,ih*1080/1152):ih:(iw-min(iw\\,ih*1080/1152))*{gx:.4f}:0,"
-                  "scale=1080:1152[game];"
-                  f"[cam][game]vstack=inputs=2,setsar=1,subtitles={name}.ass[v]")
-        elif cfg["layout"].startswith("Blur"):
-            vf = ("[0:v]setpts=PTS-STARTPTS,split=2[a][b];"
-                  f"[a]scale={round(out_w/4)}:{round(out_h/4)}:force_original_aspect_ratio=increase,crop={out_w//4}:{out_h//4},boxblur=8:2,scale={out_w}:{out_h}[bg];"
-                  f"[b]scale={out_w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,"
-                  f"setsar=1,subtitles={name}.ass[v]")
-        else:
-            if cfg["layout"].startswith("Selected"):
-                cx, cy, cw, ch = (float(cfg[k]) / 100 for k in ("crop_x", "crop_y", "crop_w", "crop_h"))
-                crop = f"crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f},"
-            else:
-                crop = ""
-            vf = (f"[0:v]setpts=PTS-STARTPTS,{crop}scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},"
-                  f"setsar=1,subtitles={name}.ass[v]")
+        vf = render_video_filter(cfg, f"{name}.ass")
         enc = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0"] if has_nvenc()
                else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
-        mute_filter = profanity_audio_filter(words, start, end) if cfg.get("profanity_filter_enabled", True) else ""
-        audio_filter = ((mute_filter + ",") if mute_filter else "") + "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS"
+        profanity_filter = (
+            profanity_audio_filter(
+                words, start, end, mode=cfg.get("profanity_audio_mode", "beep")
+            ) if cfg.get("profanity_filter_enabled", True) else ""
+        )
+        audio_filter = ((profanity_filter + ",") if profanity_filter else "") + "loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS"
         tmp = f"{name}.tmp.mp4"
         cmd = [ffmpeg_exe(), "-y", "-v", "error", "-fflags", "+genpts", "-ss", f"{start:.2f}", "-accurate_seek",
                "-t", f"{end - start:.2f}", "-i", str(pathlib.Path(src).resolve()),
@@ -1813,8 +2029,10 @@ class Engine:
             if transcript and provider in {"ollama", "gemini", "huggingface", "custom"}:
                 post_copy = generate_social_copy(transcript, tag, ai_cfg, log=self.log)
             elif transcript and provider == "hooks":
-                self.log("Hook words is selected; using concise transcript-based post copy for this clip.")
-                post_copy = build_transcript_fallback(transcript, tag)
+                self.log("Hook words is selected; the strongest exact hook phrase is used as the title.")
+                hook_terms = dict(load_custom())
+                hook_terms.update({term: 1.0 for term in HYPE_WORDS | HYPE_PHRASES})
+                post_copy = build_hook_word_copy(transcript, tag, hook_terms)
         except Exception as exc:
             provider = str(ai_cfg.get("provider", "unknown")).lower()
             self.log(
@@ -1996,7 +2214,7 @@ class Engine:
         except Exception:
             slog.close()
             raise
-        bitrate = int(self.cfg.get("capture_bitrate_kbps", 6000))
+        bitrate = int(self.cfg.get("capture_bitrate_kbps", 8000))
         if has_nvenc():
             capture_enc = ["-c:v", "h264_nvenc", "-preset", "p5", "-b:v", f"{bitrate}k",
                            "-maxrate", f"{bitrate}k", "-bufsize", f"{bitrate * 2}k"]
@@ -3010,6 +3228,36 @@ def browse_file():
 def browse_folder():
     return _browse_dialog(True)
 
+def detect_facecam(mode, target):
+    """Run local multi-frame YuNet detection on a VOD or a short live sample."""
+    import facecam_detect
+    target = (target or "").strip().strip('"')
+    if mode == "file":
+        source = pathlib.Path(target)
+        if not source.is_file():
+            raise ValueError("Choose an existing video file before detecting its facecam.")
+        return facecam_detect.detect(source)
+    target = normalize_stream_target(target)
+    if not re.match(r"https?://", target):
+        raise ValueError("Choose a Twitch or YouTube channel before detecting its facecam.")
+    if not streamlink_available():
+        raise ValueError("Streamlink is required to sample a live channel.")
+    stream = run(streamlink_cmd() + [target, STREAM_QUALITY, "--stream-url"],
+                 capture_output=True, text=True, env=streamlink_env(), timeout=45)
+    if stream.returncode != 0 or not (stream.stdout or "").strip():
+        raise ValueError("The selected creator is not live or the stream is unavailable.")
+    stream_url = stream.stdout.strip().splitlines()[-1].strip()
+    with tempfile.TemporaryDirectory(prefix="streamsnip-facecam-") as folder:
+        sample = pathlib.Path(folder) / "live-sample.mp4"
+        result = run([ffmpeg_exe(), "-y", "-v", "error", "-i", stream_url,
+                      "-t", "22", "-an", "-c:v", "libx264", "-preset", "ultrafast",
+                      "-pix_fmt", "yuv420p", str(sample)],
+                     capture_output=True, timeout=55)
+        if result.returncode != 0 or not sample.is_file() or sample.stat().st_size < 100_000:
+            raise ValueError("Could not record a short live sample. Check that the creator is still live.")
+        return facecam_detect.detect(sample)
+
+
 def grab_frame(mode, target):
     """One JPEG frame (as a data URL) from the live stream or a video file - used by the facecam-area picker."""
     import base64
@@ -3038,6 +3286,67 @@ def grab_frame(mode, target):
     except subprocess.TimeoutExpired:
         raise ValueError("Grabbing a frame took too long.")
     raise ValueError("Couldn't read a frame from that source.")
+
+
+
+def grab_output_preview(mode, target, settings=None):
+    """Render one real source frame through the final clip's layout and caption filters."""
+    import base64
+
+    mode = str(mode or "live").strip().lower()
+    target = str(target or "").strip().strip('"')
+    if mode not in {"live", "file"}:
+        raise ValueError("Choose a live creator or a local video before previewing the clip.")
+    if not target:
+        raise ValueError("Choose a source before previewing the clip.")
+
+    raw_settings = settings if isinstance(settings, dict) else {}
+    cfg = clean_cfg({**raw_settings, "mode": mode, "target": target})
+
+    if mode == "live":
+        normalized = normalize_stream_target(target)
+        if not re.match(r"https?://", normalized):
+            raise ValueError("Paste a Twitch or YouTube creator URL before previewing.")
+        if not streamlink_available():
+            raise ValueError("Streamlink is required to preview a live creator.")
+        stream = run(streamlink_cmd() + [normalized, STREAM_QUALITY, "--stream-url"],
+                     capture_output=True, text=True, env=streamlink_env(), timeout=45)
+        if stream.returncode != 0 or not (stream.stdout or "").strip():
+            raise ValueError("This creator is not live or the stream is unavailable. Try again while they are live.")
+        source = stream.stdout.strip().splitlines()[-1].strip()
+        input_attempts = [["-i", source]]
+    else:
+        source_path = pathlib.Path(target)
+        if not source_path.is_file():
+            raise ValueError("Choose an existing video file before previewing the clip.")
+        input_attempts = [["-ss", "5", "-i", str(source_path)], ["-i", str(source_path)]]
+
+    # A short, silent motion sample makes the preview playable without exposing
+    # unprocessed source audio. Real clips use detected speech and filtered audio.
+    preview_duration = 2.5
+    with tempfile.TemporaryDirectory(prefix="streamsnip-output-preview-") as folder:
+        ass_path = pathlib.Path(folder) / "preview.ass"
+        preview_path = pathlib.Path(folder) / "preview.mp4"
+        sample_words = [(0.0, 0.78, "THAT"), (0.78, 1.52, "WAS"), (1.52, preview_duration, "INSANE!")]
+        make_ass(sample_words, 0.0, preview_duration, ass_path, cfg)
+        video_filter = render_video_filter(cfg, ass_path.name)
+        last_error = ""
+        for input_args in input_attempts:
+            preview_path.unlink(missing_ok=True)
+            result = run(
+                [ffmpeg_exe(), "-y", "-v", "error", *input_args,
+                 "-t", f"{preview_duration:.2f}", "-filter_complex", video_filter,
+                 "-map", "[v]", "-an", "-c:v", "libx264", "-preset", "ultrafast",
+                 "-crf", "28", "-r", "24", "-pix_fmt", "yuv420p",
+                 "-movflags", "+faststart", str(preview_path)],
+                cwd=folder, capture_output=True, timeout=60,
+            )
+            if result.returncode == 0 and preview_path.is_file() and preview_path.stat().st_size > 10_000:
+                encoded = base64.b64encode(preview_path.read_bytes()).decode("ascii")
+                return "data:video/mp4;base64," + encoded
+            last_error = (result.stderr or b"").decode("utf-8", errors="replace")[-300:]
+        raise ValueError("Could not render the selected source with the current clip settings. "
+                         + (last_error or "Try another source or layout."))
 
 CORE = Core()
 BROWSER_AUTOMATION = BrowserAutomationManager()
@@ -3467,8 +3776,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, "posted": posted})
                 if path == "/api/open_folder":
                     open_folder(OUT); return self._send(200, {"ok": True})
+                if path == "/api/output-preview":
+                    return self._send(200, {"video": grab_output_preview(
+                        str(body.get("mode", "live")), str(body.get("target", "")), body.get("settings")
+                    )})
                 if path == "/api/frame":
                     return self._send(200, {"image": grab_frame(str(body.get("mode", "live")), str(body.get("target", "")))})
+                if path == "/api/facecam/detect":
+                    return self._send(200, detect_facecam(str(body.get("mode", "live")), str(body.get("target", ""))))
                 if path == "/api/browse":
                     return self._send(200, {"path": browse_file()})
                 if path == "/api/browse_folder":
@@ -4052,7 +4367,7 @@ header{padding:16px 26px;border-bottom:1px solid var(--line);background:rgba(9,1
     <select id="compute-device" class="text"><option value="gpu">Automatic  -  use NVIDIA GPU when available</option></select>
     <p class="hint">Speech uses CUDA when a supported NVIDIA GPU is detected; video recording and rendering use NVENC whenever FFmpeg provides it. CPU processing is used only when no supported GPU is detected. A GPU initialization failure is shown in Activity instead of silently switching to CPU.</p>
     <div class="row"><label>Live video bitrate target (kbps)</label><b>Full HD</b></div>
-    <input id="capture-bitrate" class="text" type="number" min="6000" max="50000" step="500" value="6000" aria-label="Capture video bitrate target in kilobits per second">
+    <input id="capture-bitrate" class="text" type="number" min="8000" max="50000" step="500" value="8000" aria-label="Capture video bitrate target in kilobits per second">
     <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
     <div class="row"><label>App and runtime updates</label></div>
     <p class="hint">Current app version: __APP_VERSION__. Check the published release before updating.</p>
@@ -4315,7 +4630,7 @@ $("#btn-about").onclick=openAbout;
 $("#btn-about-close").onclick=closeAbout;
 aboutOverlay.onclick=e=>{if(e.target===aboutOverlay)closeAbout()};
 document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(!settingsOverlay.hidden)closeSettings();if(!aboutOverlay.hidden)closeAbout()});
-$("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||""; $("#capture-bitrate").value=S.capture_bitrate_kbps||6000;
+$("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||""; $("#capture-bitrate").value=S.capture_bitrate_kbps||8000;
 function wireFolderPicker(inputId,buttonId,key){
   const input=$(inputId), button=$(buttonId);
   input.addEventListener("change",()=>{S[key]=input.value.trim();scheduleSave()});
@@ -4325,7 +4640,7 @@ wireFolderPicker("#rec-dir","#rec-dir-browse","rec_dir");
 wireFolderPicker("#out-dir","#out-dir-browse","out_dir");
 $("#compute-device").value=S.compute_device||"gpu";
 $("#compute-device").addEventListener("change",e=>{S.compute_device=e.target.value;scheduleSave()});
-$("#capture-bitrate").addEventListener("change",e=>{S.capture_bitrate_kbps=Math.max(6000,Math.min(50000,+e.target.value||6000));e.target.value=S.capture_bitrate_kbps;scheduleSave()});
+$("#capture-bitrate").addEventListener("change",e=>{S.capture_bitrate_kbps=Math.max(8000,Math.min(50000,+e.target.value||8000));e.target.value=S.capture_bitrate_kbps;scheduleSave()});
 $("#btn-settings-save").onclick=async()=>{const b=$("#btn-settings-save");b.disabled=true;try{await api("/api/settings",S);toast("Settings saved","ok")}catch(e){toast(e.message,"bad")}b.disabled=false};
 $("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?"  -  "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
 $("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new StreamSnip AI version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};

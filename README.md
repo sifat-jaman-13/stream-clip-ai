@@ -11,7 +11,7 @@ StreamSnip AI is a desktop-hosted creator workspace. It combines Twitch and YouT
 
 The React Creator Studio is the default interface. The Python engine continues to handle capture and media processing; a loopback-only FastAPI server exposes the local application API.
 
-> **Source status:** The repository can contain newer Creator Studio work than the installer currently published under GitHub Releases. A source-code update does not mean a new installer or tagged release has shipped.
+> **Current release: 4.0.0.** The Windows installer is attached to the GitHub release. Verify the published SHA-256 checksum before installing.
 
 ## The creator workflow
 
@@ -38,13 +38,15 @@ Opening Live Studio does not start a recording. Capture starts only after the us
 - Analyze transcript windows for high-potential moments using local scoring or a configured AI provider.
 - Choose Hook Words, Ollama, Gemini, Hugging Face, or a custom OpenAI-compatible chat-completions provider, subject to provider configuration.
 - Render portrait, landscape, square, and 4:5 clips with configurable framing and captions.
-- Generate transcript-grounded titles, descriptions, and hashtags.
+- Detect facecam regions across multiple video frames, then adjust the facecam and gameplay crops independently.\n- Preview a short rendered MP4 using the same crop, layout, and caption pipeline as the final clip.\n- Choose six word-level caption animations, including GTA Neon, and place captions at five preset positions.\n- Mask detected profanity in captions and post copy, then beep or mute only the matching word in rendered audio.\n- Record live streams at a configurable 8,000?50,000 Kbps target (8,000 Kbps minimum).\n- Generate transcript-grounded titles, descriptions, and hashtags.
 - Review clips before sharing and keep posted clips in a separate Published view.
 - Publish through Zernio when an API key and eligible connected social account are available.
-- Use manual browser handoff as a fallback; the user selects the local video and completes the final Publish action.
+- Publish an individual clip to selected connected platforms/accounts from its review dialog, or use the manual browser handoff.\n- Track completed posts in a persistent Published view; scheduled posts are not marked as published before they are accepted.\n- Use manual browser handoff as a fallback; the user selects the local video and completes the final Publish action.
 - Choose an application theme and font. Odysseus is the default theme; JetBrains Mono is the default interface font. Google Sans, Inter, Roboto, and other font options are available.
 
 Highlight scores are estimates, not guarantees of reach or engagement.
+
+Third-party notices for bundled caption/model components are included as LICENSE-NeonClipping.txt and LICENSE-YuNet.txt. The YuNet model is distributed under its upstream MIT license; these notices do not change StreamSnip AI's own license.
 
 ## AI providers, API keys, and privacy
 

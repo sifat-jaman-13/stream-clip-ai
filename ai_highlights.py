@@ -277,7 +277,15 @@ def _gemini(prompt, config):
             _GEMINI_MODEL_CACHE.pop(next(iter(_GEMINI_MODEL_CACHE)))
         _GEMINI_MODEL_CACHE[cache_id] = cached_models
     active = str(config.get("_gemini_active_model", "")).strip()
-    models = _gemini_model_order(selected, [active, *(cached_models or [])])
+    # Keep the last proven-working Gemini model sticky across separate analyses
+    # (live windows, new clips, titles/descriptions, and monitoring jobs). A
+    # manual model change resets this preference; a later failure rotates away.
+    cached_choice = _GEMINI_ACTIVE_CACHE.get(cache_id)
+    sticky_model = cached_choice[1] if cached_choice and cached_choice[0] == selected else ""
+    models = list(dict.fromkeys(
+        model for model in [sticky_model, active, selected, DEFAULT_GEMINI_MODEL, *(cached_models or [])]
+        if model and model not in RETIRED_GEMINI_MODELS
+    ))
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}
     last_error = None
     attempts = 0
@@ -577,6 +585,7 @@ def select_moments(provider, words, duration, config, log=lambda _message: None,
         return []
     picks = {}
     active_provider = provider
+    active_backend = backend
     fell_back = False
     fallback_reason = ""
     try:
@@ -596,27 +605,42 @@ def select_moments(provider, words, duration, config, log=lambda _message: None,
             continue
         prompt = _prompt(local_words, window_end - window_start)
         config["_ai_window"] = (window_start, window_end)
-        current_backend = _ollama if active_provider == "ollama" else backend
+        if active_provider == "fallback_exhausted":
+            window_start += window_size
+            continue
         try:
-            raw = _call_backend(current_backend, prompt, config, cancelled)
+            raw = _call_backend(active_backend, prompt, config, cancelled)
             parsed_window = _parse_moments(raw, window_end - window_start)
         except AIProviderError as exc:
-            if active_provider == "gemini" and (exc.quota or exc.retryable):
+            if provider == "gemini" and active_provider == "gemini" and (exc.quota or exc.retryable):
                 fallback_reason = "quota/rate limit" if exc.quota else "temporary model/API failures"
-                log(f"Gemini model rotation is exhausted ({fallback_reason}): {exc}. Switching remaining transcript windows to local Ollama.")
-                try:
-                    raw = _call_backend(_ollama, prompt, config, cancelled)
-                    parsed_window = _parse_moments(raw, window_end - window_start)
-                except AIAnalysisCancelled:
-                    raise
-                except AIProviderError as fallback_error:
-                    log(f"Ollama could not analyze transcript window {int(window_start)}–{int(window_end)}s: {fallback_error}. Skipping this window; keeping earlier highlights.")
-                    active_provider = "ollama"
-                    fell_back = True
+                log(f"Gemini rotations are exhausted ({fallback_reason}). Switching providers for this analysis; Gemini will be retried on the next video/task.")
+                fallback_candidates = [("Ollama (local/free)", _ollama)]
+                if str(config.get("huggingface_token", "")).strip():
+                    fallback_candidates.append(("Hugging Face", _huggingface))
+                if str(config.get("custom_api_base", "")).strip() and str(config.get("custom_api_model", "")).strip():
+                    fallback_candidates.append(("custom OpenAI-compatible API", _openai_compatible))
+                fallback_succeeded = False
+                for fallback_name, fallback_fn in fallback_candidates:
+                    try:
+                        log(f"Trying fallback provider: {fallback_name}.")
+                        raw = _call_backend(fallback_fn, prompt, config, cancelled)
+                        parsed_window = _parse_moments(raw, window_end - window_start)
+                        active_backend = fallback_fn
+                        active_provider = fallback_name
+                        log(f"Fallback provider {fallback_name} is working. It will handle the remaining windows in this analysis; Gemini remains selected for the next video/task.")
+                        fallback_succeeded = True
+                        fell_back = True
+                        break
+                    except AIAnalysisCancelled:
+                        raise
+                    except AIProviderError as fallback_error:
+                        log(f"Fallback provider {fallback_name} failed: {fallback_error}")
+                if not fallback_succeeded:
+                    log("All configured fallback providers failed. Skipping remaining windows for this analysis; Gemini will be retried on the next video/task.")
+                    active_provider = "fallback_exhausted"
                     window_start += window_size
                     continue
-                active_provider = "ollama"
-                fell_back = True
             else:
                 log(f"{active_provider.title()} could not analyze transcript window {int(window_start)}–{int(window_end)}s: {exc}. Skipping this window; keeping earlier highlights.")
                 window_start += window_size

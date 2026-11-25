@@ -1105,9 +1105,56 @@ class RegressionTests(unittest.TestCase):
             autoclip.make_ass([(4.9, 5.5, "first"), (6.0, 6.5, "second")], 5, 10, path, cfg)
             subtitles = path.read_text(encoding="utf-8")
         self.assertIn("FIRST", subtitles)
-        self.assertIn("Style: Default,Impact,100,&H00FFFFFF", subtitles)
-        self.assertIn(r"{\1c&H00FFFF&", subtitles)
-        self.assertIn(r"\1c&H00FFFFFF&", subtitles)
+        self.assertIn("Style: Default,Impact,82,&H0043FFEF", subtitles)
+        self.assertIn(r"{\1c&HA845FF&", subtitles)
+        self.assertIn("Clip from @channel", subtitles)
+
+    def test_capture_bitrate_defaults_to_eight_megabits_and_clamps_below_it(self):
+        self.assertEqual(autoclip.clean_cfg({})["capture_bitrate_kbps"], 8000)
+        self.assertEqual(autoclip.clean_cfg({"capture_bitrate_kbps": 6000})["capture_bitrate_kbps"], 8000)
+        self.assertEqual(autoclip.clean_cfg({"capture_bitrate_kbps": 12000})["capture_bitrate_kbps"], 12000)
+
+    def test_middle_caption_location_preset_is_centered_in_rendered_ass(self):
+        cfg = autoclip.clean_cfg({"position": "Middle"})
+        self.assertEqual(cfg["position"], "Middle")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "middle.ass"
+            autoclip.make_ass([(0.1, 0.5, "CENTERED"), (0.6, 1.0, "CAPTION")], 0, 2, path, cfg)
+            script = path.read_text(encoding="utf-8")
+        self.assertIn("Style: Default,Impact,82,&H0043FFEF", script)
+        self.assertIn(",5,70,70,0,1", script)
+
+    def test_gta_neon_is_a_real_caption_preset_with_distinct_brand_colors(self):
+        self.assertIn("GTA Neon", autoclip.SUBTITLE_STYLES)
+        cfg = autoclip.clean_cfg({"subtitle_style": "GTA Neon"})
+        self.assertEqual(cfg["subtitle_style"], "GTA Neon")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gta-neon.ass"
+            autoclip.make_ass([(0.1, 0.5, "no"), (0.6, 1.0, "way")], 0, 2, path, cfg)
+            script = path.read_text(encoding="utf-8")
+        self.assertIn("Style: Default,Impact,82,&H0043FFEF", script)
+        self.assertIn(r"{\1c&HA845FF&", script)
+        self.assertIn("&H00451030", script)
+
+    def test_caption_animation_presets_change_word_reveal_behavior(self):
+        expected = {"highlight", "pop_in", "pop_in_line", "one_by_one", "build_up", "full_line"}
+        self.assertEqual(set(autoclip.SUBTITLE_ANIMATIONS), expected)
+        words = [(0.1, 0.4, "NO"), (0.5, 0.8, "WAY"), (0.9, 1.2, "THAT"), (1.3, 1.6, "WAS")]
+        scripts = {}
+        with tempfile.TemporaryDirectory() as directory:
+            for animation in sorted(expected):
+                cfg = autoclip.clean_cfg({"subtitle_style": "GTA Neon", "subtitle_animation": animation,
+                                          "words_per_line": 4})
+                path = Path(directory) / (animation + ".ass")
+                autoclip.make_ass(words, 0, 2, path, cfg)
+                scripts[animation] = path.read_text(encoding="utf-8")
+        self.assertEqual(scripts["full_line"].count("Dialogue:"), 1)
+        self.assertIn("NO", scripts["pop_in"])
+        self.assertIn("WAS", scripts["pop_in"])
+        self.assertIn(r"\1c&H43FFEF&", scripts["build_up"])
+        self.assertNotIn(r"\fscx118", scripts["build_up"])
+        self.assertEqual(scripts["one_by_one"].count("}NO{"), 1)
+        self.assertIn(r"\fscx82\fscy82", scripts["pop_in_line"])
 
     def test_windows_reveal_opens_containing_folder(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1170,9 +1217,9 @@ class RegressionTests(unittest.TestCase):
             self.assertIn("setpts=PTS-STARTPTS", filter_graph)
             self.assertIn("asetpts=PTS-STARTPTS", command[command.index("-af") + 1])
 
-    def test_live_capture_bitrate_defaults_and_clamps_to_6000_kbps(self):
-        self.assertEqual(autoclip.clean_cfg({})["capture_bitrate_kbps"], 6000)
-        self.assertEqual(autoclip.clean_cfg({"capture_bitrate_kbps": 1000})["capture_bitrate_kbps"], 6000)
+    def test_live_capture_bitrate_defaults_and_clamps_to_8000_kbps(self):
+        self.assertEqual(autoclip.clean_cfg({})["capture_bitrate_kbps"], 8000)
+        self.assertEqual(autoclip.clean_cfg({"capture_bitrate_kbps": 6000})["capture_bitrate_kbps"], 8000)
 
     def test_gemini_tries_other_available_models_after_temporary_failure(self):
         calls = []
@@ -1185,7 +1232,8 @@ class RegressionTests(unittest.TestCase):
                 raise ai_highlights.AIProviderError("HTTP 503 busy", retryable=True)
             return {"candidates": [{"content": {"parts": [{"text": '{"moments":[]}'}]}}]}
 
-        with patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
+        with patch.dict(ai_highlights._GEMINI_ACTIVE_CACHE, {}, clear=True), \
+             patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
              patch.object(ai_highlights.time, "sleep"):
             result = ai_highlights._gemini("transcript", {"gemini_api_key": "test-key",
                                                            "gemini_model": "gemini-3.8-flash"})
@@ -1262,7 +1310,7 @@ class RegressionTests(unittest.TestCase):
             absent = autoclip.run([ffmpeg, "-v", "error", "-ss", "2.5", "-i",
                                    str(output / "caption-test.mp4"), "-vf", "format=gray",
                                    "-frames:v", "1", "-f", "rawvideo", "-"], capture_output=True)
-            self.assertGreater(sum(value > 220 for value in visible.stdout), 1000)
+            self.assertGreater(sum(value > 60 for value in visible.stdout), 1000)
             self.assertLess(sum(value > 220 for value in absent.stdout), 100)
 
     def test_gemini_quota_exhaustion_falls_back_to_ollama(self):
@@ -1286,7 +1334,8 @@ class RegressionTests(unittest.TestCase):
             generation_urls.append(url)
             raise ai_highlights.AIProviderError("HTTP 503 busy", retryable=True)
 
-        with patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
+        with patch.dict(ai_highlights._GEMINI_ACTIVE_CACHE, {}, clear=True), \
+             patch.object(ai_highlights, "_json_request", side_effect=fake_request), \
              patch.object(ai_highlights.time, "sleep"), \
              patch.object(ai_highlights, "_ollama",
                           return_value={"moments": [{"time": 24, "score": 92}]}) as ollama:
@@ -1300,7 +1349,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(sum("gemini-3.8-flash" in url for url in generation_urls), 6)
         self.assertEqual(sum("gemini-backup-flash" in url for url in generation_urls), 6)
         ollama.assert_called_once()
-        self.assertTrue(any("Switching remaining transcript windows to local Ollama" in line for line in logs))
+        self.assertTrue(any("Remaining transcript windows were analyzed with Ollama" in line for line in logs))
 
     def test_gemini_nonquota_errors_do_not_switch_providers(self):
         logs = []
@@ -1655,6 +1704,29 @@ class RegressionTests(unittest.TestCase):
         safe_text = autoclip.censor_profanity_text("The assistant passed the class.")
         self.assertEqual(safe_text, "The assistant passed the class.")
 
+    def test_profanity_filter_detects_common_variants_and_avoids_substring_matches(self):
+        words = [
+            (0.0, 0.2, "fuk"),
+            (0.2, 0.4, "sh1t"),
+            (0.4, 0.6, "bullsh*t"),
+            (0.6, 0.8, "dipshit"),
+            (0.8, 1.0, "shite"),
+            (1.0, 1.2, "assistant"),
+            (1.2, 1.4, "classic"),
+            (1.4, 1.6, "passionate"),
+        ]
+        filtered = autoclip.censor_transcript_words(words)
+        self.assertEqual([entry[2] for entry in filtered],
+                         ["****", "****", "****", "****", "****", "assistant", "classic", "passionate"])
+        self.assertEqual(
+            autoclip.censor_profanity_text("That was f*cked, bullsh*t, and a$$! The assistant passed."),
+            "That was ****, ****, and ****! The assistant passed."
+        )
+        multilingual = autoclip.censor_transcript_words([
+            (0.0, 0.2, "chutiya"), (0.2, 0.4, "blyat"), (0.4, 0.6, "coño")
+        ])
+        self.assertEqual([entry[2] for entry in multilingual], ["****", "****", "****"])
+
     def test_profanity_filter_supports_multiword_and_custom_terms(self):
         words = [
             (0.0, 0.2, "You"),
@@ -1676,6 +1748,9 @@ class RegressionTests(unittest.TestCase):
 
     def test_profanity_filter_can_be_disabled_and_defaults_to_enabled(self):
         self.assertTrue(autoclip.clean_cfg({})["profanity_filter_enabled"])
+        self.assertEqual(autoclip.clean_cfg({})["profanity_audio_mode"], "beep")
+        self.assertEqual(autoclip.clean_cfg({"profanity_audio_mode": "mute"})["profanity_audio_mode"], "mute")
+        self.assertEqual(autoclip.clean_cfg({"profanity_audio_mode": "unknown"})["profanity_audio_mode"], "beep")
         self.assertFalse(autoclip.clean_cfg({
             "profanity_filter_enabled": False
         })["profanity_filter_enabled"])
@@ -1689,22 +1764,29 @@ class RegressionTests(unittest.TestCase):
             "fuck you"
         )
 
-    def test_profanity_audio_filter_uses_word_timestamps_and_merges_nearby_intervals(self):
+    def test_profanity_audio_filter_beeps_only_at_detected_word_timestamps(self):
         words = [
             (12.1, 12.4, "****"),
             (12.45, 12.8, "****"),
             (15.0, 15.3, "****"),
             (16.0, 16.4, "clean"),
         ]
-        audio_filter = autoclip.profanity_audio_filter(words, 10.0, 18.0)
-        self.assertIn("volume=0:enable=", audio_filter)
-        self.assertIn("between(t,2.000,2.900)", audio_filter)
-        self.assertIn("between(t,4.900,5.400)", audio_filter)
+        audio_filter = autoclip.profanity_audio_filter(words, 10.0, 18.0, mode="beep")
+        self.assertIn("aeval=exprs=", audio_filter)
+        self.assertIn("sin(2*PI*1000*t)", audio_filter)
+        self.assertIn("between(t,2.080,2.820)", audio_filter)
+        self.assertIn("between(t,4.980,5.320)", audio_filter)
         self.assertNotIn("between(t,6.000", audio_filter)
 
+    def test_profanity_audio_filter_can_mute_instead_of_beeping(self):
+        words = [(12.1, 12.4, "****")]
+        audio_filter = autoclip.profanity_audio_filter(words, 10.0, 18.0, mode="mute")
+        self.assertIn("volume=0:enable=", audio_filter)
+        self.assertIn("between(t,2.080,2.420)", audio_filter)
 
 
-    def test_renderer_mutes_profanity_and_sanitizes_ai_generated_metadata(self):
+
+    def test_renderer_beeps_profanity_and_sanitizes_ai_generated_metadata(self):
         cfg = autoclip.clean_cfg({})
         engine = autoclip.Engine(cfg, lambda *_: None)
         engine.ai_cfg_for_render = {"provider": "gemini"}
@@ -1737,8 +1819,8 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(copy.call_args.args[0], "This **** worked!")
             command = render_run.call_args.args[0]
             audio_filter = command[command.index("-af") + 1]
-            self.assertIn("volume=0:enable=", audio_filter)
-            self.assertIn("between(t,0.500,1.300)", audio_filter)
+            self.assertIn("aeval=exprs=", audio_filter)
+            self.assertIn("between(t,0.580,1.220)", audio_filter)
 
             metadata = (output / "filtered_clip.txt").read_text(encoding="utf-8").lower()
             self.assertIn("****", metadata)

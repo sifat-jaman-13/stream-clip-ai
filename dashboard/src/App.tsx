@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clapperboard, CloudUpload, Cpu, Download,
   ExternalLink, Eye, FileText, FileVideo, FolderOpen, HardDrive, Info, LayoutDashboard,
   Menu, MoreHorizontal, Palette, Pause, Play, Plus, Radio,
-  RadioTower, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Square, Trash2,
+  RadioTower, RefreshCw, Search, Send, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Square, Trash2,
   Users, Video, WandSparkles, X, Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -292,7 +292,7 @@ export default function App() {
 
       <main className="page-content">
         {page === "overview" ? <OverviewPage workspace={workspace} navigate={navigate} openClip={(clip) => { setSelectedClip(clip); navigate("clips"); }} /> : null}
-        {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} /> : null}
+        {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
         {page === "creators" ? <CreatorsPage creators={workspace.creators} busy={busy} post={post} /> : null}
         {page === "clips" || page === "published" ? <ClipLibraryPage key={page + "|" + workspace.clipOffset} workspace={workspace} published={page === "published"} navigate={navigate} query={clipSearch} setQuery={setClipSearch} selectedClip={selectedClip} setSelectedClip={setSelectedClip} openForPublishing={openForPublishing} openBulkPublishing={openBulkPublishing} busy={busy} post={post} /> : null}
         {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} browserStatus={browserStatus} setBrowserStatus={setBrowserStatus} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
@@ -447,34 +447,50 @@ function ClipCompact({ clip, click }: { clip: Clip; click: () => void }) {
   </button>;
 }
 
-function LivePage({ workspace, busy, post }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
+function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
   const settings = workspace.settings || {};
   const [mode, setMode] = useState(String(settings.mode || "live"));
   const [target, setTarget] = useState(String(settings.target || ""));
   const [setupTab, setSetupTab] = useState<StudioSetupTab>("capture");
   const [frame, setFrame] = useState("");
+  const [outputPreview, setOutputPreview] = useState("");
+  const [outputPreviewCreator, setOutputPreviewCreator] = useState("");
+  const [frameSize, setFrameSize] = useState({ width: 16, height: 9 });
+  const [facecamBox, setFacecamBox] = useState({ x: Number(settings.cam_x ?? 70), y: Number(settings.cam_y ?? 4), w: Number(settings.cam_w ?? 29), h: Number(settings.cam_h ?? 37) });
+  const [gameBox, setGameBox] = useState({ x: Number(settings.game_area_x ?? 23.6), y: Number(settings.game_area_y ?? 0), w: Number(settings.game_area_w ?? 52.8), h: Number(settings.game_area_h ?? 100) });
+  const [facecamResult, setFacecamResult] = useState<RecordLike | null>(null);
+  const [detectingFacecam, setDetectingFacecam] = useState(false);
+  const [drag, setDrag] = useState<{ region: "facecam" | "game"; mode: "move" | "resize"; startX: number; startY: number; box: typeof facecamBox } | null>(null);
+  const [selectedCreatorId, setSelectedCreatorId] = useState(() => workspace.creators.find((creator) => creator.target === String(settings.target || ""))?.id || "");
+  const selectedCreator = workspace.creators.find((creator) => creator.id === selectedCreatorId)
+    || workspace.creators.find((creator) => creator.target === target)
+    || workspace.creators[0] || null;
+  const sourceTarget = mode === "live" ? (target.trim() || selectedCreator?.target || "") : target;
   const running = workspace.state.running;
-  const update = (patch: Partial<AppSettings>) => workspace.updateSettings(patch);
-  const detectedCreator = mode === "live" ? inferCreatorTag(target) : "";
+  const update = (patch: Partial<AppSettings>) => { setOutputPreview(""); workspace.updateSettings(patch); };
+  const detectedCreator = mode === "live" ? (selectedCreator?.name || inferCreatorTag(sourceTarget)) : "";
   const providerLabel = ({ gemini: "Gemini API", ollama: "Ollama", hooks: "Built-in hooks", huggingface: "Hugging Face", custom: "Custom API" } as Record<string, string>)[workspace.ai.provider] || "AI provider";
   const browse = async () => {
     const result = await post<{ path: string }>("browse-source", "/api/browse", {});
     if (result?.path) {
       setTarget(result.path);
       setMode("file");
+      setOutputPreview("");
       update({ target: result.path, mode: "file" });
     }
   };
   const changeMode = (value: string) => {
     setMode(value);
+    setOutputPreview("");
     update({ mode: value });
   };
   const changeTarget = (value: string) => {
     setTarget(value);
+    setOutputPreview("");
     update({ target: value });
   };
   const start = async () => {
-    const source = target.trim();
+    const source = sourceTarget.trim();
     if (!source || running || busy || !workspace.configLoaded) return;
     if (workspace.ai.provider === "gemini" && !workspace.ai.gemini_key_set) {
       setSetupTab("ai");
@@ -500,8 +516,29 @@ function LivePage({ workspace, busy, post }: { workspace: Workspace; busy: strin
   };
   const stop = async () => { await post("stop-capture", "/api/stop", { force: false }); };
   const preview = async () => {
-    const result = await post<{ image: string }>("preview-source", "/api/frame", { mode, target });
+    const result = await post<{ image: string }>("preview-source", "/api/frame", { mode, target: sourceTarget });
     if (result?.image) setFrame(result.image);
+  };
+  const previewOutput = async () => {
+    const previewSettings = {
+      ...settings,
+      cam_x: facecamBox.x, cam_y: facecamBox.y, cam_w: facecamBox.w, cam_h: facecamBox.h,
+      game_area_x: gameBox.x, game_area_y: gameBox.y, game_area_w: gameBox.w, game_area_h: gameBox.h,
+    };
+    const result = await post<{ video: string }>("preview-output", "/api/output-preview", {
+      mode, target: sourceTarget, settings: previewSettings,
+    });
+    if (result?.video) {
+      setOutputPreview(result.video);
+      setOutputPreviewCreator(mode === "live"
+        ? (selectedCreator?.target === sourceTarget ? selectedCreator.name : inferCreatorTag(sourceTarget) || "Live source")
+        : "Local video");
+    } else {
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: {
+        tone: "error", title: "Output preview unavailable",
+        message: "Check that the selected creator is live or choose a readable video file, then try again.",
+      } }));
+    }
   };
   const tabs: Array<{ id: StudioSetupTab; label: string; icon: LucideIcon }> = [
     { id: "capture", label: "Capture", icon: Radio },
@@ -516,20 +553,63 @@ function LivePage({ workspace, busy, post }: { workspace: Workspace; busy: strin
         <button className={mode === "live" ? "selected" : ""} onClick={() => changeMode("live")} disabled={running}><Radio size={15} />Live stream</button>
         <button className={mode === "file" ? "selected" : ""} onClick={() => changeMode("file")} disabled={running}><Video size={15} />Video file / VOD</button>
       </div>
-      <Field label={mode === "live" ? "Twitch or YouTube URL" : "Video file path"} hint={mode === "live" ? "Channel URLs with a public handle are detected automatically." : "Choose a local video supported by FFmpeg."}>
-        <div className="field-with-action">
-          <input value={target} onChange={(event) => changeTarget(event.target.value)} disabled={running} placeholder={mode === "live" ? "https://www.twitch.tv/channel or youtube.com/@handle" : "Choose a video file"} />
-          <Button onClick={() => void browse()} disabled={running || !!busy}><FolderOpen size={15} />Browse</Button>
+      {mode === "live" ? <div className="live-creator-picker">
+        <div className="live-creator-picker-heading"><div><strong>Choose a creator</strong><small>Select one of your saved channels to capture or monitor.</small></div><Button size="small" onClick={() => navigate("creators")}><Users size={14} />Manage creators</Button></div>
+        {workspace.creators.length ? <div className="live-creator-list" role="listbox" aria-label="Saved creators">
+          {workspace.creators.map((creator) => <button type="button" role="option" aria-selected={selectedCreator?.id === creator.id} key={creator.id} className={"live-creator-option" + (selectedCreator?.id === creator.id ? " selected" : "")} onClick={() => { setSelectedCreatorId(creator.id); changeTarget(creator.target); setOutputPreview(""); setFacecamResult(null); }}>
+            <span className="creator-initial">{creator.name.trim().slice(0, 1).toUpperCase() || "C"}</span><span className="live-creator-option-copy"><strong>{creator.name}</strong><small>{creator.status || creator.phase || creator.target}</small></span><StatusPill tone={creator.running ? "live" : "neutral"}>{creator.running ? "Live" : "Saved"}</StatusPill><span className="creator-select-mark"><Check size={15}/></span>
+          </button>)}
+        </div> : <EmptyState icon={Users} title="No saved creators yet" description="Add a Twitch or YouTube creator first. Your saved channels will appear here." action={<Button onClick={() => navigate("creators")}>Add a creator</Button>} />}
+        {selectedCreator ? <div className="studio-source-meta"><div className="studio-channel-detection"><span>Selected creator</span><strong>{selectedCreator.name}</strong><small>{selectedCreator.target}</small></div><StatusPill tone={selectedCreator.running ? "live" : "success"}>{selectedCreator.running ? "Monitoring" : "Ready"}</StatusPill></div> : null}
+      </div> : <Field label="Video file path" hint="Choose a local video supported by FFmpeg.">
+        <div className="field-with-action"><input value={target} onChange={(event) => changeTarget(event.target.value)} disabled={running} placeholder="Choose a video file" /><Button onClick={() => void browse()} disabled={running || !!busy}><FolderOpen size={15} />Browse</Button></div>
+      </Field>}
+    </Panel>
+
+    <Panel title="Facecam detection and layout" description="Find the webcam from multiple video frames, then inspect and adjust its exact region before rendering.">
+      <div className="facecam-toolbar">
+        <div><strong>Automatic facecam finder</strong><small>Local YuNet face detection + stable-border analysis. No cloud AI required.</small></div>
+        <div className="facecam-toolbar-actions">
+          <Button onClick={() => void preview()} disabled={!sourceTarget.trim() || !!busy}><Eye size={15}/>Load framing preview</Button>
+          <Button kind="primary" onClick={async () => {
+            if (!sourceTarget.trim() || detectingFacecam || !!busy) return;
+            setDetectingFacecam(true); setFacecamResult(null);
+            try {
+              const previewResult = await post<{ image: string }>("facecam-frame", "/api/frame", { mode, target: sourceTarget });
+              if (previewResult?.image) setFrame(previewResult.image);
+              const result = await post<RecordLike>("facecam-detect", "/api/facecam/detect", { mode, target: sourceTarget });
+              if (result) {
+                setFacecamResult(result);
+                if (result.found && result.cam) setFacecamBox({ x: result.cam.x * 100, y: result.cam.y * 100, w: result.cam.w * 100, h: result.cam.h * 100 });
+              }
+            } finally { setDetectingFacecam(false); }
+          }} disabled={!sourceTarget.trim() || detectingFacecam || !!busy}><WandSparkles size={15}/>{detectingFacecam ? "Analyzing frames…" : "Find facecam automatically"}</Button>
         </div>
-      </Field>
-      <div className="studio-source-meta">
-        <div className="studio-channel-detection">
-          <span>Detected creator</span>
-          <strong>{detectedCreator || "No channel handle detected"}</strong>
-          <small>{detectedCreator ? "Filled from the source URL. This credit is used automatically unless you override it in Captions." : mode === "live" ? "Use a Twitch channel or YouTube @handle URL. YouTube watch links do not contain the channel name; add a manual credit in Captions when needed." : "Creator detection is available for channel URLs, not local video files."}</small>
-        </div>
-        <StatusPill tone={detectedCreator ? "success" : "neutral"}>{detectedCreator ? "Channel identified" : "Manual credit available"}</StatusPill>
       </div>
+      {facecamResult ? <div className={"facecam-result " + (facecamResult.found ? "found" : "not-found")}><StatusPill tone={facecamResult.found ? "success" : "warning"}>{facecamResult.found ? "Facecam detected" : "No confident match"}</StatusPill><span>{facecamResult.found ? "Method: " + String(facecamResult.method || "multi-frame analysis") + " · Confidence: " + Math.round(Number(facecamResult.confidence || 0) * 100) + "%" : String(facecamResult.reason || "Try another section of the video or adjust the region manually.")}</span></div> : null}
+      {frame ? <div className="facecam-editor-wrap"><div className="facecam-editor-stage" style={{ aspectRatio: `${frameSize.width} / ${frameSize.height}`, maxWidth: `min(100%, ${(440 * frameSize.width / frameSize.height).toFixed(1)}px)` }} onPointerMove={(event) => {
+        if (!drag) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const dx = (event.clientX - drag.startX) / rect.width * 100;
+        const dy = (event.clientY - drag.startY) / rect.height * 100;
+        const setBox = drag.region === "facecam" ? setFacecamBox : setGameBox;
+        setBox(drag.mode === "move"
+          ? { ...drag.box, x: Math.max(0, Math.min(100 - drag.box.w, drag.box.x + dx)), y: Math.max(0, Math.min(100 - drag.box.h, drag.box.y + dy)) }
+          : { ...drag.box, w: Math.max(5, Math.min(100 - drag.box.x, drag.box.w + dx)), h: Math.max(5, Math.min(100 - drag.box.y, drag.box.h + dy)) });
+      }} onPointerUp={() => setDrag(null)} onPointerCancel={() => setDrag(null)}>
+        <img src={frame} alt="Video frame used to inspect the facecam region" onLoad={(event) => setFrameSize({ width: event.currentTarget.naturalWidth || 16, height: event.currentTarget.naturalHeight || 9 })}/>
+        <div className="facecam-selection game-region" style={{ left: gameBox.x + "%", top: gameBox.y + "%", width: gameBox.w + "%", height: gameBox.h + "%" }} onPointerDown={(event) => { event.stopPropagation(); setOutputPreview(""); event.currentTarget.setPointerCapture(event.pointerId); setDrag({ region: "game", mode: "move", startX: event.clientX, startY: event.clientY, box: gameBox }); }}>
+          <span>GAME CAPTURE</span><button type="button" aria-label="Resize game capture region" className="facecam-resize game-resize" onPointerDown={(event) => { event.stopPropagation(); setOutputPreview(""); event.currentTarget.setPointerCapture(event.pointerId); setDrag({ region: "game", mode: "resize", startX: event.clientX, startY: event.clientY, box: gameBox }); }} />
+        </div>
+        <div className="facecam-selection camera-region" style={{ left: facecamBox.x + "%", top: facecamBox.y + "%", width: facecamBox.w + "%", height: facecamBox.h + "%" }} onPointerDown={(event) => { event.stopPropagation(); setOutputPreview(""); event.currentTarget.setPointerCapture(event.pointerId); setDrag({ region: "facecam", mode: "move", startX: event.clientX, startY: event.clientY, box: facecamBox }); }}>
+          <span>FACECAM</span><button type="button" aria-label="Resize facecam region" className="facecam-resize" onPointerDown={(event) => { event.stopPropagation(); setOutputPreview(""); event.currentTarget.setPointerCapture(event.pointerId); setDrag({ region: "facecam", mode: "resize", startX: event.clientX, startY: event.clientY, box: facecamBox }); }} />
+        </div>
+      </div><small className="facecam-editor-hint"><b>Pink:</b> facecam (top panel). <b>Cyan:</b> gameplay capture (bottom panel). Drag either box to move; use its corner handle to resize.</small>
+      <div className="facecam-editor-actions">
+        <Button onClick={() => { setFacecamBox({ x: 70, y: 4, w: 29, h: 37 }); setGameBox({ x: 23.6, y: 0, w: 52.8, h: 100 }); setOutputPreview(""); setFacecamResult(null); }}>Reset both regions</Button>
+        <Button kind="primary" onClick={() => { update({ cam_x: Number(facecamBox.x.toFixed(1)), cam_y: Number(facecamBox.y.toFixed(1)), cam_w: Number(facecamBox.w.toFixed(1)), cam_h: Number(facecamBox.h.toFixed(1)), game_area_x: Number(gameBox.x.toFixed(1)), game_area_y: Number(gameBox.y.toFixed(1)), game_area_w: Number(gameBox.w.toFixed(1)), game_area_h: Number(gameBox.h.toFixed(1)) } as Partial<AppSettings>); window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "success", title: "Framing saved", message: "Both facecam and game capture regions will be used by the renderer." } })); }}>Save framing</Button>
+      </div></div> : <div className="facecam-empty"><Video size={22}/><strong>Load a frame to set up both regions</strong><small>Automatic detection finds the facecam; the game capture region can be moved and resized independently.</small></div>}
+      <div className="facecam-layout-values"><span>Facecam <b>{facecamBox.x.toFixed(1)}%, {facecamBox.y.toFixed(1)}% · {facecamBox.w.toFixed(1)} × {facecamBox.h.toFixed(1)}%</b></span><span>Game <b>{gameBox.x.toFixed(1)}%, {gameBox.y.toFixed(1)}% · {gameBox.w.toFixed(1)} × {gameBox.h.toFixed(1)}%</b></span></div>
     </Panel>
 
     <div className="studio-workspace-layout">
@@ -588,11 +668,21 @@ function LivePage({ workspace, busy, post }: { workspace: Workspace; busy: strin
       </div>
       <div className="studio-runbar-actions">
         <span className="studio-runbar-save">{workspace.saving ? "Saving..." : workspace.saveError || ""}</span>
-        <Button onClick={() => void preview()} disabled={!target.trim() || !!busy}><Eye size={15} />Preview source</Button>
-        {!running ? <Button kind="primary" onClick={() => void start()} disabled={!target.trim() || !!busy || workspace.saving || !workspace.configLoaded}><Play size={15} fill="currentColor" />Start capture</Button> : <Button kind="danger" onClick={() => void stop()} disabled={!!busy}><Square size={14} fill="currentColor" />Stop capture</Button>}
+        <Button onClick={() => void previewOutput()} disabled={!sourceTarget.trim() || !!busy}><Eye size={15} />Preview clip</Button>
+        {!running ? <Button kind="primary" onClick={() => void start()} disabled={!sourceTarget.trim() || !!busy || workspace.saving || !workspace.configLoaded}><Play size={15} fill="currentColor" />Start capture</Button> : <Button kind="danger" onClick={() => void stop()} disabled={!!busy}><Square size={14} fill="currentColor" />Stop capture</Button>}
       </div>
     </div>
-    {frame ? <Panel title="Source preview" action={<Button kind="quiet" size="small" onClick={() => setFrame("")}>Close</Button>}><img className="source-frame" src={frame} alt="Preview frame from the selected source" /></Panel> : null}
+    {outputPreview ? <Panel title={outputPreviewCreator + " · Rendered clip preview"} action={<Button kind="quiet" size="small" onClick={() => setOutputPreview("")}>Close</Button>}>
+      <div className="clip-output-preview">
+        <div className="clip-output-preview-viewport"><video src={outputPreview} controls autoPlay loop muted playsInline preload="auto" aria-label={"Rendered clip preview for " + outputPreviewCreator} /></div>
+        <div className="clip-output-preview-copy">
+          <span className="clip-output-preview-kicker">PLAYABLE OUTPUT PREVIEW · 2.5 SEC</span>
+          <strong>{String(settings.output_format || "9:16")} · {String(settings.layout || "Facecam + game (Twitch)")}</strong>
+          <p>This short video is rendered from the selected creator's own source using the same crop, layout, and caption-rendering pipeline as saved clips.</p>
+          <p>The sample words are illustrative. Real clips use detected speech and your selected caption style and position. Preview audio is muted; the final clip keeps its processed audio.</p>
+        </div>
+      </div>
+    </Panel> : null}
   </div>;
 }
 
@@ -871,6 +961,16 @@ function SettingsPage({ workspace, theme, setTheme, busy, post, navigate }: { wo
 }
 function GeneralSettings({ workspace, busy, post }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
   const settings = workspace.settings || {};
+  const [componentCheck, setComponentCheck] = useState<RecordLike | null>(null);
+  const [componentCheckBusy, setComponentCheckBusy] = useState(false);
+  const [componentCheckError, setComponentCheckError] = useState("");
+  const checkComponents = async () => {
+    setComponentCheckBusy(true);
+    setComponentCheckError("");
+    try { setComponentCheck(await apiPost<RecordLike>("/api/check_updates", {})); }
+    catch (error) { setComponentCheckError(error instanceof Error ? error.message : "Component check failed."); }
+    finally { setComponentCheckBusy(false); }
+  };
   const update = (key: string, value: string | number | boolean) => workspace.updateSettings({ [key]: value });
   const browse = async (key: "out_dir" | "rec_dir") => {
     const result = await post<{ path: string }>("browse-" + key, "/api/browse_folder", {});
@@ -884,7 +984,7 @@ function GeneralSettings({ workspace, busy, post }: { workspace: Workspace; busy
       <div className="form-actions"><Button onClick={() => void post("open-output-folder", "/api/open_folder", {})}><FolderOpen size={15} />Open clip folder</Button></div>
     </Panel>
     <Panel title="Application updates" description="Check the repository and local components for available updates.">
-      <div className="update-actions"><Button onClick={() => void post("check-app-updates", "/api/check_app_update", {})} disabled={!!busy}><RefreshCw size={15} />Check app update</Button><Button onClick={() => void post("check-components", "/api/check_updates", {})} disabled={!!busy}><RefreshCw size={15} />Check components</Button><Button onClick={() => void post("update-components", "/api/update_components", {})} disabled={!!busy}><Download size={15} />Update components</Button></div>
+      <div className="update-actions"><Button onClick={async () => { const result = await post<RecordLike>("check-app-updates", "/api/check_app_update", {}); if (!result) return; if (!result.update) { window.alert("StreamSnip AI is up to date (v" + String(result.current) + ")."); return; } const release = String(result.url || "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"); const installer = String(result.installer_url || ""); const prompt = "StreamSnip AI v" + String(result.latest) + " is available (you have v" + String(result.current) + ").\\n\\n" + (installer ? "Download the installer and run it to update the existing installation. It uses the same Windows installer identity and install folder, so it upgrades over the current app." : "No Windows setup installer was attached to this release yet. Open the release page to download it when available.") + "\\n\\nOpen the download now?"; if (window.confirm(prompt)) window.open(installer || release, "_blank", "noopener,noreferrer"); }} disabled={!!busy}><RefreshCw size={15} />Check app update</Button><Button onClick={() => void checkComponents()} disabled={componentCheckBusy || !!busy}><RefreshCw size={15} />{componentCheckBusy ? "Checking components…" : "Check components"}</Button><Button onClick={() => void post("update-components", "/api/update_components", {})} disabled={!!busy}><Download size={15} />Update components</Button></div>{componentCheckError ? <div className="inline-error" role="alert">{componentCheckError}</div> : null}{componentCheck ? <div className="component-check-results" role="status"><div className="component-check-heading"><strong>Component check complete</strong><small>{String(componentCheck.checked_at || "")}</small></div>{Array.isArray(componentCheck.items) ? componentCheck.items.map((item: RecordLike) => <div className="component-check-row" key={String(item.name)}><span><strong>{String(item.name)}</strong><small>{String(item.current || "Unknown")} {item.latest && item.latest !== "Unknown" ? "→ " + String(item.latest) : ""}{item.note ? " · " + String(item.note) : ""}</small></span><StatusPill tone={item.update ? "warning" : item.current === "Not installed" || item.current === "Not available" ? "danger" : "success"}>{item.update ? "Update available" : item.current === "Not installed" || item.current === "Not available" ? "Missing" : "Checked"}</StatusPill></div>) : <small>No component details returned.</small>}</div> : null}
     </Panel>
     <div className="save-status">{workspace.saving ? "Saving…" : workspace.savedAt ? "Saved " + dateLabel(workspace.savedAt / 1000) : "Settings save automatically."}{workspace.saveError ? <span className="danger-text">{workspace.saveError}</span> : null}</div>
   </>;
@@ -899,7 +999,7 @@ function CaptureSettings({ workspace }: { workspace: Workspace }) {
       <Field label="Seconds before highlight"><input type="number" min="3" max="90" value={num(settings.pre, 20)} onChange={(event) => update({ pre: Number(event.target.value) })} /></Field>
       <Field label="Seconds after highlight"><input type="number" min="3" max="90" value={num(settings.post, 15)} onChange={(event) => update({ post: Number(event.target.value) })} /></Field>
       <Field label="Minimum highlight score"><input type="number" min="0" max="100" step="0.5" value={num(settings.min_score, 70)} onChange={(event) => update({ min_score: Number(event.target.value) })} /></Field>
-      <Field label="Capture bitrate (Kbps)"><input type="number" min="6000" max="50000" step="500" value={num(settings.capture_bitrate_kbps, 6000)} onChange={(event) => update({ capture_bitrate_kbps: Number(event.target.value) })} /></Field>
+      <Field label="Capture bitrate (Kbps)"><input type="number" min="8000" max="50000" step="500" value={num(settings.capture_bitrate_kbps, 8000)} onChange={(event) => update({ capture_bitrate_kbps: Number(event.target.value) })} /></Field>
     </div>
     <div className="save-status">{workspace.saving ? "Saving changes…" : "Capture defaults save automatically."}</div>
   </Panel>;
@@ -975,48 +1075,16 @@ function RangeSetting({ label, value, min, max, step = 1, onChange }: {
 function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mode: string; target: string }) {
   const settings = workspace.settings || {};
   const update = (patch: Partial<AppSettings>) => workspace.updateSettings(patch);
-  const [previewFrame, setPreviewFrame] = useState("");
-  const [previewBusy, setPreviewBusy] = useState(false);
-  const [previewError, setPreviewError] = useState("");
-  const loadFrame = async () => {
-    setPreviewBusy(true);
-    setPreviewError("");
-    try {
-      const result = await apiPost<{ image: string }>("/api/frame", { mode, target });
-      setPreviewFrame(result.image || "");
-    } catch (reason) {
-      setPreviewError(reason instanceof Error ? reason.message : "Could not read a frame from this source.");
-    } finally {
-      setPreviewBusy(false);
-    }
-  };
   const layout = String(settings.layout || "Facecam + game (Twitch)");
   const cropX = num(settings.crop_x, 34.2);
   const cropY = num(settings.crop_y, 0);
   const cropW = num(settings.crop_w, 31.6);
   const cropH = num(settings.crop_h, 100);
-  const camX = num(settings.cam_x, 70);
-  const camY = num(settings.cam_y, 4);
-  const camW = num(settings.cam_w, 29);
-  const camH = num(settings.cam_h, 37);
   const detectedTag = mode === "live" ? inferCreatorTag(target) : "";
   const setRange = (key: string, value: number) => update({ [key]: value });
   return <div className="page-stack compact-stack">
     <Panel title="Video layout" description="Set the output aspect ratio and framing preset used when rendering clips.">
       <div className="settings-grid"><Field label="Output format"><select value={String(settings.output_format || "9:16")} onChange={(event) => update({ output_format: event.target.value })}>{["9:16", "16:9", "1:1", "4:5"].map((format) => <option key={format}>{format}</option>)}</select></Field><Field label="Layout preset"><select value={String(settings.layout || "Facecam + game (Twitch)")} onChange={(event) => update({ layout: event.target.value })}>{["Facecam + game (Twitch)", "Blur background", "Fill (crop center)", "Selected crop"].map((layout) => <option key={layout}>{layout}</option>)}</select></Field></div>
-    </Panel>
-    <Panel title="Framing preview" description="Load one still frame to position the crop or facecam area. This does not start a recording or creator monitor.">
-      <div className="framing-source-summary">
-        <span><strong>{mode === "live" ? "Live stream source" : "Video file source"}</strong><small title={target}>{target || "Choose a source in the panel above."}</small></span>
-        <Button kind="primary" onClick={() => void loadFrame()} disabled={previewBusy || !target.trim()}><Eye size={14} />{previewBusy ? "Loading frame..." : "Load preview"}</Button>
-      </div>
-      {previewError ? <p className="framing-error" role="alert">{previewError}</p> : null}
-      {previewFrame ? <div className="framing-stage">
-        <img src={previewFrame} alt="Still frame from the selected source" />
-        {layout === "Selected crop" ? <div className="framing-overlay framing-crop" style={{ left: cropX + "%", top: cropY + "%", width: cropW + "%", height: cropH + "%" }} /> : null}
-        {layout === "Facecam + game (Twitch)" ? <div className="framing-overlay framing-camera" style={{ left: camX + "%", top: camY + "%", width: camW + "%", height: camH + "%" }} /> : null}
-      </div> : <div className="framing-placeholder"><Eye size={19} /><strong>No preview loaded</strong><span>Choose a source and load one frame to see the selected area.</span></div>}
-      <p className="framing-note">The preview is a still frame only. Adjustments save automatically and apply to future renders.</p>
     </Panel>
     {layout === "Selected crop" ? <Panel title="Selected crop area" description="Set the crop rectangle as percentages of the source frame.">
       <div className="framing-range-grid">
@@ -1027,28 +1095,22 @@ function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mo
       </div>
       <div className="form-actions"><Button onClick={() => update({ crop_x: 34.2, crop_y: 0, crop_w: 31.6, crop_h: 100 })}>Reset crop area</Button></div>
     </Panel> : null}
-    {layout === "Facecam + game (Twitch)" ? <Panel title="Facecam and game framing" description="Position the facecam region and set the game split point.">
-      <div className="framing-range-grid">
-        <RangeSetting label="Facecam left" value={camX} min={0} max={90} step={0.5} onChange={(value) => setRange("cam_x", value)} />
-        <RangeSetting label="Facecam top" value={camY} min={0} max={90} step={0.5} onChange={(value) => setRange("cam_y", value)} />
-        <RangeSetting label="Facecam width" value={camW} min={10} max={Math.max(10, 100 - camX)} step={0.5} onChange={(value) => setRange("cam_w", value)} />
-        <RangeSetting label="Facecam height" value={camH} min={10} max={Math.max(10, 100 - camY)} step={0.5} onChange={(value) => setRange("cam_h", value)} />
-        <RangeSetting label="Game split point" value={num(settings.game_x, 50)} min={0} max={100} step={0.5} onChange={(value) => setRange("game_x", value)} />
+    <Panel title="Caption style" description="Preset captions are the default. Switch to Custom caption only when you want to override the standard styling and placement.">
+      <div className="caption-mode-switch" role="group" aria-label="Caption editing mode">
+        <button type="button" className={!settings.subtitle_custom ? "selected" : ""} onClick={() => update({ subtitle_custom: false })}><Check size={14}/>Preset captions <small>Default</small></button>
+        <button type="button" className={settings.subtitle_custom ? "selected" : ""} onClick={() => update({ subtitle_custom: true })}><SlidersHorizontal size={14}/>Custom caption</button>
       </div>
-      <div className="form-actions"><Button onClick={() => update({ cam_x: 70, cam_y: 4, cam_w: 29, cam_h: 37, game_x: 50 })}>Reset facecam framing</Button></div>
-    </Panel> : null}
-    <Panel title="Caption style" description="Choose subtitle mode and the appearance of rendered words.">
       <div className="settings-grid">
         <Field label="Subtitle mode"><select value={String(settings.subtitle_mode || "Karaoke")} onChange={(event) => update({ subtitle_mode: event.target.value })}><option>Karaoke</option><option>Classic</option></select></Field>
-        <Field label="Subtitle preset"><select value={String(settings.subtitle_style || "Classic")} onChange={(event) => update({ subtitle_style: event.target.value })}>{["Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"].map((style) => <option key={style}>{style}</option>)}</select></Field>
-        <Field label="Font"><input value={String(settings.font || "Impact")} onChange={(event) => update({ font: event.target.value })} /></Field>
-        <Field label="Base font size"><input type="number" min="60" max="150" value={num(settings.caption_size, 100)} onChange={(event) => update({ caption_size: Number(event.target.value) })} /></Field>
+        <Field label="Subtitle style"><select value={String(settings.subtitle_style || "GTA Neon")} onChange={(event) => update({ subtitle_style: event.target.value })}>{["GTA Neon", "Classic", "Hormozi", "Neon", "MrBeast", "Minimal", "Fire"].map((style) => <option key={style}>{style}</option>)}</select></Field>
+        <Field label="Caption animation"><select value={String(settings.subtitle_animation || "highlight")} onChange={(event) => update({ subtitle_animation: event.target.value })}><option value="highlight">Highlight — keep phrase visible</option><option value="pop_in">Pop-in — build phrase word by word</option><option value="pop_in_line">Pop-in line — animate the whole phrase</option><option value="one_by_one">One by one — show only the current word</option><option value="build_up">Build up — accumulate words without popping</option><option value="full_line">Full line — show the complete phrase</option></select></Field>
+        <Field label="Base font size"><input type="number" min="60" max="150" value={num(settings.caption_size, 82)} onChange={(event) => update({ caption_size: Number(event.target.value) })} /></Field>
         <Field label="Words per line"><input type="number" min="1" max="4" value={num(settings.words_per_line, 3)} onChange={(event) => update({ words_per_line: Number(event.target.value) })} /></Field>
-        <Field label="Caption position"><select value={String(settings.position || "Lower third")} onChange={(event) => update({ position: event.target.value })}><option>Lower third</option><option>Middle</option><option>Low</option></select></Field>
         <Field label="Highlight color"><select value={String(settings.color || "Yellow")} onChange={(event) => update({ color: event.target.value })}>{["Yellow", "Green", "Cyan", "Orange", "Pink"].map((color) => <option key={color}>{color}</option>)}</select></Field>
+        {!settings.subtitle_custom ? <Field label="Caption location preset"><select value={String(settings.position || "Lower third")} onChange={(event) => update({ position: event.target.value })}><option>Top</option><option>Upper third</option><option>Middle</option><option>Lower third</option><option>Bottom</option></select></Field> : null}
       </div>
-      <Toggle checked={Boolean(settings.subtitle_custom)} onChange={(value) => update({ subtitle_custom: value })} label="Use custom subtitle controls" description="Override preset defaults for size, colors, position, and alignment." />
-      {settings.subtitle_custom ? <div className="settings-grid">
+      {settings.subtitle_custom ? <div className="settings-grid custom-caption-controls">
+        <Field label="Font family"><input value={String(settings.font || "Impact")} onChange={(event) => update({ font: event.target.value })} /></Field>
         <Field label="Custom font size"><input type="number" min="60" max="180" value={num(settings.subtitle_font_size, 100)} onChange={(event) => update({ subtitle_font_size: Number(event.target.value) })} /></Field>
         <Field label="Vertical nudge"><input type="number" min="-400" max="400" value={num(settings.subtitle_nudge, 0)} onChange={(event) => update({ subtitle_nudge: Number(event.target.value) })} /></Field>
         <Field label="Text color"><input type="color" value={String(settings.subtitle_text_color || "#FFFFFF")} onChange={(event) => update({ subtitle_text_color: event.target.value })} /></Field>
@@ -1056,12 +1118,28 @@ function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mo
         <Field label="Position"><select value={String(settings.subtitle_position || "Bottom")} onChange={(event) => update({ subtitle_position: event.target.value })}><option>Top</option><option>Center</option><option>Bottom</option></select></Field>
         <Field label="Alignment"><select value={String(settings.subtitle_alignment || "Center")} onChange={(event) => update({ subtitle_alignment: event.target.value })}><option>Left</option><option>Center</option></select></Field>
       </div> : null}
+      <div className="caption-preview-layout">
+        <div className="caption-preview-copy">
+          <strong>Caption preview</strong>
+          <p>{settings.subtitle_custom ? "Custom position and styling are active." : "This preview follows the selected location preset."} The sample updates as you change settings.</p>
+          <span className="caption-preview-meta">{String(settings.subtitle_style || "GTA Neon")} ? {String(settings.position || "Lower third")} ? {String(settings.subtitle_animation || "highlight").replace(/_/g, " ")}</span>
+        </div>
+        <div className="caption-preview-phone" aria-label="Caption placement preview">
+          <div className="caption-preview-top"><span>FACECAM</span></div>
+          <div className="caption-preview-game"><span>GAME CAPTURE</span></div>
+          <div className={"caption-preview-words style-" + String(settings.subtitle_style || "GTA Neon").toLowerCase().replace(/\s+/g, "-") + " location-" + (settings.subtitle_custom ? String(settings.subtitle_position || "Bottom").toLowerCase() : String(settings.position || "Lower third").toLowerCase().replace(/\s+/g, "-"))}
+            style={{ color: settings.subtitle_custom ? String(settings.subtitle_text_color || "#FFFFFF") : "inherit", WebkitTextStroke: settings.subtitle_custom ? "0.5px " + String(settings.subtitle_stroke_color || "#000000") : "0.5px #301045", fontFamily: String(settings.font || "Impact"), fontSize: Math.max(11, num(settings.subtitle_custom ? settings.subtitle_font_size : settings.caption_size, 82) * 0.15) + "px" }}>
+            <span>NO WAY</span> <b>THAT JUST HAPPENED</b>
+          </div>
+        </div>
+      </div>
     </Panel>
     <Panel title="Creator credit and profanity filter" description="Control the credit overlay and how detected profanity is treated.">
       <Field label="Creator credit" hint={settings.streamer_tag ? "Manual creator credit override." : detectedTag ? "Auto-detected as " + detectedTag + ". Edit to set an override; clear the field to return to automatic detection." : "A channel handle is inferred when the source URL exposes one."}><input maxLength={80} value={String(settings.streamer_tag || detectedTag)} onChange={(event) => update({ streamer_tag: event.target.value })} placeholder="Auto-detected from source URL" /></Field>
       <Toggle checked={Boolean(settings.show_tag_video)} onChange={(value) => update({ show_tag_video: value })} label="Show creator tag in the video" />
-      <Toggle checked={Boolean(settings.profanity_filter_enabled)} onChange={(value) => update({ profanity_filter_enabled: value })} label="Filter detected profanity" description="Detected words are masked in captions and muted in rendered audio." />
-      <Field label="Additional words to filter"><textarea rows={5} value={String(settings.profanity_filter_words || "")} onChange={(event) => update({ profanity_filter_words: event.target.value })} /></Field>
+      <Toggle checked={Boolean(settings.profanity_filter_enabled)} onChange={(value) => update({ profanity_filter_enabled: value })} label="Filter detected profanity" description="Detected words become **** in captions. Only the matching word is replaced in audio; surrounding speech stays unchanged." />
+      {settings.profanity_filter_enabled ? <Field label="Audio treatment"><select value={String(settings.profanity_audio_mode || "beep")} onChange={(event) => update({ profanity_audio_mode: event.target.value })}><option value="beep">Beep — replace the word with a tone</option><option value="mute">Mute — silence the word</option></select><small className="field-hint">Applied only to detected word timestamps. Beep is the default.</small></Field> : null}
+      <Field label="Additional words and phrases to filter"><textarea rows={5} value={String(settings.profanity_filter_words || "")} onChange={(event) => update({ profanity_filter_words: event.target.value })} placeholder="Add one word or phrase per line" /><small className="field-hint">Built-in profanity coverage is included automatically. Add streamer-specific spellings or phrases here, one per line.</small></Field>
     </Panel>
   </div>;
 }
@@ -1074,12 +1152,28 @@ function AppearanceSettings({ theme, setTheme }: { theme: ThemeId; setTheme: (th
 }
 function HelpPage({ navigate }: { navigate: (page: PageId) => void }) {
   return <div className="page-stack">
-    <PageHeading title="Help" description="A practical guide to the local capture and review workflow." />
+    <PageHeading title="Help & how-to" description="Setup walkthroughs, workflow guides, troubleshooting, and what each part of StreamSnip AI does." />
+    <Panel title="Quick start: first clip" description="Follow this order the first time you use the app.">
+      <ol className="help-steps">
+        <li><strong>Connect your source.</strong> Open Live Studio, choose Live stream or Video file, then paste a Twitch/YouTube URL or select a local video.</li>
+        <li><strong>Set up AI.</strong> In the AI tab, choose Gemini (recommended API provider), add your Google AI Studio API key, choose a model, and use Test provider. Keep a model that passes; it remains selected for future jobs.</li>
+        <li><strong>Choose transcription.</strong> Faster-Whisper runs locally. Select a model and language (Auto detects); the speech model may download the first time.</li>
+        <li><strong>Set framing and captions.</strong> Load a still frame in Facecam detection and layout. Drag the pink facecam box and cyan game-capture box independently, then save both regions. In Captions, choose one of four location presets or switch to Custom caption and review the placement preview.</li>
+        <li><strong>Start processing.</strong> Confirm the source and settings, then explicitly press Start. Watch progress in Studio and Activity.</li>
+        <li><strong>Review and publish.</strong> Open Clip library, edit the TXT-backed title/description, then use Publishing for Zernio or manual browser upload.</li>
+      </ol>
+      <Button kind="primary" onClick={() => navigate("live")}>Open Live Studio setup <ArrowRight size={14} /></Button>
+    </Panel>
     <div className="help-grid">
-      <Panel title="1. Choose a source" description="Use Live Studio for a Twitch or YouTube stream, or choose a local VOD file."><p>Starting capture is always an explicit action. The engine checks the source, records or processes it, and reports each stage in the workspace.</p><Button onClick={() => navigate("live")}>Open Live Studio<ArrowRight size={14} /></Button></Panel>
-      <Panel title="2. Monitor creators" description="Save channels once, then start live monitoring or watch a dedicated VOD folder."><p>Each creator keeps separate live clips, recordings, a VOD inbox, processed VODs, and failed VODs. Existing files are kept when a monitor is removed.</p><Button onClick={() => navigate("creators")}>Manage creators<ArrowRight size={14} /></Button></Panel>
-      <Panel title="3. Review clips" description="Generated clips appear in the library with matching TXT metadata."><p>Edit the title and description before publishing. A clip can be downloaded or shown in its local folder.</p><Button onClick={() => navigate("clips")}>Open clip library<ArrowRight size={14} /></Button></Panel>
-      <Panel title="4. Publish" description="Choose Zernio or prepare a manual browser upload."><p>Zernio jobs run through the configured provider. Manual handoff opens your default browser; you select the video and complete the final Publish action yourself.</p><Button onClick={() => navigate("publishing")}>Open publishing<ArrowRight size={14} /></Button></Panel>
+      <Panel title="Live stream capture" description="Monitor a live Twitch or YouTube stream."><p>Paste the channel or stream URL. The engine records in chunks, transcribes each chunk, scores highlight moments, and renders clips with your caption layout. Stop capture from Live Studio; graceful stop finishes current work where possible.</p><Button onClick={() => navigate("live")}>Live Studio</Button></Panel>
+      <Panel title="Recorded video / VOD" description="Process a local video file."><p>Choose the file source, set the desired processing options, and start. The engine transcribes the video, analyzes transcript windows, then renders selected moments. Keep enough disk space for source and output files.</p><Button onClick={() => navigate("live")}>File processing setup</Button></Panel>
+      <Panel title="Gemini model rotation & fallback" description="A working model stays preferred; failures trigger recovery."><p>Gemini is tried first. The engine retries a model, rotates through available Gemini API models after repeated failures, and remembers the model that succeeds for later windows and future videos. Only when Gemini rotation is exhausted does it try configured fallback providers (local Ollama first, then configured Hugging Face or custom API). A fallback is announced in Activity and is temporary: Gemini remains your selected provider and is retried on the next video/task.</p><p>For the best fallback coverage, install Ollama and download a model, or configure another provider in AI settings.</p></Panel>
+      <Panel title="Creators & multi-monitor" description="Save channels and run independent monitor jobs."><p>Add a Twitch or YouTube channel in Creators. Each creator has isolated live/VOD folders and status. Start or stop each monitor individually; stop all before closing the app. Removing a profile does not delete its existing media.</p><Button onClick={() => navigate("creators")}>Manage creators</Button></Panel>
+      <Panel title="Transcription & captions" description="Speech recognition and visual subtitle rendering."><p>Faster-Whisper uses your PC and compatible NVIDIA GPU acceleration. Larger models can improve recognition but use more VRAM and time. Facecam (pink) and game capture (cyan) are independent source-frame regions in Live Studio. Caption placement offers Top, Upper third, Lower third, and Bottom presets; Custom caption exposes manual size, color, stroke, alignment, and nudge controls.</p><Button onClick={() => navigate("live")}>Configure framing and captions</Button></Panel>
+      <Panel title="Clip library & metadata" description="Find, edit, and organize generated clips."><p>Clips include a video and matching text metadata. Gemini, Ollama, Hugging Face, and compatible custom models generate both title and description from the clip transcript. Built-in Hook words mode uses its strongest matched phrase as the title and a conservative transcript-based description. Search the library, preview, edit title/description, open the containing folder, download, or mark a clip published. Published is a local registry; it does not prove a platform post unless publishing reports success.</p><Button onClick={() => navigate("clips")}>Open clip library</Button></Panel>
+      <Panel title="Publishing" description="Automated scheduling or manual upload."><p>Save your Zernio key, load connected accounts, select accounts, and save defaults. Queueing sends a job through Zernio. Manual upload opens the platform in your default browser; select the file and complete the final publish action yourself.</p><Button onClick={() => navigate("publishing")}>Publishing settings</Button></Panel>
+      <Panel title="Settings & component checks" description="Storage, app updates, and runtime versions."><p>Settings controls output/recording folders and appearance. Check app update queries the latest GitHub release. Check components reads installed FFmpeg, Python package versions and the selected Whisper model cache; it is read-only and does not install anything. Update components changes packages and may download the speech model—review the confirmation first.</p><Button onClick={() => navigate("settings")}>Open Settings</Button></Panel>
+      <Panel title="Troubleshooting" description="Common issues and where to look."><p><strong>Source won’t open:</strong> verify the URL, stream is live/public, and Streamlink/FFmpeg are available. <strong>AI test fails:</strong> check API key, model availability, quota, and network; review Activity. <strong>Clips are missing:</strong> check output folder and Activity errors. <strong>Slow processing:</strong> use a smaller Whisper model, reduce parallel workload, and check GPU/VRAM. <strong>Disk full:</strong> move output/recording folders in Settings.</p><Button onClick={() => navigate("activity")}>Open Activity log</Button></Panel>
     </div>
   </div>;
 }

@@ -326,8 +326,20 @@ try {
     Write-Host "StreamSnip AI setup" -ForegroundColor Cyan
     Write-Host "Setup log: $logPath"
     Request-HuggingFaceToken
-    if (-not (Test-Path $main) -or -not (Test-Path $requirements)) {
-        throw "The StreamSnip AI source files are incomplete. Reinstall the application and try again."
+    $requiredSourceFiles = @(
+        "autoclip.py",
+        "ai_highlights.py",
+        "post_metadata.py",
+        "zernio_poster.py",
+        "browser_automation.py",
+        "facecam_detect.py",
+        "requirements.txt",
+        "models\face_detection_yunet_2023mar.onnx",
+        "dashboard\dist\index.html"
+    )
+    $missingSourceFiles = @($requiredSourceFiles | Where-Object { -not (Test-Path (Join-Path $source $_)) })
+    if ($missingSourceFiles.Count -gt 0) {
+        throw ("The StreamSnip AI package is incomplete. Missing: " + ($missingSourceFiles -join ", ") + ". Reinstall the application.")
     }
 
     $python = Find-SupportedPython
@@ -356,7 +368,7 @@ try {
         $requirementsHash = (Get-FileHash $requirements -Algorithm SHA256).Hash.ToLowerInvariant()
         $expectedMarker = "$RuntimeSchema|$requirementsHash"
         $savedMarker = if (Test-Path $runtimeMarker) { (Get-Content $runtimeMarker -Raw).Trim() } else { "" }
-        $dependencyProbe = & $runtimePython -c "import importlib.util,sys; sys.exit(0 if all(importlib.util.find_spec(x) for x in ('numpy','faster_whisper','streamlink')) else 1)" 2>$null
+        $dependencyProbe = & $runtimePython -c "import importlib.util,sys; sys.exit(0 if all(importlib.util.find_spec(x) for x in ('numpy','faster_whisper','streamlink','cv2')) else 1)" 2>$null
         $dependenciesReady = ($LASTEXITCODE -eq 0)
         if ($savedMarker -ne $expectedMarker -or -not $dependenciesReady) {
             Write-Host "Installing StreamSnip AI dependencies. The first setup can take several minutes..." -ForegroundColor Cyan
@@ -366,7 +378,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Could not install StreamSnip AI dependencies." }
             & $runtimePython -m pip check
             if ($LASTEXITCODE -ne 0) { throw "The installed Python dependencies are inconsistent." }
-            & $runtimePython -c "import numpy, faster_whisper, streamlink"
+            & $runtimePython -c "import numpy, faster_whisper, streamlink, cv2"
             if ($LASTEXITCODE -ne 0) { throw "A required StreamSnip AI package could not be loaded after installation." }
             Set-Content -Path $runtimeMarker -Value $expectedMarker -Encoding ASCII
         } else {

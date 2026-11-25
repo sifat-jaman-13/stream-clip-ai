@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stream-clip-ai"
-version = "3.0.0"
+version = "4.0.0"
 description = "Local-first Twitch, YouTube, and VOD clipper with Whisper transcription, optional AI highlights, captions, FFmpeg rendering, and Zernio publishing"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.24",
+  "opencv-contrib-python-headless>=4.10,<5",
   "faster-whisper==1.2.1",
   "fastapi>=0.115,<1.0",
   "uvicorn>=0.34,<1.0",
@@ -57,7 +58,10 @@ Download = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 Security = "https://github.com/sifat-jaman-13/stream-clip-ai/security/policy"
 
 [tool.setuptools]
-py-modules = ["autoclip", "api_server", "ai_highlights", "post_metadata", "zernio_poster"]
+py-modules = ["autoclip", "api_server", "ai_highlights", "post_metadata", "zernio_poster", "facecam_detect"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.setuptools.data-files]
+"models" = ["models/face_detection_yunet_2023mar.onnx"]

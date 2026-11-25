@@ -2,13 +2,15 @@
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets', 'assets')]
+datas = [('assets', 'assets'), ('models/face_detection_yunet_2023mar.onnx', 'models'), ('LICENSE-NeonClipping.txt', '.'), ('LICENSE-YuNet.txt', '.')]
 binaries = []
 hiddenimports = []
 hiddenimports += collect_submodules('streamlink')
 hiddenimports += collect_submodules('streamlink_cli')
 hiddenimports += collect_submodules('zernio_poster')
-hiddenimports += ['ai_highlights', 'api_server', 'post_metadata', 'tkinter', 'tkinter.filedialog']
+hiddenimports += ['ai_highlights', 'api_server', 'post_metadata', 'facecam_detect', 'tkinter', 'tkinter.filedialog']
+tmp_ret = collect_all('cv2')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('faster_whisper')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('ctranslate2')

@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#090b0e">
-  <meta name="description" content="StreamSnip AI is a local-first creator clipping studio. The upcoming 4.0 update brings multi-creator live monitoring, separate VOD workflows, direct Zernio publishing, and bring-your-own transcription.">
+  <meta name="theme-color" content="#171c23">
+  <meta name="description" content="StreamSnip AI v4.0.4 — a local-first creator clipping studio for Windows. Capture live streams, process recorded VODs, detect facecams locally, render captioned shorts, and publish through Zernio.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="StreamSnip AI — Find the moment. Make it a clip.">
-  <meta property="og:description" content="A local-first creator studio. Capture multiple live streams, clip recorded VODs separately, bring your own transcriber, and publish directly through Zernio.">
+  <meta property="og:description" content="Local-first Twitch and YouTube clipping studio with Faster-Whisper transcription, local YuNet facecam detection, AI highlight scoring, and Zernio publishing.">
   <meta property="og:url" content="https://sifat-jaman-13.github.io/stream-clip-ai/">
   <meta property="og:image" content="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/streamsnipai-social-card.svg">
   <meta property="og:image:type" content="image/svg+xml">
@@ -16,274 +16,766 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/streamsnipai-social-card.svg">
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/app-icon.png">
-  <title>StreamSnip AI — Find the moment. Make it a clip.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <title>StreamSnip AI — Local-First Creator Clipping Studio</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #090b0e;
-      --surface: #101419;
-      --surface-2: #151b21;
-      --surface-3: #1b232b;
-      --line: rgba(226, 236, 242, .10);
-      --line-strong: rgba(226, 236, 242, .17);
-      --text: #f4f6f2;
-      --muted: #9ba5aa;
-      --muted-2: #707c82;
-      --lime: #d4ff62;
-      --lime-ink: #17200a;
-      --violet: #b9a4ff;
-      --cyan: #7ee7db;
-      --radius: 22px;
+      --canvas: #171c23;
+      --bg: #1b2028;
+      --surface: #232b35;
+      --surface-elevated: #282c34;
+      --surface-hover: #2d3743;
+      --ink: #e8f0f4;
+      --body: #c8d5dc;
+      --muted: #9cdef2;
+      --quiet: #8aa3b0;
+      --line: #355a66;
+      --line-soft: rgba(156, 222, 242, 0.14);
+      --accent: #e06c75;
+      --accent-hover: #eb7d86;
+      --accent-ink: #17191e;
+      --success: #80c99a;
+      --warning: #e6b96f;
+      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+      --radius-panel: 14px;
+      --radius-control: 8px;
       --max: 1180px;
-      --shadow: 0 24px 90px rgba(0,0,0,.38);
+      --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", Consolas, monospace;
     }
+
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: 90px; }
+    html { scroll-behavior: smooth; scroll-padding-top: 84px; }
     body {
       margin: 0;
-      background:
-        radial-gradient(ellipse at 77% 9%, rgba(101, 128, 57, .13), transparent 31rem),
-        radial-gradient(ellipse at 4% 40%, rgba(107, 82, 178, .10), transparent 30rem),
-        var(--bg);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 15px;
       line-height: 1.6;
-      letter-spacing: -.012em;
       -webkit-font-smoothing: antialiased;
     }
+    ::selection { background: var(--accent); color: var(--accent-ink); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    * { scrollbar-color: var(--line) var(--canvas); scrollbar-width: thin; }
+
     a { color: inherit; text-decoration: none; }
-    button { font: inherit; }
+    button { font: inherit; color: inherit; cursor: pointer; }
     .wrap { width: min(var(--max), calc(100% - 48px)); margin-inline: auto; }
-    .announcement {
-      display: flex; justify-content: center; align-items: center; gap: 9px;
-      min-height: 38px; padding: 7px 18px; border-bottom: 1px solid var(--line);
-      color: #b8c1bc; font-size: 12px; letter-spacing: .025em; text-align: center;
-      background: rgba(10, 13, 16, .75);
+    .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    /* Top release bar */
+    .release-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 38px;
+      padding: 6px 16px;
+      background: #12171d;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 12px;
+      color: var(--body);
+      text-align: center;
     }
-    .announcement .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 12px rgba(212,255,98,.6); }
-    .announcement a { color: var(--lime); font-weight: 650; }
-    .nav-shell { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--line); background: rgba(9,11,14,.82); backdrop-filter: blur(18px); }
-    .nav { height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
-    .brand { display: inline-flex; align-items: center; gap: 11px; font-size: 16px; font-weight: 760; letter-spacing: -.04em; white-space: nowrap; }
-    .brand img { width: 35px; height: 35px; border-radius: 10px; object-fit: cover; }
-    .brand span span { color: var(--lime); }
-    .nav-links { display: flex; align-items: center; gap: 31px; color: #aab4b6; font-size: 13px; font-weight: 570; }
-    .nav-links a:hover, .text-link:hover { color: var(--lime); }
-    .nav-actions { display: flex; align-items: center; gap: 12px; }
-    .menu-toggle { display: none; width: 42px; height: 42px; border: 1px solid var(--line-strong); border-radius: 12px; background: transparent; color: var(--text); cursor: pointer; }
+    .release-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      flex: 0 0 auto;
+    }
+    .release-bar a {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .release-bar a:hover { color: var(--ink); }
+
+    /* Navigation */
+    .nav-shell {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: rgba(23, 28, 35, 0.88);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .nav {
+      height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-display);
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+    .brand img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      object-fit: cover;
+      border: 1px solid var(--line);
+    }
+    .brand-accent { color: var(--accent); }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      color: var(--body);
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .nav-links a { transition: color 150ms var(--ease-out); }
+    .nav-links a:hover { color: var(--muted); }
+    .nav-actions { display: flex; align-items: center; gap: 10px; }
+    .menu-toggle {
+      display: none;
+      width: 40px;
+      height: 40px;
+      place-items: center;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-control);
+    }
+
+    /* Buttons */
     .btn {
-      display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-      min-height: 48px; padding: 0 19px; border-radius: 12px; border: 1px solid transparent;
-      font-size: 13px; font-weight: 760; letter-spacing: -.01em; transition: transform .2s ease, border-color .2s ease, background .2s ease;
-      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 0 18px;
+      border-radius: var(--radius-control);
+      border: 1px solid transparent;
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), transform 130ms var(--ease-out);
     }
-    .btn:hover { transform: translateY(-2px); }
-    .btn-primary { background: var(--lime); color: var(--lime-ink); box-shadow: 0 7px 28px rgba(212,255,98,.12); }
-    .btn-primary:hover { background: #e0ff91; }
-    .btn-quiet { border-color: var(--line-strong); background: rgba(255,255,255,.025); color: var(--text); }
-    .btn-quiet:hover { border-color: rgba(212,255,98,.45); background: rgba(212,255,98,.06); }
-    .btn svg { width: 16px; height: 16px; }
-    .site-banner{display:block;width:min(100% - 44px,1180px);height:auto;margin:34px auto 0;border:1px solid var(--line);border-radius:20px;box-shadow:0 24px 65px rgba(0,0,0,.28)}.hero { padding: 42px 0 76px; overflow: hidden; }
-    .hero-grid { display: grid; grid-template-columns: .94fr 1.06fr; align-items: center; gap: 62px; }
-    .eyebrow { display: inline-flex; align-items: center; gap: 9px; color: var(--lime); text-transform: uppercase; font-size: 10px; font-weight: 820; letter-spacing: .17em; }
-    .eyebrow:before { content: ""; width: 21px; height: 1px; background: var(--lime); }
-    h1 { max-width: 640px; margin: 22px 0 20px; font-size: clamp(44px, 5.8vw, 72px); line-height: .99; letter-spacing: -.075em; font-weight: 790; }
-    h1 .accent { color: var(--lime); }
-    .hero-copy { max-width: 510px; color: #aab4b7; font-size: 17px; line-height: 1.75; }
-    .hero-actions { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 30px; }
-    .micro-note { display: flex; align-items: center; gap: 9px; margin-top: 19px; color: var(--muted-2); font-size: 11px; }
-    .micro-note svg { width: 14px; color: var(--lime); }
-    .visual-wrap { position: relative; min-width: 0; }
-    .visual-glow { position: absolute; inset: 10% 4% 3%; background: rgba(169, 190, 72, .14); filter: blur(75px); pointer-events: none; }
-    .app-window { position: relative; overflow: hidden; border: 1px solid rgba(220,237,220,.17); border-radius: 19px; background: #10151a; box-shadow: 0 35px 100px rgba(0,0,0,.55), 0 0 0 7px rgba(255,255,255,.018); transform: perspective(1400px) rotateY(-5deg) rotateX(2deg); }
-    .window-bar { height: 43px; display: flex; align-items: center; justify-content: space-between; padding: 0 15px; border-bottom: 1px solid var(--line); background: #141a20; }
-    .traffic { display: flex; gap: 5px; }
-    .traffic i { width: 7px; height: 7px; border-radius: 50%; background: #4c585e; }
-    .window-title { color: #7d898d; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
-    .live-status { display: flex; align-items: center; gap: 6px; color: #a6b3aa; font-size: 9px; font-weight: 700; }
-    .live-status:before { content:""; width: 6px; height: 6px; border-radius: 50%; background: #ff6464; box-shadow: 0 0 9px #ff6464; }
-    .app-body { display: grid; grid-template-columns: 148px 1fr; min-height: 340px; }
-    .app-side { padding: 17px 11px; border-right: 1px solid var(--line); background: #0e1318; }
-    .side-label { padding: 0 8px; color: #637078; font-size: 8px; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
-    .side-item { display: flex; align-items: center; gap: 9px; margin-top: 8px; padding: 9px 8px; border-radius: 8px; color: #849095; font-size: 10px; }
-    .side-item.active { background: rgba(212,255,98,.09); color: var(--lime); }
-    .side-item svg { width: 13px; height: 13px; }
-    .side-bottom { margin-top: 42px; padding: 10px 8px; border: 1px solid var(--line); border-radius: 9px; color: #7e8a8e; font-size: 9px; line-height: 1.5; }
-    .side-bottom b { display: block; color: #d2dbd2; font-size: 10px; }
-    .app-main { min-width: 0; padding: 17px 17px 20px; }
-    .session-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-    .session-kicker { color: #7f8b90; font-size: 8px; letter-spacing: .13em; text-transform: uppercase; }
-    .session-name { margin-top: 3px; font-size: 16px; font-weight: 740; letter-spacing: -.04em; }
-    .session-pill { border: 1px solid rgba(212,255,98,.25); border-radius: 30px; padding: 5px 8px; color: var(--lime); font-size: 8px; font-weight: 740; white-space: nowrap; }
-    .source-card { position: relative; height: 130px; margin-top: 15px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background:
-      radial-gradient(ellipse at 68% 56%, rgba(212,255,98,.20), transparent 24%),
-      linear-gradient(125deg, #26302b 0%, #1b2730 45%, #251e35 100%); }
-    .source-card:before { content:""; position:absolute; inset:0; opacity:.22; background: repeating-linear-gradient(135deg, transparent 0 17px, rgba(255,255,255,.08) 18px 19px); }
-    .source-art { position: absolute; right: 14%; bottom: -24px; width: 92px; height: 125px; border-radius: 44px 44px 9px 9px; background: linear-gradient(155deg, #a7b4ad, #364d49 57%, #18242a); transform: rotate(8deg); box-shadow: 0 0 0 9px rgba(0,0,0,.13); }
-    .source-art:before { content:""; position:absolute; left:24px; top:-29px; width:48px; height:53px; border-radius:48% 48% 42% 42%; background: linear-gradient(135deg,#dbb99b,#866e67); }
-    .source-art:after { content:""; position:absolute; top:11px; left:18px; width:60px; height:12px; border-radius:50%; background:#242b2d; }
-    .source-overlay { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:space-between; padding:11px; }
-    .source-label { color:#edf1e9; font-size:9px; font-weight:750; text-shadow:0 1px 8px #000; }
-    .source-time { align-self:flex-start; padding:4px 6px; border-radius:4px; background:rgba(0,0,0,.55); color:#fff; font-size:8px; }
-    .analysis-row { display:flex; justify-content:space-between; margin:14px 0 8px; color:#7f8b90; font-size:9px; }
-    .analysis-row b { color:#cbd5cc; font-weight:680; }
-    .wave { height:38px; display:flex; align-items:center; gap:3px; padding:0 8px; border:1px solid var(--line); border-radius:8px; background:#0d1217; }
-    .wave i { flex:1; min-width:2px; border-radius:3px; background:#64745a; height:var(--h); opacity:.78; }
-    .wave i:nth-child(3n) { background:var(--lime); }
-    .wave i:nth-child(7n) { background:#a694f2; }
-    .clip-results { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:11px; }
-    .clip-mini { display:flex; align-items:center; gap:8px; min-width:0; padding:7px; border:1px solid var(--line); border-radius:8px; background:#141b20; }
-    .clip-thumb { position:relative; flex:0 0 30px; width:30px; height:37px; border-radius:5px; overflow:hidden; background:linear-gradient(160deg,#7d6abb,#263b43 66%,#b2b878); }
-    .clip-thumb.alt { background:linear-gradient(155deg,#a9bd69,#415a4e 52%,#5f4a8b); }
-    .clip-thumb:after { content:""; position:absolute; left:8px; top:4px; width:14px; height:30px; border-radius:10px 10px 3px 3px; background:rgba(9,14,16,.42); }
-    .clip-info { min-width:0; }
-    .clip-info b { display:block; overflow:hidden; color:#d8ded8; font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
-    .clip-info span { color:#7f8b90; font-size:8px; }
-    .floating-tag { position:absolute; right:-20px; bottom:38px; display:flex; align-items:center; gap:9px; padding:11px 14px; border:1px solid rgba(212,255,98,.27); border-radius:12px; background:#171f1a; box-shadow:var(--shadow); color:#dfe8d9; font-size:10px; font-weight:680; transform:rotate(2deg); }
-    .floating-tag svg { width:17px; color:var(--lime); }
-    .floating-tag small { display:block; color:#829087; font-size:8px; font-weight:500; }
-    .proof-strip { border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:rgba(255,255,255,.014); }
-    .proof { display:grid; grid-template-columns:repeat(4,1fr); }
-    .proof-item { min-height:84px; display:flex; align-items:center; justify-content:center; gap:10px; padding:17px; border-right:1px solid var(--line); color:#a2adae; font-size:11px; font-weight:640; }
-    .proof-item:last-child { border-right:0; }
-    .proof-item svg { width:17px; height:17px; color:var(--lime); }
-    section.content-section { padding:105px 0; }
-    .section-heading { max-width:700px; margin:0 auto 48px; text-align:center; }
-    .section-heading .eyebrow { justify-content:center; }
-    h2 { margin:15px 0 13px; font-size:clamp(32px,4.4vw,49px); line-height:1.08; letter-spacing:-.065em; }
-    .section-heading p { max-width:570px; margin:0 auto; color:var(--muted); font-size:15px; line-height:1.75; }
-    .feature-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:13px; }
-    .roadmap-section { border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:rgba(255,255,255,.012); }
-    .roadmap-label { display:inline-flex; padding:5px 9px; border:1px solid rgba(212,255,98,.25); border-radius:30px; color:var(--lime); font-size:9px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
-    .feature { min-height:230px; padding:25px; border:1px solid var(--line); border-radius:var(--radius); background:linear-gradient(145deg,rgba(255,255,255,.035),rgba(255,255,255,.012)); transition:transform .2s ease,border-color .2s ease; }
-    .feature:hover { transform:translateY(-4px); border-color:rgba(212,255,98,.28); }
-    .feature-icon { width:40px; height:40px; display:grid; place-items:center; margin-bottom:28px; border:1px solid rgba(212,255,98,.18); border-radius:12px; background:rgba(212,255,98,.07); color:var(--lime); }
-    .feature-icon svg { width:19px; height:19px; }
-    h3 { margin:0 0 9px; font-size:17px; letter-spacing:-.035em; }
-    .feature p { margin:0; color:var(--muted); font-size:13px; line-height:1.75; }
-    .workflow { padding:88px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:linear-gradient(180deg,rgba(255,255,255,.018),transparent); }
-    .workflow-grid { display:grid; grid-template-columns:.85fr 1.15fr; align-items:center; gap:65px; }
-    .workflow-copy h2 { max-width:430px; }
-    .workflow-copy p { max-width:420px; color:var(--muted); font-size:14px; line-height:1.8; }
-    .workflow-copy .btn { margin-top:14px; }
-    .steps { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
-    .step { position:relative; min-height:165px; padding:21px; border:1px solid var(--line); border-radius:17px; background:#11171c; }
-    .step-number { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; color:var(--lime); font-family:ui-monospace,monospace; font-size:11px; }
-    .step-number svg { width:17px; height:17px; color:#82908a; }
-    .step h3 { font-size:15px; }
-    .step p { margin:0; color:var(--muted); font-size:12px; line-height:1.7; }
-    .local-section { padding:105px 0; }
-    .local-card { position:relative; display:grid; grid-template-columns:1fr 1fr; gap:50px; align-items:center; overflow:hidden; padding:54px; border:1px solid rgba(212,255,98,.21); border-radius:26px; background:radial-gradient(ellipse at 85% 2%,rgba(212,255,98,.12),transparent 36%),linear-gradient(135deg,#151c19,#11171c 65%); }
-    .local-card h2 { max-width:480px; font-size:clamp(32px,4vw,44px); }
-    .local-card p { max-width:470px; color:#aab5ae; font-size:14px; line-height:1.8; }
-    .local-points { display:grid; gap:12px; }
-    .local-point { display:flex; align-items:flex-start; gap:12px; padding:13px 0; border-bottom:1px solid var(--line); color:#d6ded5; font-size:12px; }
-    .local-point:last-child { border-bottom:0; }
-    .check { flex:0 0 21px; width:21px; height:21px; display:grid; place-items:center; border-radius:50%; background:rgba(212,255,98,.12); color:var(--lime); }
-    .check svg { width:12px; height:12px; }
-    .local-point small { display:block; margin-top:3px; color:#8d9993; font-size:11px; }
-    .engines { display:flex; flex-wrap:wrap; gap:7px; margin-top:22px; }
-    .engine { padding:7px 10px; border:1px solid var(--line-strong); border-radius:30px; color:#b6c0b9; font-size:10px; }
-    .download { padding:90px 0 104px; }
-    .download-panel { position:relative; overflow:hidden; padding:62px 28px; border:1px solid rgba(212,255,98,.24); border-radius:27px; background:radial-gradient(ellipse at 50% 115%,rgba(212,255,98,.13),transparent 43%),#12191a; text-align:center; }
-    .download-panel:before,.download-panel:after { content:""; position:absolute; width:240px; height:240px; border:1px solid rgba(212,255,98,.10); border-radius:50%; pointer-events:none; }
-    .download-panel:before { top:-160px; left:-80px; }
-    .download-panel:after { right:-100px; bottom:-190px; width:350px; height:350px; }
-    .download-panel h2 { max-width:660px; margin-inline:auto; }
-    .download-panel p { max-width:570px; margin:0 auto; color:var(--muted); font-size:14px; line-height:1.8; }
-    .download-actions { display:flex; justify-content:center; flex-wrap:wrap; gap:11px; margin-top:27px; }
-    .download-note { margin-top:16px; color:#7f8b89; font-size:10px; }
-    footer { border-top:1px solid var(--line); background:#080a0c; }
-    .footer-main { display:flex; align-items:flex-start; justify-content:space-between; gap:35px; padding:37px 0; }
-    .footer-brand p { max-width:290px; color:#7f8b90; font-size:11px; line-height:1.7; }
-    .footer-links { display:flex; flex-wrap:wrap; gap:22px; color:#a2adae; font-size:11px; }
-    .footer-links a:hover { color:var(--lime); }
-    .footer-bottom { display:flex; justify-content:space-between; gap:20px; padding:17px 0; border-top:1px solid var(--line); color:#657176; font-size:10px; }
-    .footer-bottom a { color:#9ca8a8; }
-    .reveal { opacity:0; transform:translateY(18px); transition:opacity .65s ease,transform .65s ease; }
-    .reveal.visible { opacity:1; transform:none; }
-    :focus-visible { outline:2px solid var(--lime); outline-offset:4px; }
-    @media (max-width: 940px) {
-      .hero-grid { grid-template-columns:1fr; gap:50px; }
-      .hero-copy { max-width:650px; }
-      .visual-wrap { width:min(680px,100%); margin-inline:auto; }
-      .workflow-grid { grid-template-columns:1fr; gap:35px; }
-      .workflow-copy { max-width:680px; }
-      .local-card { grid-template-columns:1fr; gap:27px; padding:38px; }
+    .btn:active { transform: scale(0.97); }
+    .btn svg { width: 16px; height: 16px; flex: 0 0 auto; }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-secondary {
+      background: var(--surface);
+      border-color: var(--line);
+      color: var(--ink);
+    }
+    .btn-secondary:hover {
+      background: var(--surface-hover);
+      border-color: var(--muted);
+    }
+
+    /* Hero */
+    .hero {
+      padding: 56px 0 64px;
+      background: radial-gradient(ellipse 70% 50% at 75% 18%, rgba(156, 222, 242, 0.08), transparent), var(--canvas);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+      align-items: center;
+      gap: 48px;
+    }
+    h1 {
+      margin: 0 0 18px;
+      font-family: var(--font-display);
+      font-size: clamp(38px, 4.8vw, 58px);
+      line-height: 1.04;
+      letter-spacing: -0.03em;
+      font-weight: 700;
+    }
+    h1 .accent { color: var(--accent); }
+    .hero-copy {
+      max-width: 52ch;
+      margin: 0;
+      color: var(--body);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+    .hero-facts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 20px;
+      margin-top: 22px;
+      color: var(--quiet);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .hero-facts span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .hero-facts svg { width: 14px; height: 14px; color: var(--success); }
+
+    /* Interactive Studio Frame */
+    .studio-frame {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+    }
+    .studio-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 14px;
+      background: #141920;
+      border-bottom: 1px solid var(--line-soft);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .studio-brand-mini {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .studio-brand-badge {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .studio-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 3px;
+      background: var(--canvas);
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+    }
+    .studio-tab {
+      padding: 4px 9px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--quiet);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+    }
+    .studio-tab[aria-selected="true"] {
+      background: var(--surface-elevated);
+      color: var(--ink);
+    }
+    .studio-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 99px;
+      background: rgba(128, 201, 154, 0.12);
+      border: 1px solid rgba(128, 201, 154, 0.35);
+      color: var(--success);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .studio-pill i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    .studio-body {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+    .studio-panel { display: none; gap: 14px; }
+    .studio-panel.active { display: grid; }
+    .studio-row {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 12px;
+    }
+    .studio-card {
+      background: var(--surface);
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+    .studio-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .studio-card-head strong { color: var(--ink); font-weight: 600; }
+    .pipeline-stages {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+    }
+    .pipeline-stage {
+      padding: 7px 6px;
+      border-radius: 7px;
+      background: var(--bg);
+      border: 1px solid var(--line-soft);
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--quiet);
+    }
+    .pipeline-stage.done {
+      border-color: rgba(128, 201, 154, 0.4);
+      color: var(--success);
+    }
+    .pipeline-stage.current {
+      border-color: var(--accent);
+      color: var(--ink);
+      background: rgba(224, 108, 117, 0.12);
+    }
+    .clip-preview-mini {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .phone-mock {
+      width: 78px;
+      aspect-ratio: 9 / 16;
+      flex: 0 0 auto;
+      border-radius: 10px;
+      border: 2px solid var(--line);
+      background: #0d1218;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 38% 62%;
+    }
+    .phone-cam {
+      background: linear-gradient(135deg, #2b3c4b, #1a242f);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: grid;
+      place-items: center;
+      font-family: var(--font-mono);
+      font-size: 7px;
+      color: rgba(255,255,255,0.45);
+    }
+    .phone-game {
+      background: linear-gradient(150deg, #1b2d36, #111b24);
+      display: grid;
+      place-items: center;
+      font-family: var(--font-mono);
+      font-size: 7px;
+      color: rgba(255,255,255,0.35);
+    }
+    .phone-caption {
+      position: absolute;
+      left: 5px;
+      right: 5px;
+      bottom: 22%;
+      text-align: center;
+      font-family: var(--font-display);
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1.1;
+      text-transform: uppercase;
+      color: #efff43;
+      text-shadow: 0 1px 3px #000;
+    }
+    .phone-caption b { color: #ff45a8; }
+    .clip-meta-list {
+      display: grid;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .clip-meta-list div {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--body);
+      border-bottom: 1px solid var(--line-soft);
+      padding-bottom: 4px;
+    }
+    .clip-meta-list div:last-child { border-bottom: 0; padding-bottom: 0; }
+    .clip-meta-list span { color: var(--quiet); }
+
+    /* Interactive caption preset switcher */
+    .preset-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .preset-pill {
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--body);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .preset-pill[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: rgba(224, 108, 117, 0.14);
+      color: var(--ink);
+    }
+
+    /* Spec strip */
+    .spec-strip {
+      background: var(--bg);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .spec-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .spec-item {
+      padding: 18px 20px;
+      border-right: 1px solid var(--line-soft);
+      display: grid;
+      gap: 3px;
+    }
+    .spec-item:last-child { border-right: 0; }
+    .spec-item strong {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--ink);
+    }
+    .spec-item span {
+      font-size: 12px;
+      color: var(--quiet);
+    }
+
+    /* Sections */
+    section.section { padding: 80px 0; }
+    section.section-alt {
+      background: var(--bg);
+      border-top: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .section-head {
+      max-width: 640px;
+      margin-bottom: 40px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-family: var(--font-display);
+      font-size: clamp(28px, 3.6vw, 40px);
+      line-height: 1.12;
+      letter-spacing: -0.025em;
+    }
+    .section-head p {
+      margin: 0;
+      color: var(--body);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .feature-card {
+      padding: 22px;
+      background: var(--surface);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-panel);
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out);
+    }
+    .feature-card:hover {
+      border-color: var(--line);
+      transform: translateY(-2px);
+    }
+    .feature-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 9px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      display: grid;
+      place-items: center;
+    }
+    .feature-icon svg { width: 18px; height: 18px; }
+    .feature-card h3 {
+      margin: 4px 0 0;
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .feature-card p {
+      margin: 0;
+      color: var(--body);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    /* Pipeline workflow */
+    .workflow-grid {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 48px;
+      align-items: start;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .step-card {
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius-panel);
+      display: grid;
+      gap: 8px;
+    }
+    .step-num {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .step-card h3 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 15px;
+    }
+    .step-card p {
+      margin: 0;
+      color: var(--body);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    /* Local-first matrix */
+    .local-card {
+      display: grid;
+      grid-template-columns: 0.95fr 1.05fr;
+      gap: 44px;
+      padding: 40px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+    .provider-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+    }
+    .provider-tag {
+      padding: 5px 10px;
+      border-radius: 6px;
+      background: var(--bg);
+      border: 1px solid var(--line-soft);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .local-list {
+      display: grid;
+      gap: 0;
+    }
+    .local-item {
+      display: flex;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .local-item:last-child { border-bottom: 0; padding-bottom: 0; }
+    .local-item:first-child { padding-top: 0; }
+    .local-check {
+      width: 20px;
+      height: 20px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: rgba(128, 201, 154, 0.14);
+      color: var(--success);
+      display: grid;
+      place-items: center;
+      margin-top: 2px;
+    }
+    .local-check svg { width: 12px; height: 12px; }
+    .local-item strong { display: block; font-size: 13px; color: var(--ink); }
+    .local-item small { display: block; color: var(--body); font-size: 12px; line-height: 1.55; margin-top: 2px; }
+
+    /* Download CTA */
+    .download-box {
+      padding: 48px 32px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      text-align: center;
+      display: grid;
+      justify-items: center;
+      gap: 14px;
+    }
+    .download-box h2 { margin: 0; }
+    .download-box p {
+      max-width: 56ch;
+      margin: 0;
+      color: var(--body);
+      font-size: 14px;
+    }
+    .download-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .download-note {
+      max-width: 68ch;
+      color: var(--quiet);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--line-soft);
+      background: #12171d;
+      padding: 32px 0 24px;
+    }
+    .footer-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 28px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .footer-brand p {
+      max-width: 320px;
+      margin: 10px 0 0;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-size: 13px;
+      color: var(--body);
+    }
+    .footer-links a:hover { color: var(--muted); }
+    .footer-bottom {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding-top: 18px;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+
+    @media (max-width: 960px) {
+      .hero-grid, .workflow-grid, .local-card { grid-template-columns: 1fr; }
+      .spec-grid { grid-template-columns: repeat(2, 1fr); }
+      .spec-item:nth-child(2) { border-right: 0; }
+      .spec-item:nth-child(1), .spec-item:nth-child(2) { border-bottom: 1px solid var(--line-soft); }
+      .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 700px) {
-      .wrap { width:min(100% - 34px,var(--max)); }
-      .announcement { font-size:10px; }
-      .nav { height:67px; }
-      .nav-actions .btn { display:none; }
-      .menu-toggle { display:grid; place-items:center; }
-      .nav-links { display:none; position:absolute; top:67px; left:0; right:0; padding:15px 22px 20px; border-bottom:1px solid var(--line); background:#0c1013; flex-direction:column; align-items:stretch; gap:0; }
-      .nav-links.open { display:flex; }
-      .nav-links a { padding:12px 0; border-bottom:1px solid var(--line); }
-      .hero { padding:67px 0 58px; }
-      h1 { font-size:clamp(43px,12vw,62px); }
-      .hero-copy { font-size:15px; }
-      .app-window { transform:none; }
-      .app-body { grid-template-columns:104px 1fr; min-height:315px; }
-      .app-side { padding:14px 7px; }
-      .side-item { gap:6px; padding:8px 5px; font-size:9px; }
-      .side-bottom { margin-top:30px; }
-      .app-main { padding:13px 10px; }
-      .source-card { height:115px; }
-      .floating-tag { right:-4px; bottom:17px; }
-      .proof { grid-template-columns:repeat(2,1fr); }
-      .proof-item { min-height:66px; justify-content:flex-start; padding:13px 9px; font-size:10px; border-bottom:1px solid var(--line); }
-      .proof-item:nth-child(2) { border-right:0; }
-      .proof-item:nth-child(3),.proof-item:nth-child(4) { border-bottom:0; }
-      section.content-section,.local-section { padding:76px 0; }
-      .section-heading { margin-bottom:33px; }
-      .feature-grid { grid-template-columns:1fr; }
-      .feature { min-height:0; }
-      .feature-icon { margin-bottom:20px; }
-      .workflow { padding:75px 0; }
-      .steps { gap:9px; }
-      .step { min-height:156px; padding:15px; }
-      .local-card { padding:26px 21px; border-radius:20px; }
-      .download { padding:60px 0 74px; }
-      .download-panel { padding:48px 20px; border-radius:21px; }
-      .footer-main { flex-direction:column; padding:30px 0; }
-      .footer-links { gap:15px; }
-      .footer-bottom { flex-direction:column; gap:8px; }
+      .wrap { width: min(var(--max), calc(100% - 32px)); }
+      .nav-actions .btn { display: none; }
+      .menu-toggle { display: grid; }
+      .nav-links {
+        display: none;
+        position: absolute;
+        top: 68px;
+        left: 0;
+        right: 0;
+        padding: 12px 20px 18px;
+        background: var(--canvas);
+        border-bottom: 1px solid var(--line);
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+      }
+      .nav-links.open { display: flex; }
+      .nav-links a { padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+      .studio-row { grid-template-columns: 1fr; }
+      .pipeline-stages { grid-template-columns: repeat(2, 1fr); }
+      .feature-grid, .steps { grid-template-columns: 1fr; }
+      .local-card { padding: 24px 20px; }
     }
     @media (prefers-reduced-motion: reduce) {
-      html { scroll-behavior:auto; }
-      *,*:before,*:after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
-      .reveal { opacity:1; transform:none; }
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="announcement">
-    <span class="dot" aria-hidden="true"></span>
-    StreamSnip AI 4.0 is in development — direct publishing + creator-first live monitoring
-    <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">See what’s new <span aria-hidden="true">↗</span></a>
+  <div class="release-bar">
+    <span class="release-dot" aria-hidden="true"></span>
+    <span>StreamSnip AI <strong class="mono">v4.0.4</strong> is live — React Creator Studio, local YuNet facecam finder, and Zernio publishing.</span>
+    <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Release notes</a>
   </div>
 
   <header class="nav-shell">
     <nav class="nav wrap" aria-label="Main navigation">
       <a class="brand" href="#top" aria-label="StreamSnip AI home">
         <img src="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/app-icon.png" alt="">
-        <span>StreamSnip <span>AI</span></span>
+        <span>StreamSnip <span class="brand-accent">AI</span></span>
       </a>
       <div class="nav-links" id="nav-links">
         <a href="#features">Features</a>
-        <a href="#roadmap">Coming in 4.0</a>
-        <a href="#workflow">How it works</a>
+        <a href="#workflow">Workflow</a>
         <a href="#local-first">Local-first</a>
-        <a href="https://github.com/sifat-jaman-13/stream-clip-ai">Source code</a>
+        <a href="#download">Download</a>
+        <a href="https://github.com/sifat-jaman-13/stream-clip-ai">GitHub</a>
       </div>
       <div class="nav-actions">
         <a class="btn btn-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe">
-          Download for Windows
+          Download v4.0.4
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
         </a>
         <button class="menu-toggle" id="menu-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="nav-links">
-          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
       </div>
     </nav>
@@ -291,257 +783,317 @@
 
   <main id="top">
     <section class="hero">
-      <div class="wrap"><img class="site-banner" src="../assets/streamsnipai-banner.svg" alt="StreamSnip AI — Find the moment. Make it a clip."></div><div class="wrap hero-grid">
-        <div class="reveal">
-          <div class="eyebrow">Your streams, made shareable</div>
+      <div class="wrap hero-grid">
+        <div>
           <h1>Find the moment.<br><span class="accent">Make it a clip.</span></h1>
-          <p class="hero-copy">Capture multiple creators live, process recorded VODs in their own folders, find standout moments, and publish reviewed clips directly through connected social accounts. StreamSnip keeps the core workflow local and lets creators choose their own AI and transcription tools.</p>
+          <p class="hero-copy">
+            StreamSnip AI is a local-first creator workspace for Windows. Capture live Twitch and YouTube streams or watch VOD folders, transcribe locally with Faster-Whisper, detect facecams with YuNet, render captioned shorts, and publish through Zernio.
+          </p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe">
-              Get StreamSnip AI
+              Download Windows Installer
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
             </a>
-            <a class="btn btn-quiet" href="https://github.com/sifat-jaman-13/stream-clip-ai">
-              Explore on GitHub
+            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai">
+              Explore Source
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg>
             </a>
           </div>
-          <div class="micro-note">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></svg>
-            No API key for local capture, transcription, or rendering. Zernio and hosted AI are optional integrations.
+          <div class="hero-facts">
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 4 4L19 6"/></svg>Loopback-only FastAPI</span>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 4 4L19 6"/></svg>No cloud key for local clipping</span>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 4 4L19 6"/></svg>Python 3.10–3.15</span>
           </div>
         </div>
 
-        <div class="visual-wrap reveal" aria-label="Illustrative preview of the StreamSnip AI clipping workflow">
-          <div class="visual-glow"></div>
-          <div class="app-window">
-            <div class="window-bar">
-              <div class="traffic"><i></i><i></i><i></i></div>
-              <div class="window-title">StreamSnip AI / Studio</div>
-              <div class="live-status">CAPTURING</div>
+        <div class="studio-frame" aria-label="Interactive StreamSnip AI Creator Studio preview">
+          <div class="studio-topbar">
+            <div class="studio-brand-mini">
+              <span class="studio-brand-badge">S</span>
+              <span>StreamSnip AI · Live Studio</span>
             </div>
-            <div class="app-body">
-              <aside class="app-side" aria-hidden="true">
-                <div class="side-label">Workspace</div>
-                <div class="side-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM8 9l3 3-3 3m5 0h4"/></svg>Dashboard</div>
-                <div class="side-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg>Live stream</div>
-                <div class="side-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16v12H4zM8 3v6m8-6v6"/></svg>Video files</div>
-                <div class="side-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg>Clip gallery</div>
-                <div class="side-bottom"><b>Local workspace</b>Your media stays on this device.</div>
-              </aside>
-              <div class="app-main">
-                <div class="session-top">
-                  <div><div class="session-kicker">Creator workspace</div><div class="session-name">Multi-creator live monitor</div></div>
-                  <div class="session-pill">LIVE CAPTURE</div>
+            <div class="studio-tabs" role="tablist" aria-label="Studio preview views">
+              <button type="button" class="studio-tab" role="tab" aria-selected="true" data-tab="pipeline">Pipeline</button>
+              <button type="button" class="studio-tab" role="tab" aria-selected="false" data-tab="captions">Captions</button>
+              <button type="button" class="studio-tab" role="tab" aria-selected="false" data-tab="publish">Zernio</button>
+            </div>
+            <span class="studio-pill"><i></i>READY</span>
+          </div>
+
+          <div class="studio-body">
+            <div class="studio-panel active" id="tab-pipeline" role="tabpanel">
+              <div class="studio-card">
+                <div class="studio-card-head">
+                  <strong>Session pipeline</strong>
+                  <span class="mono">CUDA · FFmpeg · Streamlink</span>
                 </div>
-                <div class="source-card">
-                  <div class="source-art"></div>
-                  <div class="source-overlay"><span class="source-label">LIVE SOURCE · TWITCH</span><span class="source-time">01:24:38 / 02:10:00</span></div>
+                <div class="pipeline-stages">
+                  <div class="pipeline-stage done">1. Capture</div>
+                  <div class="pipeline-stage done">2. Whisper</div>
+                  <div class="pipeline-stage current">3. Score</div>
+                  <div class="pipeline-stage">4. Render</div>
+                  <div class="pipeline-stage">5. Zernio</div>
                 </div>
-                <div class="analysis-row"><span>Transcript analysis</span><b>Finding standout moments</b></div>
-                <div class="wave" aria-hidden="true">
-                  <i style="--h:13px"></i><i style="--h:20px"></i><i style="--h:11px"></i><i style="--h:27px"></i><i style="--h:18px"></i><i style="--h:31px"></i><i style="--h:13px"></i><i style="--h:23px"></i><i style="--h:33px"></i><i style="--h:18px"></i><i style="--h:27px"></i><i style="--h:12px"></i><i style="--h:22px"></i><i style="--h:30px"></i><i style="--h:15px"></i><i style="--h:24px"></i><i style="--h:11px"></i><i style="--h:29px"></i><i style="--h:17px"></i><i style="--h:26px"></i><i style="--h:13px"></i><i style="--h:32px"></i><i style="--h:20px"></i><i style="--h:12px"></i><i style="--h:25px"></i><i style="--h:16px"></i><i style="--h:29px"></i><i style="--h:14px"></i><i style="--h:23px"></i><i style="--h:17px"></i>
+              </div>
+              <div class="studio-row">
+                <div class="studio-card">
+                  <div class="studio-card-head">
+                    <strong>Active configuration</strong>
+                    <span>Odysseus</span>
+                  </div>
+                  <div class="clip-meta-list">
+                    <div><span>Source</span><strong>Twitch / VOD</strong></div>
+                    <div><span>Speech</span><strong>distil-large-v3</strong></div>
+                    <div><span>Scorer</span><strong>Gemini / Ollama / Hooks</strong></div>
+                    <div><span>Bitrate</span><strong>8,000–50,000 Kbps</strong></div>
+                  </div>
                 </div>
-                <div class="clip-results">
-                  <div class="clip-mini"><div class="clip-thumb"></div><div class="clip-info"><b>That was unexpected</b><span>00:42 · Highlight</span></div></div>
-                  <div class="clip-mini"><div class="clip-thumb alt"></div><div class="clip-info"><b>Chat went wild</b><span>00:36 · Highlight</span></div></div>
+                <div class="studio-card">
+                  <div class="studio-card-head">
+                    <strong>9:16 Output</strong>
+                    <span>YuNet</span>
+                  </div>
+                  <div class="clip-preview-mini">
+                    <div class="phone-mock">
+                      <div class="phone-cam">FACECAM</div>
+                      <div class="phone-game">GAMEPLAY</div>
+                      <div class="phone-caption">NO WAY <b>THAT HIT</b></div>
+                    </div>
+                    <div class="clip-meta-list" style="flex:1">
+                      <div><span>Layout</span><strong>Split</strong></div>
+                      <div><span>Style</span><strong>GTA Neon</strong></div>
+                      <div><span>Sidecar</span><strong>.txt</strong></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="studio-panel" id="tab-captions" role="tabpanel">
+              <div class="studio-card">
+                <div class="studio-card-head">
+                  <strong>Caption animation presets</strong>
+                  <span class="mono" id="preset-label">GTA Neon</span>
+                </div>
+                <div class="preset-pills" role="group" aria-label="Caption preset selector">
+                  <button type="button" class="preset-pill" aria-pressed="true" data-style="GTA Neon" data-color="#efff43" data-hi="#ff45a8">GTA Neon</button>
+                  <button type="button" class="preset-pill" aria-pressed="false" data-style="Hormozi" data-color="#ffffff" data-hi="#d7ff3f">Hormozi</button>
+                  <button type="button" class="preset-pill" aria-pressed="false" data-style="Neon" data-color="#ffffff" data-hi="#50e8ff">Neon</button>
+                  <button type="button" class="preset-pill" aria-pressed="false" data-style="Fire" data-color="#ffffff" data-hi="#ff664a">Fire</button>
+                  <button type="button" class="preset-pill" aria-pressed="false" data-style="Classic" data-color="#ffffff" data-hi="#efff43">Classic</button>
+                </div>
+                <div class="clip-preview-mini" style="margin-top:6px">
+                  <div class="phone-mock">
+                    <div class="phone-cam">FACECAM</div>
+                    <div class="phone-game">GAMEPLAY</div>
+                    <div class="phone-caption" id="demo-caption">CLUTCH <b>MOMENT</b></div>
+                  </div>
+                  <div class="clip-meta-list" style="flex:1">
+                    <div><span>Modes</span><strong>Karaoke &amp; Classic</strong></div>
+                    <div><span>Formats</span><strong>9:16, 16:9, 1:1, 4:5</strong></div>
+                    <div><span>Profanity</span><strong>Beep or Mute word</strong></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="studio-panel" id="tab-publish" role="tabpanel">
+              <div class="studio-card">
+                <div class="studio-card-head">
+                  <strong>Zernio publishing handoff</strong>
+                  <span class="mono">Explicit user action</span>
+                </div>
+                <div class="clip-meta-list">
+                  <div><span>Destinations</span><strong>YouTube, Instagram, TikTok, Facebook</strong></div>
+                  <div><span>Metadata</span><strong>Title + transcript-grounded copy (.txt)</strong></div>
+                  <div><span>Scheduling</span><strong>Publish now or set interval</strong></div>
+                  <div><span>Tracking</span><strong>Separate Published registry</strong></div>
                 </div>
               </div>
             </div>
           </div>
-          <div class="floating-tag">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h5M8 16h8"/></svg>
-            <span>Ready for review<small>Captions · crop · clip export</small></span>
-          </div>
         </div>
       </div>
     </section>
 
-    <div class="proof-strip">
-      <div class="wrap proof">
-        <div class="proof-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 3 8v8l9 5 9-5V8l-9-5Z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>Local processing first</div>
-        <div class="proof-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16v12H4zM8 3v6m8-6v6"/></svg>Live streams + video files</div>
-        <div class="proof-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 18V6m0 12h16M7 14l3-4 3 2 4-6"/></svg>AI-assisted highlights</div>
-        <div class="proof-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>Captions + flexible layouts</div>
+    <div class="spec-strip">
+      <div class="wrap spec-grid">
+        <div class="spec-item">
+          <strong>10 Concurrent Monitors</strong>
+          <span>Independent creator live + VOD folders</span>
+        </div>
+        <div class="spec-item">
+          <strong>Faster-Whisper + BYO</strong>
+          <span>Local CUDA transcription or custom CLI</span>
+        </div>
+        <div class="spec-item">
+          <strong>YuNet Facecam Finder</strong>
+          <span>Multi-frame webcam + game crop detection</span>
+        </div>
+        <div class="spec-item">
+          <strong>Zernio Direct Publish</strong>
+          <span>Schedule or post reviewed clips in-app</span>
+        </div>
       </div>
     </div>
 
-    <section class="content-section" id="features">
+    <section class="section" id="features">
       <div class="wrap">
-        <div class="section-heading reveal">
-          <div class="eyebrow">A full clipping workflow</div>
-          <h2>From hours of footage<br>to the moments that matter.</h2>
-          <p>Capture, understand, shape, and export without bouncing between a pile of tools.</p>
+        <div class="section-head">
+          <h2>Built for creators who want control over every clip.</h2>
+          <p>Capture streams, transcribe locally, frame facecams cleanly, and export post-ready clips without handing your media library to a cloud editor.</p>
         </div>
         <div class="feature-grid">
-          <article class="feature reveal">
+          <article class="feature-card">
             <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg></div>
-            <h3>Capture or import</h3>
-            <p>Record supported Twitch and YouTube live streams, or bring in local videos and VOD files for clipping.</p>
+            <h3>Live streams &amp; VOD inbox</h3>
+            <p>Capture Twitch and YouTube streams via Streamlink at 8,000–50,000 Kbps, or drop recordings into per-creator VOD watch folders.</p>
           </article>
-          <article class="feature reveal">
+          <article class="feature-card">
             <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM8 9h8M8 13h5M8 17h8"/></svg></div>
-            <h3>Find the highlights</h3>
-            <p>Transcribe with local Whisper and rank moments with hook words, Ollama, Gemini, or Hugging Face.</p>
+            <h3>Flexible highlight scoring</h3>
+            <p>Score transcript windows with offline Hook Words, local Ollama models, Google Gemini, Hugging Face, or any OpenAI-compatible endpoint.</p>
           </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h5"/></svg></div>
-            <h3>Make captions yours</h3>
-            <p>Choose karaoke or classic captions, presets, fonts, colors, word timing, size, and placement.</p>
+          <article class="feature-card">
+            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2.5"/><path d="M14 9h4m-4 4h4"/></svg></div>
+            <h3>Local YuNet facecam detection</h3>
+            <p>Analyze multiple frames locally with OpenCV + YuNet to locate the facecam, then drag and resize both facecam and gameplay boxes.</p>
           </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 3v18m8-18v18"/></svg></div>
-            <h3>Frame for every feed</h3>
-            <p>Render in 9:16, 16:9, 1:1, or 4:5 with flexible portrait layouts and framing options.</p>
+          <article class="feature-card">
+            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"/></svg></div>
+            <h3>Word-level animated captions</h3>
+            <p>Pick from 6 animations including GTA Neon, 5 placement presets or custom coordinates, plus optional profanity masking with word-level beep/mute.</p>
           </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M7 4v6m10-6v6M5 13h14v7H5z"/></svg></div>
-            <h3>Keep your own style</h3>
-            <p>Add streamer credit, custom branding, and matching caption files.</p>
-          </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg></div>
-            <h3>Automatic AI post copy</h3>
-            <p>Gemini, Ollama, or Hugging Face can write titles and descriptions using the same provider selected for highlight analysis. Hook Words and provider failures use transcript-based fallback copy.</p>
-          </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg></div>
-            <h3>Post-ready titles and descriptions</h3>
-            <p>Every finished clip gets a matching TXT sidecar with a post-ready title, transcript-grounded description, creator credit when available, and hashtags.</p>
-          </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg></div>
-            <h3>Publish from the clip dialog</h3>
-            <p>Edit the caption, choose connected Zernio accounts, and send the clip directly. Manual upload remains available as a fallback.</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <section class="content-section roadmap-section" id="roadmap">
-      <div class="wrap">
-        <div class="section-heading reveal">
-          <div class="roadmap-label">Major update in development · 4.0</div>
-          <h2>One workspace for every creator.</h2>
-          <p>The next major update puts live capture and direct publishing first. These features are being integrated and tested before a new installer is released.</p>
-        </div>
-        <div class="feature-grid">
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg></div>
-            <h3>Publish directly from StreamSnip</h3>
-            <p>Choose connected Zernio accounts, edit each clip's title and description, publish now or schedule, and track progress. Successful posts move to a persistent Posted tab; manual uploads can be marked posted. Delete one clip, selected clips, or clear the current tab.</p>
-          </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="8" r="4"/><circle cx="17" cy="9" r="3"/><path d="M2 20c0-4 2-6 6-6s6 2 6 6m1-5c4 0 7 1 7 5"/></svg></div>
-            <h3>Independent creator controls</h3>
-            <p>A simple single-source Start/Stop control stays at the top of the app. Each saved creator also gets independent Start Live / Stop Live controls, so you can stop one stream without interrupting the others.</p>
-          </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"/></svg></div>
-            <h3>Separate live and VOD pipelines</h3>
-            <p>Every creator gets a watched VOD inbox, separate recorded-VOD clips, processed originals, and a failed folder. Live output never gets mixed with VOD output. Temporary live recording chunks are automatically removed after successful clip rendering or when no worthwhile moments are found; failed renders are kept for retry.</p>
-          </article>
-          <article class="feature reveal">
+          <article class="feature-card">
             <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h7"/></svg></div>
-            <h3>Bring your own transcriber</h3>
-            <p>Use the built-in local Whisper engine or connect your own CLI transcriber or script with timestamped JSON output. No StreamSnip API key is required for local tools.</p>
+            <h3>Transcript-grounded metadata</h3>
+            <p>Every rendered clip gets a matching .txt sidecar with a post-ready title, grounded description, creator credit, and topical hashtag.</p>
           </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M7 7l-3 5 3 5m10-10 3 5-3 5"/></svg></div>
-            <h3>Profanity without losing the moment</h3>
-            <p>Optional audio and caption censoring never removes a candidate, lowers its viral score, or blocks publishing. Creators decide whether to censor or keep the original.</p>
-          </article>
-          <article class="feature reveal">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM8 9h8M8 13h8M8 17h4"/></svg></div>
-            <h3>No unnecessary credentials</h3>
-            <p>Local capture, transcription, and rendering need no API key. Add Zernio for direct publishing or a provider key only when you choose hosted AI.</p>
+          <article class="feature-card">
+            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg></div>
+            <h3>Direct Zernio publishing</h3>
+            <p>Connect your Zernio API key, select connected social accounts, edit titles/descriptions in the inspector, and track completed posts separately.</p>
           </article>
         </div>
       </div>
     </section>
 
-    <section class="workflow" id="workflow">
+    <section class="section section-alt" id="workflow">
       <div class="wrap workflow-grid">
-        <div class="workflow-copy reveal">
-          <div class="eyebrow">A simple flow</div>
-          <h2>Less scrubbing.<br>More creating.</h2>
-          <p>Give StreamSnip AI a live source or a recording. It handles the repetitive work, while you control each creator, review every clip, and choose where it gets published.</p>
-          <a class="btn btn-quiet" href="https://github.com/sifat-jaman-13/stream-clip-ai#install-on-windows">Read the quick start <span aria-hidden="true">↗</span></a>
+        <div class="section-head" style="margin-bottom:0">
+          <h2>From stream source to reviewed short in four steps.</h2>
+          <p>Opening Live Studio never starts recording automatically. Review your source, framing, AI provider, and captions before you press Start capture.</p>
+          <div style="margin-top:24px">
+            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai#the-creator-workflow">Read the full workflow guide</a>
+          </div>
         </div>
         <div class="steps">
-          <article class="step reveal"><div class="step-number">01 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM8 9h8"/></svg></div><h3>Choose a source</h3><p>Start a supported live capture or select a local video.</p></article>
-          <article class="step reveal"><div class="step-number">02 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h3l2-6 4 12 2-6h5"/></svg></div><h3>Analyze the audio</h3><p>Transcribe speech and score promising moments.</p></article>
-          <article class="step reveal"><div class="step-number">03 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h14v18H5zM8 8h8M8 12h8"/></svg></div><h3>Shape your clips</h3><p>Set duration, format, layout, captions, and branding.</p></article>
-          <article class="step reveal"><div class="step-number">04 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg></div><h3>Review and share</h3><p>Keep the clips you like, export them, publish via Zernio, and track completed posts in a separate Posted tab.</p></article>
+          <article class="step-card">
+            <span class="step-num">01</span>
+            <h3>Select source or creator</h3>
+            <p>Choose a saved Twitch/YouTube creator or browse for a local VOD. Each creator keeps isolated live and VOD folders.</p>
+          </article>
+          <article class="step-card">
+            <span class="step-num">02</span>
+            <h3>Detect &amp; preview framing</h3>
+            <p>Run local YuNet facecam detection and render a 2.5-second MP4 preview using the exact FFmpeg + caption pipeline.</p>
+          </article>
+          <article class="step-card">
+            <span class="step-num">03</span>
+            <h3>Transcribe &amp; score</h3>
+            <p>Faster-Whisper transcribes locally on CUDA/CPU, then Hook Words, Ollama, Gemini, or custom APIs rank highlight windows.</p>
+          </article>
+          <article class="step-card">
+            <span class="step-num">04</span>
+            <h3>Review &amp; publish</h3>
+            <p>Inspect rendered clips and .txt metadata in the Clip library, then queue single or batch posts through Zernio.</p>
+          </article>
         </div>
       </div>
     </section>
 
-    <section class="local-section" id="local-first">
+    <section class="section" id="local-first">
       <div class="wrap">
-        <div class="local-card reveal">
+        <div class="local-card">
           <div>
-            <div class="eyebrow">Your machine. Your media.</div>
-            <h2>Local-first isn't a footnote. It's the point.</h2>
-            <p>StreamSnip AI needs no API key for local capture, local transcription, or rendering. Add Zernio only for direct publishing, and add a hosted AI key only if you choose a cloud analysis provider.</p>
-            <div class="engines">
-              <span class="engine">Hook words · local</span>
-              <span class="engine">Ollama · local</span>
-              <span class="engine">Gemini · optional</span>
-              <span class="engine">Hugging Face · optional</span>
+            <h2>Local-first architecture, transparent integrations.</h2>
+            <p style="color:var(--body);margin:12px 0 0">The React Creator Studio talks exclusively to a loopback-bound FastAPI server on your PC. Capture, transcription, facecam detection, and FFmpeg rendering stay local.</p>
+            <div class="provider-tags">
+              <span class="provider-tag">Hook Words · Offline</span>
+              <span class="provider-tag">Ollama · Local</span>
+              <span class="provider-tag">Faster-Whisper · CUDA</span>
+              <span class="provider-tag">Gemini · Optional</span>
+              <span class="provider-tag">Zernio · Optional</span>
             </div>
           </div>
-          <div class="local-points">
-            <div class="local-point"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></span><span><b>Choose your transcriber</b><small>Use built-in faster-whisper locally or bring your own CLI transcriber or script.</small></span></div>
-            <div class="local-point"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></span><span><b>Cloud AI is optional</b><small>Choose Ollama locally or add Gemini, Hugging Face, or another compatible hosted provider.</small></span></div>
-            <div class="local-point"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></span><span><b>Post copy follows your chosen provider</b><small>The selected AI highlight provider also writes clip titles and descriptions; Hook Words uses transcript-grounded fallback copy.</small></span></div>
-            <div class="local-point"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></span><span><b>Direct publishing stays in your hands</b><small>Choose the Zernio accounts for each post. Auto-post remains off by default.</small></span></div>
-            <div class="local-point"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></span><span><b>Live and recorded VODs stay separate</b><small>Each creator gets isolated live recordings, live clips, a VOD inbox, VOD clips, and archives.</small></span></div>
-            <div class="local-point"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></span><span><b>Profanity never disqualifies a clip</b><small>Optional censoring affects the rendered audio and captions, not viral scoring or publishing eligibility.</small></span></div>
-            <div class="local-point"><span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></span><span><b>Safe Windows shutdown</b><small>Keep the support terminal window OPEN while StreamSnip AI is running. Click Quit inside the app and wait until it has shut down before closing the terminal. Closing the terminal directly may interrupt recording, clip processing, or uploads.</small></span></div>
+          <div class="local-list">
+            <div class="local-item">
+              <span class="local-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 4 4L19 6"/></svg></span>
+              <div>
+                <strong>Bring-your-own transcriber</strong>
+                <small>Use built-in Faster-Whisper or plug in any CLI transcriber (such as whisper.cpp) emitting timestamped JSON.</small>
+              </div>
+            </div>
+            <div class="local-item">
+              <span class="local-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 4 4L19 6"/></svg></span>
+              <div>
+                <strong>Explicit credential boundaries</strong>
+                <small>API keys stay in local settings and are never returned to the browser. Hosted AI providers only receive transcript text when selected.</small>
+              </div>
+            </div>
+            <div class="local-item">
+              <span class="local-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 4 4L19 6"/></svg></span>
+              <div>
+                <strong>Six workspace themes &amp; 13 fonts</strong>
+                <small>Odysseus graphite default with JetBrains Mono, plus Studio Light/Dark, GitHub Dark, Nord, and Odysseus Paper.</small>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="download" id="download">
+    <section class="section section-alt" id="download">
       <div class="wrap">
-        <div class="download-panel reveal">
-          <div class="eyebrow" style="justify-content:center">Ready when you are</div>
-          <h2>Make your next stream<br><span style="color:var(--lime)">work harder.</span></h2>
-          <p>Get the current Windows installer, explore the source, or follow the upcoming 4.0 development. This repository uses a proprietary non-commercial source-available licence; read LICENSE before use.</p>
+        <div class="download-box">
+          <h2>Ready to clip your next stream.</h2>
+          <p>Download the Windows installer for StreamSnip AI v4.0.4 or run directly from source with Python 3.10–3.15 and Node.js.</p>
           <div class="download-actions">
             <a class="btn btn-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Setup.exe">
-              Download Windows installer
+              Download StreamSnipAI-Setup.exe
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
             </a>
-            <a class="btn btn-quiet" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">All releases <span aria-hidden="true">↗</span></a>
-            <a class="btn btn-quiet" href="https://github.com/sifat-jaman-13/stream-clip-ai#run-from-source">Run from source <span aria-hidden="true">↗</span></a>
+            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Release notes &amp; SHA-256</a>
+            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai#run-from-source">Run from source</a>
           </div>
-          <div class="download-note">Current stable Windows build: v3.0.0. The 4.0 major update is in development and does not yet have a new installer. The installer is unsigned; review the release notes and SHA-256 checksum.</div>
+          <div class="download-note">
+            Current release: v4.0.4. Verify the published SHA-256 checksum on the GitHub release page before installing. Proprietary non-commercial source-available licence (see LICENSE).
+          </div>
         </div>
       </div>
     </section>
   </main>
 
   <footer>
-    <div class="wrap footer-main">
-      <div class="footer-brand">
-        <a class="brand" href="#top"><img src="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/app-icon.png" alt=""><span>StreamSnip <span>AI</span></span></a>
-        <p>A local-first clipping studio for streamers and creators. Built and maintained by Sifat Jaman / ScarZero.</p>
+    <div class="wrap">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a class="brand" href="#top"><img src="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/app-icon.png" alt=""><span>StreamSnip <span class="brand-accent">AI</span></span></a>
+          <p>A local-first creator clipping studio for Windows. Built and maintained by Sifat Jaman.</p>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/sifat-jaman-13/stream-clip-ai">GitHub</a>
+          <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Releases</a>
+          <a href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/README.md">Documentation</a>
+          <a href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/LICENSE">License</a>
+          <a href="https://youtube.com/@scarclipfarm">YouTube</a>
+          <a href="https://www.instagram.com/scarzero13/">Instagram</a>
+        </div>
       </div>
-      <div class="footer-links">
-        <a href="https://github.com/sifat-jaman-13/stream-clip-ai">GitHub</a>
-        <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Releases</a>
-        <a href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/README.md">Documentation</a>
-        <a href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/LICENSE">Non-commercial licence</a>
-        <a href="https://youtube.com/@scarclipfarm">YouTube</a>
-        <a href="https://www.instagram.com/scarzero13/">Instagram</a>
+      <div class="footer-bottom">
+        <span>© <span id="year">2026</span> StreamSnip AI. Proprietary non-commercial source-available licence.</span>
+        <span class="mono">v4.0.4 · Local-first creator workspace</span>
       </div>
-    </div>
-    <div class="wrap footer-bottom">
-      <span>© <span id="year">2026</span> StreamSnip AI. Proprietary non-commercial source-available licence.</span>
-      <span>Made for creators who would rather be making than scrubbing.</span>
     </div>
   </footer>
 
@@ -563,22 +1115,34 @@
           });
         });
       }
+
+      var tabs = document.querySelectorAll(".studio-tab");
+      var panels = document.querySelectorAll(".studio-panel");
+      tabs.forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          var target = tab.getAttribute("data-tab");
+          tabs.forEach(function (t) { t.setAttribute("aria-selected", String(t === tab)); });
+          panels.forEach(function (p) { p.classList.toggle("active", p.id === "tab-" + target); });
+        });
+      });
+
+      var presets = document.querySelectorAll(".preset-pill");
+      var caption = document.getElementById("demo-caption");
+      var presetLabel = document.getElementById("preset-label");
+      presets.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          presets.forEach(function (b) { b.setAttribute("aria-pressed", String(b === btn)); });
+          if (presetLabel) presetLabel.textContent = btn.getAttribute("data-style") || "GTA Neon";
+          if (caption) {
+            caption.style.color = btn.getAttribute("data-color") || "#efff43";
+            var b = caption.querySelector("b");
+            if (b) b.style.color = btn.getAttribute("data-hi") || "#ff45a8";
+          }
+        });
+      });
+
       var year = document.getElementById("year");
       if (year) year.textContent = String(new Date().getFullYear());
-      var items = document.querySelectorAll(".reveal");
-      if ("IntersectionObserver" in window && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        var observer = new IntersectionObserver(function (entries) {
-          entries.forEach(function (entry) {
-            if (entry.isIntersecting) {
-              entry.target.classList.add("visible");
-              observer.unobserve(entry.target);
-            }
-          });
-        }, { threshold: 0.12 });
-        items.forEach(function (item) { observer.observe(item); });
-      } else {
-        items.forEach(function (item) { item.classList.add("visible"); });
-      }
     })();
   </script>
 </body>

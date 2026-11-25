@@ -11,7 +11,7 @@ StreamSnip AI is a desktop-hosted creator workspace. It combines Twitch and YouT
 
 The React Creator Studio is the default interface. The Python engine continues to handle capture and media processing; a loopback-only FastAPI server exposes the local application API. The Windows installer prepares the isolated Python runtime, dependencies, and speech models during installation or repair. It discovers installed stable 64-bit Python 3.10+ interpreters, tests the current dependency set in a disposable environment, and chooses the newest compatible version. Only when no installed interpreter can resolve the dependencies does it install a checksum-verified Python 3.14.10 privately inside the StreamSnip folder; it never replaces a system Python or changes global PATH. After setup, the desktop shortcut starts the prepared runtime directly; normal app launches do not rerun setup or re-download models.
 
-> **Current release: 4.0.3.** The Windows installer is attached to the GitHub release. Verify the published SHA-256 checksum before installing.
+> **Current release: 4.0.4.** The Windows installer is attached to the GitHub release. Verify the published SHA-256 checksum before installing.
 
 ## The creator workflow
 
@@ -38,7 +38,8 @@ Opening Live Studio does not start a recording. Capture starts only after the us
 - Analyze transcript windows for high-potential moments using local scoring or a configured AI provider.
 - Choose Hook Words, Ollama, Gemini, Hugging Face, or a custom OpenAI-compatible chat-completions provider, subject to provider configuration.
 - Render portrait, landscape, square, and 4:5 clips with configurable framing and captions.
-- Detect facecam regions across multiple video frames, then adjust the facecam and gameplay crops independently.\n- Preview a short rendered MP4 using the same crop, layout, and caption pipeline as the final clip.\n- Choose six word-level caption animations, including GTA Neon, and place captions at five preset positions.\n- Mask detected profanity in captions and post copy, then beep or mute only the matching word in rendered audio.\n- Record live streams at a configurable 8,000?50,000 Kbps target (8,000 Kbps minimum).\n- Generate transcript-grounded titles, descriptions, and hashtags.
+- Detect facecam regions across multiple video frames, then adjust the facecam and gameplay crops independently.
+- Preview a short rendered MP4 using the same crop, layout, and caption pipeline as the final clip.\n- Choose six word-level caption animations, including GTA Neon, and place captions at five preset positions.\n- Mask detected profanity in captions and post copy, then beep or mute only the matching word in rendered audio.\n- Record live streams at a configurable 8,000–50,000 Kbps target (8,000 Kbps minimum).\n- Generate transcript-grounded titles, descriptions, and hashtags.
 - Review clips before sharing and keep posted clips in a separate Published view.
 - Publish through Zernio when an API key and eligible connected social account are available.
 - Publish an individual clip to selected connected platforms/accounts from its review dialog, or use the manual browser handoff.\n- Track completed posts in a persistent Published view; scheduled posts are not marked as published before they are accepted.\n- Use manual browser handoff as a fallback; the user selects the local video and completes the final Publish action.

@@ -12,7 +12,7 @@ StreamSnip AI is a desktop-hosted creator workspace. It combines Twitch and YouT
 
 The React Creator Studio is the default interface. The Python engine continues to handle capture and media processing; a loopback-only FastAPI server exposes the local application API. The Windows installer prepares the isolated Python runtime, dependencies, and speech models during installation or repair. It discovers installed stable 64-bit Python 3.10+ interpreters, tests the current dependency set in a disposable environment, and chooses the newest compatible version. Only when no installed interpreter can resolve the dependencies does it install a checksum-verified Python 3.14.10 privately inside the StreamSnip folder; it never replaces a system Python or changes global PATH. After setup, the desktop shortcut starts the prepared runtime directly; normal app launches do not rerun setup or re-download models. Python 3.15 is supported: StreamSnip installs faster-whisper without its optional ONNX Runtime VAD dependency because the application does not enable VAD; standard transcription remains available.
 
-> **Current release: 4.0.4.** The Windows installer is attached to the GitHub release. Verify the published SHA-256 checksum before installing.
+> **Current release: 4.0.5.** The Windows installer is attached to the GitHub release. Verify the published SHA-256 checksum before installing.
 
 ## The creator workflow
 

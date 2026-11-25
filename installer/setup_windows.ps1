@@ -141,6 +141,7 @@ function Find-SupportedPython([string]$RequirementsPath) {
 
     $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
     foreach ($pattern in @(
+        (Join-Path $env:LOCALAPPDATA "Python\pythoncore-*\python.exe"),
         (Join-Path $env:LOCALAPPDATA "Programs\Python\Python*\python.exe"),
         (Join-Path $env:ProgramFiles "Python*\python.exe"),
         (Join-Path $programFilesX86 "Python*\python.exe"),

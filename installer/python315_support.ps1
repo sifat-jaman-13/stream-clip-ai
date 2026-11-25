@@ -1,9 +1,21 @@
 function New-StreamSnipRequirementsProfile([string]$Version,[string]$RequirementsPath) {
     if ([version]$Version -lt [version]"3.15") { return $RequirementsPath }
     $profilePath = Join-Path $env:TEMP ("streamsnip-py315-" + [guid]::NewGuid().ToString("N") + ".txt")
-    $lines = @(Get-Content -LiteralPath $RequirementsPath | Where-Object { ([string]$_) -notmatch '(?i)^[ ]*(faster-whisper|onnxruntime)([<>=!~]|[ ]|$)' })
-    $lines += @("av>=11","ctranslate2>=4.0,<5","huggingface-hub>=0.21","tokenizers>=0.13,<1","tqdm>=4")
-    [IO.File]::WriteAllLines($profilePath,[string[]]$lines,(New-Object System.Text.UTF8Encoding($false)))
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($raw in (Get-Content -LiteralPath $RequirementsPath)) {
+        $line = [string]$raw
+        if ($line -match '(?i)^[ ]*(faster-whisper|onnxruntime)([<>=!~]|[ ]|$)') { continue }
+        $trimmed = $line.Trim()
+        if ($trimmed -and -not $seen.Add($trimmed)) { continue }
+        $lines.Add($line)
+    }
+    foreach ($dep in @("av>=11","ctranslate2>=4.0,<5","huggingface-hub>=0.21","tokenizers>=0.13,<1","tqdm>=4")) {
+        $pkg = ($dep -split '[<>=!~ ]')[0]
+        $alreadyPresent = $lines | Where-Object { $_ -match "(?i)^[ ]*$([regex]::Escape($pkg))([<>=!~]|[ ]|$)" }
+        if (-not $alreadyPresent) { $lines.Add($dep) }
+    }
+    [IO.File]::WriteAllLines($profilePath,[string[]]$lines.ToArray(),(New-Object System.Text.UTF8Encoding($false)))
     return $profilePath
 }
 function Install-StreamSnipDependencies([string]$RuntimePython,[string]$RequirementsPath,[string]$Version) {

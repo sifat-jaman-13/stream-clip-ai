@@ -39,10 +39,16 @@ Opening Live Studio does not start a recording. Capture starts only after the us
 - Choose Hook Words, Ollama, Gemini, Hugging Face, or a custom OpenAI-compatible chat-completions provider, subject to provider configuration.
 - Render portrait, landscape, square, and 4:5 clips with configurable framing and captions.
 - Detect facecam regions across multiple video frames, then adjust the facecam and gameplay crops independently.
-- Preview a short rendered MP4 using the same crop, layout, and caption pipeline as the final clip.\n- Choose six word-level caption animations, including GTA Neon, and place captions at five preset positions.\n- Mask detected profanity in captions and post copy, then beep or mute only the matching word in rendered audio.\n- Record live streams at a configurable 8,000–50,000 Kbps target (8,000 Kbps minimum).\n- Generate transcript-grounded titles, descriptions, and hashtags.
+- Preview a short rendered MP4 using the same crop, layout, and caption pipeline as the final clip.
+- Choose six word-level caption animations, including GTA Neon, and place captions at five preset positions.
+- Mask detected profanity in captions and post copy, then beep or mute only the matching word in rendered audio.
+- Record live streams at a configurable 8,000–50,000 Kbps target (8,000 Kbps minimum).
+- Generate transcript-grounded titles, descriptions, and hashtags.
 - Review clips before sharing and keep posted clips in a separate Published view.
 - Publish through Zernio when an API key and eligible connected social account are available.
-- Publish an individual clip to selected connected platforms/accounts from its review dialog, or use the manual browser handoff.\n- Track completed posts in a persistent Published view; scheduled posts are not marked as published before they are accepted.\n- Use manual browser handoff as a fallback; the user selects the local video and completes the final Publish action.
+- Publish an individual clip to selected connected platforms/accounts from its review dialog, or use the manual browser handoff.
+- Track completed posts in a persistent Published view; scheduled posts are not marked as published before they are accepted.
+- Use manual browser handoff as a fallback; the user selects the local video and completes the final Publish action.
 - Choose an application theme and font. Odysseus is the default theme; JetBrains Mono is the default interface font. Google Sans, Inter, Roboto, and other font options are available.
 
 Highlight scores are estimates, not guarantees of reach or engagement.

@@ -652,5 +652,5 @@ def select_moments(provider, words, duration, config, log=lambda _message: None,
             picks[absolute_second] = max(picks.get(absolute_second, 0.0), calibrated_score)
         window_start += window_size
     if fell_back:
-        log(f"Remaining transcript windows were analyzed with Ollama after Gemini {fallback_reason}.")
+        log(f"Remaining transcript windows were analyzed with {active_provider} after Gemini {fallback_reason}.")
     return sorted(picks.items())

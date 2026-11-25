@@ -722,6 +722,19 @@ def _atomic_text_write(path, content):
         temporary.unlink(missing_ok=True)
 
 
+def _unlink_clip_pair(clip_path):
+    """Remove a clip MP4 and its TXT sidecar, surfacing Windows file-lock guidance."""
+    for target in (clip_path, clip_path.with_suffix(".txt")):
+        try:
+            target.unlink(missing_ok=True)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) in (32, 33):
+                details = describe_file_lock(target, exc)
+                CORE.push_file_lock(details)
+                raise RuntimeError(details["message"]) from exc
+            raise
+
+
 def write_clip_metadata_files(output_dir, clip_filename, source_filename, start, end,
                               transcript, creator_credit="", on_warning=None,
                               post_title=None, post_description=None, post_hashtags=None):
@@ -4022,34 +4035,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     names = [item["name"] for item in _clip_index()
                              if (item["name"] in registry) == (tab == "posted")]
                     deleted = []
-                    for name in names:
-                        clip_path = find_clip_path(name)
-                        if not clip_path: continue
-                        for target in (clip_path, clip_path.with_suffix(".txt")):
-                            target.unlink(missing_ok=True)
-                        deleted.append(name)
-                    forget_posted_clips(deleted)
+                    try:
+                        for name in names:
+                            clip_path = find_clip_path(name)
+                            if not clip_path: continue
+                            _unlink_clip_pair(clip_path)
+                            deleted.append(name)
+                    finally:
+                        if deleted:
+                            forget_posted_clips(deleted)
                     return self._send(200, {"ok": True, "deleted": len(deleted)})
                 if path == "/api/delete_many":
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
                     valid = [str(n) for n in names if CLIP_RE.fullmatch(str(n)) and find_clip_path(str(n))]
                     if not valid: return self._send(400, {"error": "No valid clips selected."})
-                    for name in valid:
-                        clip_path = find_clip_path(name)
-                        if not clip_path:
-                            continue
-                        for target in (clip_path, clip_path.with_suffix(".txt")):
-                            try:
-                                target.unlink(missing_ok=True)
-                            except OSError as exc:
-                                if os.name == "nt" and getattr(exc, "winerror", None) in (32, 33):
-                                    details = describe_file_lock(target, exc)
-                                    CORE.push_file_lock(details)
-                                    raise RuntimeError(details["message"]) from exc
-                                raise
-                    forget_posted_clips(valid)
-                    return self._send(200, {"ok": True, "deleted": len(valid)})
+                    deleted = []
+                    try:
+                        for name in valid:
+                            clip_path = find_clip_path(name)
+                            if not clip_path:
+                                continue
+                            _unlink_clip_pair(clip_path)
+                            deleted.append(name)
+                    finally:
+                        if deleted:
+                            forget_posted_clips(deleted)
+                    return self._send(200, {"ok": True, "deleted": len(deleted)})
                 if path in ("/api/delete", "/api/reveal"):
                     name = str(body.get("name", ""))
                     clip_path = find_clip_path(name)
@@ -4058,16 +4070,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if path == "/api/reveal":
                         reveal(clip_path)
                     else:
-                        for target in (clip_path, clip_path.with_suffix(".txt")):
-                            try:
-                                target.unlink(missing_ok=True)
-                            except OSError as exc:
-                                if os.name == "nt" and getattr(exc, "winerror", None) in (32, 33):
-                                    details = describe_file_lock(target, exc)
-                                    CORE.push_file_lock(details)
-                                    raise RuntimeError(details["message"]) from exc
-                                raise
-                    if path == "/api/delete":
+                        _unlink_clip_pair(clip_path)
                         forget_posted_clips([name])
                     return self._send(200, {"ok": True})
                 if path == "/api/clip-metadata":
@@ -4083,7 +4086,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if sidecar.is_symlink():
                         raise ValueError("The metadata sidecar is a symbolic link and cannot be edited.")
                     metadata = title + (("\n\n" + description) if description else "")
-                    sidecar.write_text(metadata, encoding="utf-8")
+                    _atomic_text_write(sidecar, metadata)
                     CORE.push(f"Updated TXT metadata for {name}")
                     return self._send(200, {"ok": True, "name": name, "caption": metadata})
                 if path == "/api/open_folder":

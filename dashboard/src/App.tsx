@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity, AlertCircle, ArrowRight, ArrowUpRight, BadgeCheck, Check, CheckCircle2,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clapperboard, CloudUpload, Cpu, Download,
@@ -189,6 +189,7 @@ export default function App() {
   const [busy, setBusy] = useState("");
   const [quitting, setQuitting] = useState(false);
   const [toast, setToast] = useState<ToastDetail | null>(null);
+  const themeControlRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => installWindowLeaseLifecycle(), []);
 
@@ -222,8 +223,17 @@ export default function App() {
   useEffect(() => {
     if (!themeOpen) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") setThemeOpen(false); };
+    const closeOutside = (event: PointerEvent) => {
+      if (themeControlRef.current && !themeControlRef.current.contains(event.target as Node)) {
+        setThemeOpen(false);
+      }
+    };
     window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
+    window.addEventListener("pointerdown", closeOutside);
+    return () => {
+      window.removeEventListener("keydown", close);
+      window.removeEventListener("pointerdown", closeOutside);
+    };
   }, [themeOpen]);
 
   const setClipTab = workspace.setClipTab;
@@ -294,7 +304,7 @@ export default function App() {
             <kbd>Enter</kbd>
           </form>
           <EnginePill connected={connected} running={running} stopping={workspace.state.stopping} />
-          <div className="theme-control">
+          <div className="theme-control" ref={themeControlRef}>
             <button className="theme-trigger" aria-label={"Appearance: " + selectedTheme.name} aria-expanded={themeOpen} onClick={() => setThemeOpen((value) => !value)}><Palette size={16} /><span>{selectedTheme.name}</span><ChevronDown size={13} /></button>
             {themeOpen ? <div className="theme-popover" role="dialog" aria-label="Workspace appearance">
               <div className="theme-popover-title"><strong>Appearance</strong><span>Saved on this device</span></div>
@@ -754,6 +764,20 @@ function CreatorsPage({ workspace, busy, post, navigate }: { workspace: Workspac
   const [target, setTarget] = useState("");
   const [folderOpen, setFolderOpen] = useState("");
   const [removing, setRemoving] = useState<Creator | null>(null);
+  useEffect(() => {
+    if (!folderOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setFolderOpen(""); };
+    const onPointer = (event: PointerEvent) => {
+      const targetEl = event.target as HTMLElement | null;
+      if (!targetEl?.closest(".folder-menu")) setFolderOpen("");
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer);
+    };
+  }, [folderOpen]);
   const folders = [["live_clips", "Live clips"], ["live_recordings", "Live recordings"], ["vod_inbox", "Recorded VOD inbox"], ["vod_clips", "VOD clips"], ["vod_processed", "Processed VODs"], ["vod_failed", "Failed VODs"]];
   const activeSources = creators.filter((creator) => creator.running || isCreatorCaptureActive(creator, workspace)).length;
   const add = async (event: FormEvent<HTMLFormElement>) => {
@@ -852,7 +876,7 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
         <button className={!published ? "selected" : ""} onClick={() => { navigate("clips"); setSelectedClip(null); }}><Video size={15} />Ready to review <b>{count(workspace.state.clip_total)}</b></button>
         <button className={published ? "selected" : ""} onClick={() => { navigate("published"); setSelectedClip(null); }}><BadgeCheck size={15} />Published <b>{count(workspace.state.posted_total)}</b></button>
       </div>
-      <label className="library-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter this page by title or creator" /></label>
+      <label className="library-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter this page by title or creator" />{query ? <button type="button" className="search-clear-btn" aria-label="Clear clip search" onClick={() => setQuery("")}><X size={13} /></button> : null}</label>
     </div>
     {selectedNames.length ? <div className="selection-bar"><strong>{count(selectedNames.length)} selected</strong><Button size="small" onClick={() => openBulkPublishing(selectedNames)} disabled={published}><Send size={14} />Publish selected</Button><Button size="small" kind="danger" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete</Button><Button size="small" kind="quiet" onClick={() => setSelectedNames([])}>Clear</Button></div> : null}
     <div className={"clip-library-layout" + (selectedClip ? " has-inspector" : "")}>
@@ -973,19 +997,34 @@ function HypeWordsPage({ workspace }: { workspace: Workspace }) {
   </div>;
 }
 
+function isProblemLog(log: LogEntry) {
+  if (log.file_lock) return true;
+  return /\b(error|failed|failure|exception|warning|rejected|exhausted|unavailable)\b/i.test(log.m);
+}
 function ActivityPage({ workspace, busy, post }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
   const [filter, setFilter] = useState("");
-  const filtered = workspace.logs.filter((log) => (log.m + " " + log.t).toLowerCase().includes(filter.toLowerCase()));
+  const [view, setView] = useState<"all" | "problems">("all");
+  const problemCount = useMemo(() => workspace.logs.filter(isProblemLog).length, [workspace.logs]);
+  const filtered = workspace.logs.filter((log) => {
+    if (view === "problems" && !isProblemLog(log)) return false;
+    return (log.m + " " + log.t).toLowerCase().includes(filter.toLowerCase());
+  });
   return <div className="page-stack">
     <PageHeading title="Activity" description="Messages from capture, transcription, rendering, creator monitors, and publishing." actions={<a className="button button-secondary" href="/api/log/download"><Download size={15} />Download log</a>} />
-    <Panel title="Engine events" description={count(filtered.length) + " messages shown."} action={<label className="library-search"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter events" /></label>}>
-      {filtered.length ? <div className="activity-list">{filtered.slice().reverse().map((log) => <ActivityRow key={log.id} log={log} post={post} busy={busy} />)}</div> : <EmptyState icon={Activity} title="No activity found" description="Engine messages appear here when capture, processing, or publishing work begins." action={filter ? <Button onClick={() => setFilter("")}>Clear filter</Button> : undefined} />}
+    <Panel title="Engine events" description={count(filtered.length) + " messages shown."} action={<div className="activity-toolbar">
+      <div className="activity-filter-tabs" role="tablist" aria-label="Activity filter">
+        <button type="button" role="tab" aria-selected={view === "all"} className={view === "all" ? "selected" : ""} onClick={() => setView("all")}>All events</button>
+        <button type="button" role="tab" aria-selected={view === "problems"} className={view === "problems" ? "selected" : ""} onClick={() => setView("problems")}>Problems only{problemCount ? <b>{count(problemCount)}</b> : null}</button>
+      </div>
+      <label className="library-search"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter events" />{filter ? <button type="button" className="search-clear-btn" aria-label="Clear event filter" onClick={() => setFilter("")}><X size={13} /></button> : null}</label>
+    </div>}>
+      {filtered.length ? <div className="activity-list">{filtered.slice().reverse().map((log) => <ActivityRow key={log.id} log={log} post={post} busy={busy} />)}</div> : <EmptyState icon={Activity} title={view === "problems" ? "No problems recorded" : "No activity found"} description={view === "problems" ? "Errors and warnings from capture, AI, or publishing will appear here." : "Engine messages appear here when capture, processing, or publishing work begins."} action={filter ? <Button onClick={() => setFilter("")}>Clear filter</Button> : undefined} />}
     </Panel>
   </div>;
 }
 function ActivityRow({ log, post, busy }: { log: LogEntry; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; busy: string }) {
   const lock = log.file_lock as RecordLike | undefined;
-  return <div className="activity-row"><time>{log.t}</time><i /><div><p>{log.m}</p>{lock ? <div className="file-lock-warning"><AlertCircle size={14} /><span>{lock.message || "A process is holding this file open."}</span><Button size="small" onClick={() => void post("stop-file-holder", "/api/stop_file_holder", { name: lock.file, pid: lock.pid })} disabled={!!busy}>Close locking app</Button></div> : null}</div></div>;
+  return <div className={"activity-row" + (isProblemLog(log) ? " is-problem" : "")}><time>{log.t}</time><i /><div><p>{log.m}</p>{lock ? <div className="file-lock-warning"><AlertCircle size={14} /><span>{lock.message || "A process is holding this file open."}</span><Button size="small" onClick={() => void post("stop-file-holder", "/api/stop_file_holder", { name: lock.file, pid: lock.pid })} disabled={!!busy}>Close locking app</Button></div> : null}</div></div>;
 }
 
 function SettingsPage({ workspace, theme, setTheme, busy, post, navigate }: { workspace: Workspace; theme: ThemeId; setTheme: (theme: ThemeId) => void; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
@@ -1169,7 +1208,7 @@ function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mo
         <div className="caption-preview-copy">
           <strong>Caption preview</strong>
           <p>{settings.subtitle_custom ? "Custom position and styling are active." : "This preview follows the selected location preset."} The sample updates as you change settings.</p>
-          <span className="caption-preview-meta">{String(settings.subtitle_style || "GTA Neon")} ? {String(settings.position || "Lower third")} ? {String(settings.subtitle_animation || "highlight").replace(/_/g, " ")}</span>
+          <span className="caption-preview-meta">{String(settings.subtitle_style || "GTA Neon")} · {String(settings.position || "Lower third")} · {String(settings.subtitle_animation || "highlight").replace(/_/g, " ")}</span>
         </div>
         <div className="caption-preview-phone" aria-label="Caption placement preview">
           <div className="caption-preview-top"><span>FACECAM</span></div>

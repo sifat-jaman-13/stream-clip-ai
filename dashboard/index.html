@@ -10,13 +10,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500;600;700&family=Google+Sans+Flex:GRAD,opsz,ROND,wdth,wght@0..100,6..144,0..100,25..151,1..1000&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Lato:wght@400;700;900&family=Montserrat:wght@400;500;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Open+Sans:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  </head>
     <script>
     try {
       const savedTheme = localStorage.getItem("streamsnip.theme") || "";
       const aliases = { midnight: "github", graphite: "github", dark: "studio-dark", light: "studio-light", studio: "studio-light", odyssey: "odysseus" };
       const resolvedTheme = aliases[savedTheme] || savedTheme;
-      document.documentElement.dataset.theme = ["odysseus", "studio-light", "studio-dark", "github", "odysseas"].includes(resolvedTheme) ? resolvedTheme : "odysseus";
+      document.documentElement.dataset.theme = ["odysseus", "studio-light", "studio-dark", "github", "nord", "odysseas"].includes(resolvedTheme) ? resolvedTheme : "odysseus";
       const fontFamilies = {
         "google-sans": '"Google Sans Flex", "Google Sans", "Segoe UI", Arial, sans-serif',
         inter: '"Inter", Arial, sans-serif', roboto: '"Roboto", Arial, sans-serif',
@@ -31,7 +30,8 @@
       if (defaultFont !== savedFont) localStorage.setItem("streamsnip.font", defaultFont);
       document.documentElement.style.setProperty("--font-family", fontFamilies[defaultFont] || fontFamilies["jetbrains-mono"]);
     } catch { document.documentElement.dataset.theme = "odysseus"; }
-  </script>
+    </script>
+  </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

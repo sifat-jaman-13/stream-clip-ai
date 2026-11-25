@@ -57,7 +57,7 @@ const emptyState: DashboardState = {
   stopping: false,
   mode: null,
   phase: "idle",
-  status: "Connecting to StreamSnip AIâ€¦",
+  status: "Connecting to StreamSnip AI…",
   progress: 0,
   posting: { active: false, total: 0, completed: 0, current: "", errors: 0 },
   logs: [],

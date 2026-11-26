@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "4.0.5"
+  #define MyAppVersion "4.0.6"
 #endif
 #define MyAppName "StreamSnip AI"
 #define MyAppPublisher "ScarZero"
@@ -26,8 +26,8 @@ DisableProgramGroupPage=yes
 [Files]
 Source: "..\dist\StreamSnipDesktopNative\*"; DestDir: "{app}\desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\LICENSE-NeonClipping.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\LICENSE-YuNet.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\licenses\third-party\*"; DestDir: "{app}\licenses\third-party"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\autoclip.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\api_server.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\ai_highlights.py"; DestDir: "{app}\source"; Flags: ignoreversion

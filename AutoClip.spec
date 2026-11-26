@@ -2,7 +2,7 @@
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets', 'assets'), ('models/face_detection_yunet_2023mar.onnx', 'models'), ('LICENSE-NeonClipping.txt', '.'), ('LICENSE-YuNet.txt', '.')]
+datas = [('assets', 'assets'), ('LICENSE', '.'), ('models/face_detection_yunet_2023mar.onnx', 'models'), ('licenses/third-party/YuNet-MIT.txt', 'licenses/third-party'), ('licenses/third-party/JetBrains-Mono-OFL.txt', 'licenses/third-party')]
 binaries = []
 hiddenimports = []
 hiddenimports += collect_submodules('streamlink')

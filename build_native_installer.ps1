@@ -62,7 +62,7 @@ if (-not $iscc) {
 if (-not $iscc) { throw "Inno Setup 6 is required to create the native StreamSnip AI installer." }
 
 $versionMatch = Select-String -Path (Join-Path $PSScriptRoot "autoclip.py") -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
-$version = if ($versionMatch) { $versionMatch.Matches[0].Groups[1].Value } else { "4.0.5" }
+$version = if ($versionMatch) { $versionMatch.Matches[0].Groups[1].Value } else { "4.0.6" }
 
 Write-Host "Compiling StreamSnipAI-Native-Setup.exe (version $version)..." -ForegroundColor Cyan
 & $iscc "/DMyAppVersion=$version" $iss

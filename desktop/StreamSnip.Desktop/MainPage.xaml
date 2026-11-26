@@ -227,7 +227,7 @@
                     <TextBlock Text="·" Foreground="{StaticResource LineBrush}" />
                     <TextBlock Text="Capture and rendering stay on this PC" FontSize="10" Foreground="{StaticResource MutedTextBrush}" />
                 </StackPanel>
-                <TextBlock Grid.Column="2" Text="StreamSnip AI  •  4.0.5" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="StreamSnip AI  •  4.0.6" FontSize="10" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Grid>
     </Grid>

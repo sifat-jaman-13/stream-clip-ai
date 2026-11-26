@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.0.6] - 2026-11-26
+
+### Added
+- Rebuilt the public GitHub Pages website around real native WinUI 3 product screenshots and a clearer download path.
+- Replaced the repository README with a structured product and technical guide, including current publishing destinations, install verification, local-first boundaries, and developer instructions.
+- Consolidated bundled third-party notices under licenses/third-party/ and documented the exact scope of each notice.
+
+### Fixed
+- Removed an unrelated NeonClipping licence notice; StreamSnip's caption treatment is independently implemented.
+- Kept the YuNet MIT notice for the bundled face-detection model and the JetBrains Mono OFL notice for the bundled font, without attributing StreamSnip's own detection/framing logic to either.
+- Synchronized the application version across Python metadata, the native desktop UI, the package manifest, and installer defaults.
+
+### Verification
+- 257 Python tests passed, including 8 subtests.
+- Frontend lint and Vite production build passed; the native WinUI 3 application publish succeeded.
+- The tagged Windows release workflow compiles the Inno Setup 6 installer and attaches its matching SHA-256 checksum.
+
 ## [4.0.4] - 2026-11-25
 
 ### Fixed

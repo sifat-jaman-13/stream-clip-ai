@@ -22,7 +22,9 @@ ENV/
 # Runtime outputs (user-generated)
 out/
 rec/
-models/
+models/*
+!models/
+!models/face_detection_yunet_2023mar.onnx
 settings.json
 custom_words.txt
 zernio.json

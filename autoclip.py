@@ -34,7 +34,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            ollama_models, select_moments, test_provider)
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
-APP_VERSION = "4.0.5"
+APP_VERSION = "4.0.6"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -1368,7 +1368,7 @@ def group_words(ws, max_words, max_chars, gap=0.7):
     return groups
 
 SUBTITLE_PRESETS = {
-    # NeonClipping-inspired GTA look, independently implemented for StreamSnip.
+    # Original GTA-style neon caption treatment, implemented for StreamSnip AI.
     "GTA Neon": {"font": "Impact", "text": "#EFFF43", "highlight": "#FF45A8", "stroke": "#301045", "outline": 7, "shadow": 5, "pop": True},
     "Classic": {"font": "Impact", "text": "#FFFFFF", "stroke": "#000000", "outline": 9, "shadow": 4, "pop": True},
     "Hormozi": {"font": "Arial Black", "text": "#FFFFFF", "stroke": "#000000", "outline": 10, "shadow": 4, "pop": True},

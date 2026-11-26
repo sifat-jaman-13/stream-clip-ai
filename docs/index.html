@@ -1,782 +1,247 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-type="software">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#171c23">
-  <meta name="description" content="StreamSnip AI is a local-first Windows creator studio. Capture Twitch and YouTube, process VODs, transcribe locally, frame and caption clips, then publish reviewed videos through Zernio.">
+  <meta name="theme-color" content="#0b1017">
+  <meta name="description" content="StreamSnip AI is a native Windows creator studio for capturing live streams and VODs, finding standout moments, reviewing clips, and publishing through Zernio.">
+  <meta name="page-type" content="software">
+  <meta name="site-kind" content="software">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="StreamSnip AI — Find the moment. Make it a clip.">
-  <meta property="og:description" content="Native WinUI 3 desktop app with a local Python media engine for stream capture, VOD processing, local transcription, facecam framing, captions, and Zernio publishing.">
+  <meta property="og:title" content="StreamSnip AI — Make the moment count">
+  <meta property="og:description" content="A native Windows creator studio for live capture, VOD clipping, local transcription, clip review, and publishing.">
   <meta property="og:url" content="https://sifat-jaman-13.github.io/stream-clip-ai/">
   <meta property="og:image" content="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/streamsnipai-social-card.svg">
   <meta property="og:image:type" content="image/svg+xml">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/streamsnipai-social-card.svg">
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/app-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <title>StreamSnip AI — Native Windows Creator Studio</title>
   <style>
     :root {
       color-scheme: dark;
-      --canvas: #171c23;
-      --bg: #1b2028;
-      --surface: #232b35;
-      --surface-elevated: #282c34;
-      --surface-hover: #2d3743;
-      --ink: #e8f0f4;
-      --body: #c8d5dc;
-      --muted: #9cdef2;
-      --quiet: #8aa3b0;
-      --line: #355a66;
-      --line-soft: rgba(156, 222, 242, 0.14);
-      --accent: #e06c75;
-      --accent-hover: #eb7d86;
-      --accent-ink: #17191e;
-      --success: #80c99a;
-      --warning: #e6b96f;
-      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-      --radius-panel: 14px;
-      --radius-control: 8px;
-      --max: 1180px;
-      --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-      --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
-      --font-mono: "JetBrains Mono", Consolas, monospace;
+      --bg: #0b1017;
+      --bg-soft: #101823;
+      --panel: #131d29;
+      --panel-raised: #182433;
+      --line: rgba(176, 202, 218, .14);
+      --line-strong: rgba(176, 202, 218, .24);
+      --ink: #f2f6f7;
+      --body: #b5c4ce;
+      --muted: #8295a3;
+      --cyan: #8bd9d4;
+      --cyan-strong: #b1f0e9;
+      --coral: #f18b79;
+      --green: #89d5a8;
+      --display: "Space Grotesk", "DM Sans", system-ui, sans-serif;
+      --sans: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "Cascadia Code", Consolas, monospace;
+      --max: 1240px;
+      --radius: 18px;
+      --ease: cubic-bezier(.22, 1, .36, 1);
     }
-
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: 84px; }
-    body {
-      margin: 0;
-      background: var(--canvas);
-      color: var(--ink);
-      font-family: var(--font-sans);
-      font-size: 15px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-    ::selection { background: var(--accent); color: var(--accent-ink); }
-    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    * { scrollbar-color: var(--line) var(--canvas); scrollbar-width: thin; }
-
+    html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+    ::selection { background: var(--cyan); color: #071217; }
+    :focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
     a { color: inherit; text-decoration: none; }
     button { font: inherit; color: inherit; cursor: pointer; }
-    .wrap { width: min(var(--max), calc(100% - 48px)); margin-inline: auto; }
-    .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-
-    /* Top release bar */
-    .release-bar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      min-height: 38px;
-      padding: 6px 16px;
-      background: #12171d;
-      border-bottom: 1px solid var(--line-soft);
-      font-size: 12px;
-      color: var(--body);
-      text-align: center;
-    }
-    .release-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--success);
-      flex: 0 0 auto;
-    }
-    .release-bar a {
-      color: var(--muted);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 600;
-      text-decoration: underline;
-      text-underline-offset: 3px;
-    }
-    .release-bar a:hover { color: var(--ink); }
-
-    /* Navigation */
-    .nav-shell {
-      position: sticky;
-      top: 0;
-      z-index: 30;
-      background: rgba(23, 28, 35, 0.88);
-      backdrop-filter: blur(14px);
-      border-bottom: 1px solid var(--line-soft);
-    }
-    .nav {
-      height: 68px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-    }
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      font-family: var(--font-display);
-      font-size: 17px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      white-space: nowrap;
-    }
-    .brand img {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      object-fit: cover;
-      border: 1px solid var(--line);
-    }
-    .brand-accent { color: var(--accent); }
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 28px;
-      color: var(--body);
-      font-size: 13px;
-      font-weight: 500;
-    }
-    .nav-links a { transition: color 150ms var(--ease-out); }
-    .nav-links a:hover { color: var(--muted); }
-    .nav-actions { display: flex; align-items: center; gap: 10px; }
-    .menu-toggle {
-      display: none;
-      width: 40px;
-      height: 40px;
-      place-items: center;
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: var(--radius-control);
-    }
-
-    /* Buttons */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      min-height: 42px;
-      padding: 0 18px;
-      border-radius: var(--radius-control);
-      border: 1px solid transparent;
-      font-size: 13px;
-      font-weight: 600;
-      white-space: nowrap;
-      transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), transform 130ms var(--ease-out);
-    }
-    .btn:active { transform: scale(0.97); }
-    .btn svg { width: 16px; height: 16px; flex: 0 0 auto; }
-    .btn-primary {
-      background: var(--accent);
-      color: var(--accent-ink);
-    }
-    .btn-primary:hover { background: var(--accent-hover); }
-    .btn-secondary {
-      background: var(--surface);
-      border-color: var(--line);
-      color: var(--ink);
-    }
-    .btn-secondary:hover {
-      background: var(--surface-hover);
-      border-color: var(--muted);
-    }
-
-    /* Hero */
-    .hero {
-      padding: 56px 0 64px;
-      background: radial-gradient(ellipse 70% 50% at 75% 18%, rgba(156, 222, 242, 0.08), transparent), var(--canvas);
-      border-bottom: 1px solid var(--line-soft);
-    }
-    .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
-      align-items: center;
-      gap: 48px;
-    }
-    h1 {
-      margin: 0 0 18px;
-      font-family: var(--font-display);
-      font-size: clamp(38px, 4.8vw, 58px);
-      line-height: 1.04;
-      letter-spacing: -0.03em;
-      font-weight: 700;
-    }
-    h1 .accent { color: var(--accent); }
-    .hero-copy {
-      max-width: 52ch;
-      margin: 0;
-      color: var(--body);
-      font-size: 16px;
-      line-height: 1.7;
-    }
-    .hero-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 28px;
-    }
-    .hero-facts {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px 20px;
-      margin-top: 22px;
-      color: var(--quiet);
-      font-family: var(--font-mono);
-      font-size: 11px;
-    }
-    .hero-facts span {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-    }
-    .hero-facts svg { width: 14px; height: 14px; color: var(--success); }
-
-    /* Interactive Studio Frame */
-    .studio-frame {
-      background: var(--bg);
-      border: 1px solid var(--line);
-      border-radius: var(--radius-panel);
-      overflow: hidden;
-      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
-    }
-    .studio-topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 14px;
-      background: #141920;
-      border-bottom: 1px solid var(--line-soft);
-      font-family: var(--font-mono);
-      font-size: 11px;
-    }
-    .studio-brand-mini {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--ink);
-      font-weight: 600;
-    }
-    .studio-brand-badge {
-      width: 20px;
-      height: 20px;
-      border-radius: 5px;
-      background: var(--accent);
-      color: var(--accent-ink);
-      display: grid;
-      place-items: center;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .studio-tabs {
-      display: flex;
-      gap: 4px;
-      padding: 3px;
-      background: var(--canvas);
-      border: 1px solid var(--line-soft);
-      border-radius: 7px;
-    }
-    .studio-tab {
-      padding: 4px 9px;
-      border: 0;
-      border-radius: 5px;
-      background: transparent;
-      color: var(--quiet);
-      font-family: var(--font-mono);
-      font-size: 10px;
-      font-weight: 600;
-      transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
-    }
-    .studio-tab[aria-selected="true"] {
-      background: var(--surface-elevated);
-      color: var(--ink);
-    }
-    .studio-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 9px;
-      border-radius: 99px;
-      background: rgba(128, 201, 154, 0.12);
-      border: 1px solid rgba(128, 201, 154, 0.35);
-      color: var(--success);
-      font-size: 10px;
-      font-weight: 600;
-    }
-    .studio-pill i {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--success);
-    }
-    .studio-body {
-      padding: 16px;
-      display: grid;
-      gap: 14px;
-    }
-    .studio-panel { display: none; gap: 14px; }
-    .studio-panel.active { display: grid; }
-    .studio-row {
-      display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
-      gap: 12px;
-    }
-    .studio-card {
-      background: var(--surface);
-      border: 1px solid var(--line-soft);
-      border-radius: 10px;
-      padding: 12px;
-      display: grid;
-      gap: 8px;
-    }
-    .studio-card-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .studio-card-head strong { color: var(--ink); font-weight: 600; }
-    .pipeline-stages {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 6px;
-    }
-    .pipeline-stage {
-      padding: 7px 6px;
-      border-radius: 7px;
-      background: var(--bg);
-      border: 1px solid var(--line-soft);
-      text-align: center;
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: var(--quiet);
-    }
-    .pipeline-stage.done {
-      border-color: rgba(128, 201, 154, 0.4);
-      color: var(--success);
-    }
-    .pipeline-stage.current {
-      border-color: var(--accent);
-      color: var(--ink);
-      background: rgba(224, 108, 117, 0.12);
-    }
-    .clip-preview-mini {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .phone-mock {
-      width: 78px;
-      aspect-ratio: 9 / 16;
-      flex: 0 0 auto;
-      border-radius: 10px;
-      border: 2px solid var(--line);
-      background: #0d1218;
-      position: relative;
-      overflow: hidden;
-      display: grid;
-      grid-template-rows: 38% 62%;
-    }
-    .phone-cam {
-      background: linear-gradient(135deg, #2b3c4b, #1a242f);
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      display: grid;
-      place-items: center;
-      font-family: var(--font-mono);
-      font-size: 7px;
-      color: rgba(255,255,255,0.45);
-    }
-    .phone-game {
-      background: linear-gradient(150deg, #1b2d36, #111b24);
-      display: grid;
-      place-items: center;
-      font-family: var(--font-mono);
-      font-size: 7px;
-      color: rgba(255,255,255,0.35);
-    }
-    .phone-caption {
-      position: absolute;
-      left: 5px;
-      right: 5px;
-      bottom: 22%;
-      text-align: center;
-      font-family: var(--font-display);
-      font-size: 9px;
-      font-weight: 700;
-      line-height: 1.1;
-      text-transform: uppercase;
-      color: #efff43;
-      text-shadow: 0 1px 3px #000;
-    }
-    .phone-caption b { color: #ff45a8; }
-    .clip-meta-list {
-      display: grid;
-      gap: 6px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-    }
-    .clip-meta-list div {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      color: var(--body);
-      border-bottom: 1px solid var(--line-soft);
-      padding-bottom: 4px;
-    }
-    .clip-meta-list div:last-child { border-bottom: 0; padding-bottom: 0; }
-    .clip-meta-list span { color: var(--quiet); }
-
-    /* Interactive caption preset switcher */
-    .preset-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .preset-pill {
-      padding: 5px 10px;
-      border-radius: 6px;
-      border: 1px solid var(--line);
-      background: var(--bg);
-      color: var(--body);
-      font-family: var(--font-mono);
-      font-size: 11px;
-    }
-    .preset-pill[aria-pressed="true"] {
-      border-color: var(--accent);
-      background: rgba(224, 108, 117, 0.14);
-      color: var(--ink);
-    }
-
-    /* Spec strip */
-    .spec-strip {
-      background: var(--bg);
-      border-bottom: 1px solid var(--line-soft);
-    }
-    .spec-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-    }
-    .spec-item {
-      padding: 18px 20px;
-      border-right: 1px solid var(--line-soft);
-      display: grid;
-      gap: 3px;
-    }
-    .spec-item:last-child { border-right: 0; }
-    .spec-item strong {
-      font-family: var(--font-mono);
-      font-size: 13px;
-      color: var(--ink);
-    }
-    .spec-item span {
-      font-size: 12px;
-      color: var(--quiet);
-    }
-
-    /* Sections */
-    section.section { padding: 80px 0; }
-    section.section-alt {
-      background: var(--bg);
-      border-top: 1px solid var(--line-soft);
-      border-bottom: 1px solid var(--line-soft);
-    }
-    .section-head {
-      max-width: 640px;
-      margin-bottom: 40px;
-    }
-    h2 {
-      margin: 0 0 12px;
-      font-family: var(--font-display);
-      font-size: clamp(28px, 3.6vw, 40px);
-      line-height: 1.12;
-      letter-spacing: -0.025em;
-    }
-    .section-head p {
-      margin: 0;
-      color: var(--body);
-      font-size: 15px;
-      line-height: 1.7;
-    }
-
-    .feature-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 16px;
-    }
-    .feature-card {
-      padding: 22px;
-      background: var(--surface);
-      border: 1px solid var(--line-soft);
-      border-radius: var(--radius-panel);
-      display: grid;
-      align-content: start;
-      gap: 10px;
-      transition: border-color 160ms var(--ease-out), transform 160ms var(--ease-out);
-    }
-    .feature-card:hover {
-      border-color: var(--line);
-      transform: translateY(-2px);
-    }
-    .feature-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 9px;
-      background: var(--bg);
-      border: 1px solid var(--line);
-      color: var(--muted);
-      display: grid;
-      place-items: center;
-    }
-    .feature-icon svg { width: 18px; height: 18px; }
-    .feature-card h3 {
-      margin: 4px 0 0;
-      font-family: var(--font-display);
-      font-size: 16px;
-      font-weight: 700;
-    }
-    .feature-card p {
-      margin: 0;
-      color: var(--body);
-      font-size: 13px;
-      line-height: 1.65;
-    }
-
-    /* Pipeline workflow */
-    .workflow-grid {
-      display: grid;
-      grid-template-columns: 0.9fr 1.1fr;
-      gap: 48px;
-      align-items: start;
-    }
-    .steps {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-    }
-    .step-card {
-      padding: 20px;
-      background: var(--surface);
-      border: 1px solid var(--line-soft);
-      border-radius: var(--radius-panel);
-      display: grid;
-      gap: 8px;
-    }
-    .step-num {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--muted);
-    }
-    .step-card h3 {
-      margin: 0;
-      font-family: var(--font-display);
-      font-size: 15px;
-    }
-    .step-card p {
-      margin: 0;
-      color: var(--body);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    /* Local-first matrix */
-    .local-card {
-      display: grid;
-      grid-template-columns: 0.95fr 1.05fr;
-      gap: 44px;
-      padding: 40px;
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 18px;
-    }
-    .provider-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 20px;
-    }
-    .provider-tag {
-      padding: 5px 10px;
-      border-radius: 6px;
-      background: var(--bg);
-      border: 1px solid var(--line-soft);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .local-list {
-      display: grid;
-      gap: 0;
-    }
-    .local-item {
-      display: flex;
-      gap: 12px;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--line-soft);
-    }
-    .local-item:last-child { border-bottom: 0; padding-bottom: 0; }
-    .local-item:first-child { padding-top: 0; }
-    .local-check {
-      width: 20px;
-      height: 20px;
-      flex: 0 0 auto;
-      border-radius: 50%;
-      background: rgba(128, 201, 154, 0.14);
-      color: var(--success);
-      display: grid;
-      place-items: center;
-      margin-top: 2px;
-    }
-    .local-check svg { width: 12px; height: 12px; }
-    .local-item strong { display: block; font-size: 13px; color: var(--ink); }
-    .local-item small { display: block; color: var(--body); font-size: 12px; line-height: 1.55; margin-top: 2px; }
-
-    /* Download CTA */
-    .download-box {
-      padding: 48px 32px;
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      text-align: center;
-      display: grid;
-      justify-items: center;
-      gap: 14px;
-    }
-    .download-box h2 { margin: 0; }
-    .download-box p {
-      max-width: 56ch;
-      margin: 0;
-      color: var(--body);
-      font-size: 14px;
-    }
-    .download-actions {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-      margin-top: 8px;
-    }
-    .download-note {
-      max-width: 68ch;
-      color: var(--quiet);
-      font-family: var(--font-mono);
-      font-size: 11px;
-      line-height: 1.6;
-    }
-
-    /* Footer */
-    footer {
-      border-top: 1px solid var(--line-soft);
-      background: #12171d;
-      padding: 32px 0 24px;
-    }
-    .footer-top {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 28px;
-      padding-bottom: 24px;
-      border-bottom: 1px solid var(--line-soft);
-    }
-    .footer-brand p {
-      max-width: 320px;
-      margin: 10px 0 0;
-      color: var(--quiet);
-      font-size: 12px;
-    }
-    .footer-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 20px;
-      font-size: 13px;
-      color: var(--body);
-    }
-    .footer-links a:hover { color: var(--muted); }
-    .footer-bottom {
-      display: flex;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 12px;
-      padding-top: 18px;
-      color: var(--quiet);
-      font-size: 12px;
-    }
-
-    @media (max-width: 960px) {
-      .hero-grid, .workflow-grid, .local-card { grid-template-columns: 1fr; }
-      .spec-grid { grid-template-columns: repeat(2, 1fr); }
-      .spec-item:nth-child(2) { border-right: 0; }
-      .spec-item:nth-child(1), .spec-item:nth-child(2) { border-bottom: 1px solid var(--line-soft); }
-      .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    @media (max-width: 700px) {
-      .wrap { width: min(var(--max), calc(100% - 32px)); }
-      .nav-actions .btn { display: none; }
-      .menu-toggle { display: grid; }
-      .nav-links {
-        display: none;
-        position: absolute;
-        top: 68px;
-        left: 0;
-        right: 0;
-        padding: 12px 20px 18px;
-        background: var(--canvas);
-        border-bottom: 1px solid var(--line);
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0;
-      }
+    img { display: block; max-width: 100%; }
+    .wrap { width: min(var(--max), calc(100% - 56px)); margin-inline: auto; }
+    .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--cyan); font: 600 11px/1.2 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    .eyebrow::before { content: ""; width: 22px; height: 1px; background: currentColor; }
+    .announcement { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 6px 20px; background: #101923; border-bottom: 1px solid var(--line); color: var(--body); text-align: center; font-size: 11px; letter-spacing: .02em; }
+    .announcement-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px rgba(137,213,168,.65); }
+    .announcement a { color: var(--cyan); font-weight: 700; }
+    .site-header { position: sticky; top: 0; z-index: 50; background: rgba(11,16,23,.82); backdrop-filter: blur(18px); border-bottom: 1px solid var(--line); }
+    .nav { height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }
+    .brand { display: inline-flex; align-items: center; gap: 11px; white-space: nowrap; font: 700 18px/1 var(--display); letter-spacing: -.04em; }
+    .brand img { width: 34px; height: 34px; object-fit: cover; border-radius: 9px; }
+    .brand em { color: var(--cyan); font-style: normal; }
+    .nav-links { display: flex; align-items: center; gap: 30px; color: var(--body); font-size: 13px; font-weight: 600; }
+    .nav-links a { transition: color 160ms var(--ease); }
+    .nav-links a:hover { color: var(--cyan-strong); }
+    .nav-actions { display: flex; align-items: center; gap: 12px; }
+    .menu-toggle { display: none; width: 42px; height: 42px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); }
+    .nav-download-mobile { display: none; }
+    .button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 0 19px; border: 1px solid transparent; border-radius: 10px; font-size: 13px; font-weight: 700; white-space: nowrap; transition: transform 150ms var(--ease), background 150ms var(--ease), border-color 150ms var(--ease), color 150ms var(--ease); }
+    .button svg { width: 16px; height: 16px; flex: none; }
+    .button:hover { transform: translateY(-2px); }
+    .button:active { transform: translateY(0) scale(.98); }
+    .button-primary { background: var(--cyan); color: #071417; }
+    .button-primary:hover { background: var(--cyan-strong); }
+    .button-secondary { background: rgba(255,255,255,.035); border-color: var(--line-strong); color: var(--ink); }
+    .button-secondary:hover { border-color: rgba(139,217,212,.55); background: rgba(139,217,212,.07); }
+    .hero { position: relative; isolation: isolate; overflow: hidden; min-height: min(820px, calc(100svh - 112px)); display: flex; align-items: center; padding: 78px 0 84px; background: radial-gradient(ellipse 55% 64% at 83% 29%, rgba(51,145,144,.18), transparent 68%), radial-gradient(ellipse 45% 65% at 8% 0%, rgba(84,103,145,.14), transparent 70%), var(--bg); border-bottom: 1px solid var(--line); }
+    .hero::before { content: ""; position: absolute; z-index: -1; inset: 0; background-image: linear-gradient(rgba(173,205,216,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(173,205,216,.035) 1px, transparent 1px); background-size: 72px 72px; mask-image: linear-gradient(to bottom, black, transparent 88%); pointer-events: none; }
+    .hero-grid { display: grid; grid-template-columns: minmax(0,.82fr) minmax(0,1.18fr); align-items: center; gap: 58px; }
+    .hero-copy { max-width: 540px; }
+    h1 { margin: 22px 0; font: 700 clamp(48px, 5.8vw, 76px)/.99 var(--display); letter-spacing: -.065em; }
+    h1 span { color: var(--cyan); }
+    .hero-lede { max-width: 52ch; margin: 0; color: var(--body); font-size: 17px; line-height: 1.72; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 11px 20px; margin-top: 25px; color: var(--muted); font: 11px/1.5 var(--mono); }
+    .hero-meta span { display: inline-flex; align-items: center; gap: 8px; }
+    .hero-meta svg { width: 14px; height: 14px; color: var(--green); }
+    .hero-visual { position: relative; min-width: 0; }
+    .visual-frame { padding: 9px; position: relative; border: 1px solid rgba(172,221,218,.28); border-radius: 17px; background: linear-gradient(140deg, rgba(139,217,212,.13), rgba(255,255,255,.025) 42%, rgba(241,139,121,.08)); box-shadow: 0 36px 100px rgba(0,0,0,.48), 0 0 70px rgba(77,171,164,.08); }
+    .visual-frame img { width: 100%; aspect-ratio: 1.58 / 1; object-fit: cover; object-position: top left; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); }
+    .visual-label { position: absolute; left: 26px; top: 25px; display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 7px; background: rgba(7,13,19,.82); backdrop-filter: blur(12px); color: #eaf6f4; font: 600 9px/1 var(--mono); letter-spacing: .11em; }
+    .visual-label i { width: 6px; height: 6px; border-radius: 50%; background: var(--coral); }
+    .visual-index { position: absolute; right: -16px; bottom: 28px; padding: 12px 16px; border: 1px solid var(--line-strong); border-radius: 10px; background: #121c27; box-shadow: 0 16px 38px rgba(0,0,0,.32); color: var(--body); font: 10px/1.5 var(--mono); }
+    .visual-index strong { display: block; color: var(--cyan); font-size: 13px; }
+    .proof-strip { background: #0e151e; border-bottom: 1px solid var(--line); }
+    .proof-grid { display: grid; grid-template-columns: repeat(4,1fr); }
+    .proof-item { min-height: 94px; padding: 22px 25px; border-right: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+    .proof-item:first-child { border-left: 1px solid var(--line); }
+    .proof-item strong { font: 600 14px var(--display); letter-spacing: -.02em; }
+    .proof-item span { color: var(--muted); font-size: 11px; }
+    section.section { padding: 104px 0; }
+    section.section-alt { background: var(--bg-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .section-head { max-width: 700px; margin-bottom: 46px; }
+    .section-head h2, .feature-copy h2, .download-copy h2 { margin: 16px 0 14px; font: 600 clamp(32px,4vw,48px)/1.08 var(--display); letter-spacing: -.055em; }
+    .section-head p, .feature-copy p, .download-copy p { margin: 0; max-width: 60ch; color: var(--body); font-size: 15px; line-height: 1.75; }
+    .split { display: grid; grid-template-columns: minmax(0,.88fr) minmax(0,1.12fr); gap: 68px; align-items: center; }
+    .split.reverse { grid-template-columns: minmax(0,1.12fr) minmax(0,.88fr); }
+    .split.reverse .feature-copy { order: 2; }
+    .split.reverse .feature-visual { order: 1; }
+    .feature-copy { max-width: 500px; }
+    .feature-copy h2 { max-width: 12ch; }
+    .feature-points { display: grid; gap: 13px; margin: 28px 0 0; padding: 0; list-style: none; }
+    .feature-points li { display: grid; grid-template-columns: 18px 1fr; gap: 11px; align-items: start; color: var(--body); font-size: 13px; line-height: 1.6; }
+    .feature-points svg { width: 16px; height: 16px; margin-top: 3px; color: var(--cyan); }
+    .feature-visual { min-width: 0; position: relative; }
+    .screen-frame { padding: 8px; border: 1px solid var(--line-strong); border-radius: 15px; background: #0f1822; box-shadow: 0 28px 70px rgba(0,0,0,.3); overflow: hidden; }
+    .screen-frame img { width: 100%; border-radius: 8px; transition: transform 500ms var(--ease); }
+    .screen-frame:hover img { transform: scale(1.025); }
+    .screen-frame.wide img { aspect-ratio: 1.58 / 1; object-fit: cover; object-position: top left; }
+    .screen-frame.tall img { aspect-ratio: 1.45 / 1; object-fit: cover; object-position: top left; }
+    .workflow { display: grid; grid-template-columns: repeat(4,1fr); gap: 0; border: 1px solid var(--line-strong); border-radius: 15px; overflow: hidden; background: rgba(255,255,255,.018); }
+    .workflow-step { position: relative; min-height: 180px; padding: 24px 22px; border-right: 1px solid var(--line); }
+    .workflow-step:last-child { border-right: 0; }
+    .workflow-step span { color: var(--cyan); font: 600 11px var(--mono); }
+    .workflow-step h3 { margin: 18px 0 8px; font: 600 18px var(--display); letter-spacing: -.03em; }
+    .workflow-step p { margin: 0; color: var(--body); font-size: 12px; line-height: 1.65; }
+    .workflow-step:not(:last-child)::after { content: "→"; position: absolute; right: -10px; top: 25px; z-index: 2; width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; background: #121d29; color: var(--cyan); font: 12px var(--mono); }
+    .type-moment { padding: 104px 0; background: #d6e8e2; color: #0d2525; }
+    .moment-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 70px; align-items: center; }
+    .moment-kicker { color: #316a68; font: 600 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .moment-quote { margin: 0; font: 600 clamp(36px,5vw,64px)/1.02 var(--display); letter-spacing: -.065em; }
+    .moment-quote span { color: #418984; }
+    .moment-copy { max-width: 430px; color: #345250; font-size: 15px; line-height: 1.8; }
+    .moment-copy strong { color: #153b39; }
+    .local-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 64px; align-items: start; }
+    .local-copy h2 { margin: 16px 0; max-width: 11ch; font: 600 clamp(32px,4vw,46px)/1.08 var(--display); letter-spacing: -.055em; }
+    .local-copy p { color: var(--body); font-size: 14px; line-height: 1.75; }
+    .local-list { border-top: 1px solid var(--line-strong); }
+    .local-item { display: grid; grid-template-columns: 30px 1fr; gap: 16px; padding: 19px 0; border-bottom: 1px solid var(--line); }
+    .local-item .index { color: var(--cyan); font: 600 11px var(--mono); padding-top: 2px; }
+    .local-item strong { display: block; font-size: 14px; }
+    .local-item small { display: block; margin-top: 4px; color: var(--body); font-size: 12px; line-height: 1.65; }
+    .provider-row { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+    .provider { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: rgba(255,255,255,.025); color: var(--body); font: 600 11px var(--mono); }
+    .provider img { width: 15px; height: 15px; }
+    .download-section { padding: 105px 0; background: radial-gradient(ellipse 54% 80% at 50% 100%, rgba(63,147,143,.18), transparent 72%), #0e151e; border-top: 1px solid var(--line); }
+    .download-grid { display: grid; grid-template-columns: 1.1fr .9fr; align-items: center; gap: 68px; }
+    .download-copy h2 { max-width: 11ch; font-size: clamp(38px,5vw,58px); }
+    .download-copy p { max-width: 51ch; }
+    .download-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 29px; }
+    .download-facts { display: grid; gap: 0; border-top: 1px solid var(--line-strong); }
+    .download-fact { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-bottom: 1px solid var(--line); color: var(--body); font-size: 12px; }
+    .download-fact strong { color: var(--ink); font: 600 11px var(--mono); text-align: right; }
+    footer { padding: 38px 0 25px; background: #080d13; border-top: 1px solid var(--line); }
+    .footer-top { display: flex; justify-content: space-between; gap: 40px; padding-bottom: 30px; border-bottom: 1px solid var(--line); }
+    .footer-brand p { max-width: 350px; margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+    .footer-links { display: flex; flex-wrap: wrap; align-content: start; gap: 12px 24px; color: var(--body); font-size: 12px; }
+    .footer-links a:hover { color: var(--cyan); }
+    .footer-bottom { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-top: 18px; color: var(--muted); font-size: 11px; }
+    [data-enter] { opacity: 0; transform: translateY(18px); animation: enter 700ms var(--ease) forwards; }
+    [data-enter="1"] { animation-delay: 90ms; }
+    [data-enter="2"] { animation-delay: 180ms; }
+    [data-enter="3"] { animation-delay: 270ms; }
+    @keyframes enter { to { opacity: 1; transform: translateY(0); } }
+    @media (max-width: 1000px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 44px; }
+      .hero-copy { max-width: 750px; }
+      .hero-visual { max-width: 850px; }
+      .split, .split.reverse, .local-grid, .download-grid { grid-template-columns: 1fr; gap: 36px; }
+      .split.reverse .feature-copy, .split.reverse .feature-visual { order: initial; }
+      .feature-copy, .local-copy { max-width: 720px; }
+      .feature-copy h2, .local-copy h2 { max-width: 18ch; }
+    }
+    @media (max-width: 900px) {
+      .nav-actions .button { display: none; }
+      .menu-toggle { display: grid; place-items: center; }
+      .nav-links { display: none; position: absolute; top: 76px; left: 0; right: 0; padding: 12px 22px 18px; background: #0c131b; border-bottom: 1px solid var(--line-strong); flex-direction: column; align-items: stretch; gap: 0; }
       .nav-links.open { display: flex; }
-      .nav-links a { padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
-      .studio-row { grid-template-columns: 1fr; }
-      .pipeline-stages { grid-template-columns: repeat(2, 1fr); }
-      .feature-grid, .steps { grid-template-columns: 1fr; }
-      .local-card { padding: 24px 20px; }
+      .nav-links a { padding: 13px 0; border-bottom: 1px solid var(--line); }
+      .nav-download-mobile { display: block; color: var(--cyan) !important; font-weight: 700; }
+    }
+    @media (max-width: 720px) {
+      .wrap { width: min(var(--max), calc(100% - 34px)); }
+      .announcement { min-height: 42px; font-size: 10px; }
+      .nav { height: 66px; }
+      .nav-actions .button { display: none; }
+      .menu-toggle { display: grid; place-items: center; }
+      .nav-links { display: none; position: absolute; top: 66px; left: 0; right: 0; padding: 12px 22px 18px; background: #0c131b; border-bottom: 1px solid var(--line-strong); flex-direction: column; align-items: stretch; gap: 0; }
+      .nav-links.open { display: flex; }
+      .nav-links a { padding: 13px 0; border-bottom: 1px solid var(--line); }
+      .hero { min-height: auto; padding: 66px 0 70px; }
+      h1 { font-size: clamp(46px, 12vw, 64px); }
+      .hero-lede { font-size: 15px; }
+      .visual-index { right: 7px; bottom: 8px; }
+      .proof-grid { grid-template-columns: repeat(2,1fr); }
+      .proof-item { min-height: 82px; padding: 17px 14px; }
+      .proof-item:nth-child(2) { border-right: 0; }
+      .proof-item:nth-child(3) { border-left: 1px solid var(--line); border-top: 1px solid var(--line); }
+      .proof-item:nth-child(4) { border-top: 1px solid var(--line); }
+      section.section, .type-moment, .download-section { padding: 72px 0; }
+      .section-head { margin-bottom: 30px; }
+      .workflow { grid-template-columns: 1fr 1fr; }
+      .workflow-step { min-height: 160px; padding: 19px 15px; border-bottom: 1px solid var(--line); }
+      .workflow-step:nth-child(2) { border-right: 0; }
+      .workflow-step:nth-child(3), .workflow-step:nth-child(4) { border-bottom: 0; }
+      .workflow-step:nth-child(2)::after { display: none; }
+      .moment-inner { grid-template-columns: 1fr; gap: 25px; }
+      .footer-top { flex-direction: column; }
     }
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      *, *::before, *::after {
-        animation-duration: 0.01ms !important;
-        transition-duration: 0.01ms !important;
-      }
+      [data-enter] { opacity: 1; transform: none; animation: none; }
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
     }
   </style>
 </head>
 <body>
-  <div class="release-bar">
-    <span class="release-dot" aria-hidden="true"></span>
-    <span>StreamSnip AI · Native WinUI 3 desktop · Local Python media engine · Facebook, Instagram, and YouTube publishing.</span>
-    <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Release notes</a>
+  <div class="announcement">
+    <span class="announcement-dot" aria-hidden="true"></span>
+    <span>Native Windows Creator Studio</span>
+    <span aria-hidden="true">·</span>
+    <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Get the latest release</a>
   </div>
-
-  <header class="nav-shell">
+  <header class="site-header">
     <nav class="nav wrap" aria-label="Main navigation">
       <a class="brand" href="#top" aria-label="StreamSnip AI home">
         <img src="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/app-icon.png" alt="">
-        <span>StreamSnip <span class="brand-accent">AI</span></span>
+        <span>StreamSnip <em>AI</em></span>
       </a>
       <div class="nav-links" id="nav-links">
-        <a href="#features">Features</a>
         <a href="#workflow">Workflow</a>
+        <a href="#studio">Live Studio</a>
+        <a href="#library">Clip library</a>
         <a href="#publishing">Publishing</a>
-        <a href="#local-first">Local-first</a>
-        <a href="#download">Download</a>
-        <a href="https://github.com/sifat-jaman-13/stream-clip-ai">GitHub</a>
+        <a href="#local-first">Architecture</a>
+        <a class="nav-download-mobile" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Download for Windows ↗</a>
       </div>
       <div class="nav-actions">
-        <a class="btn btn-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">
-          Browse releases
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
-        </a>
+        <a class="button button-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Download for Windows</a>
         <button class="menu-toggle" id="menu-toggle" aria-label="Open navigation" aria-expanded="false" aria-controls="nav-links">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
       </div>
     </nav>
@@ -785,330 +250,180 @@
   <main id="top">
     <section class="hero">
       <div class="wrap hero-grid">
-        <div>
-          <h1>Find the moment.<br><span class="accent">Make it a clip.</span></h1>
-          <p class="hero-copy">
-            StreamSnip AI is a native Windows creator studio built around a local media engine. Capture Twitch and YouTube streams or process recorded VODs, transcribe locally, find standout moments, frame facecams, render captioned clips, and publish reviewed posts through Zernio.
-          </p>
-          <div class="hero-actions">
-            <a class="btn btn-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">
-              Browse Windows releases
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
+        <div class="hero-copy">
+          <span class="eyebrow" data-enter>Native creator workspace</span>
+          <h1 data-enter="1">Make the<br><span>moment count.</span></h1>
+          <p class="hero-lede" data-enter="2">Capture live streams. Find the moments worth keeping. Turn them into clips you can review, refine, and publish — from one native Windows workspace.</p>
+          <div class="hero-actions" data-enter="3">
+            <a class="button button-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">
+              Download StreamSnip AI
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
             </a>
-            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai">
-              Explore Source
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg>
-            </a>
+            <a class="button button-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai">Explore the project</a>
           </div>
-          <div class="hero-facts">
-            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 4 4L19 6"/></svg>Native WinUI 3 interface</span>
-            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 4 4L19 6"/></svg>Local media processing</span>
-            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 4 4L19 6"/></svg>Loopback-only engine API</span>
+          <div class="hero-meta">
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg>Windows 10 / 11</span>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg>Native WinUI 3</span>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg>Local media engine</span>
           </div>
         </div>
-
-        <div class="studio-frame" aria-label="Interactive StreamSnip AI Creator Studio preview">
-          <div class="studio-topbar">
-            <div class="studio-brand-mini">
-              <span class="studio-brand-badge">S</span>
-              <span>StreamSnip AI · Live Studio</span>
-            </div>
-            <div class="studio-tabs" role="tablist" aria-label="Studio preview views">
-              <button type="button" class="studio-tab" role="tab" aria-selected="true" data-tab="pipeline">Pipeline</button>
-              <button type="button" class="studio-tab" role="tab" aria-selected="false" data-tab="captions">Captions</button>
-              <button type="button" class="studio-tab" role="tab" aria-selected="false" data-tab="publish">Zernio</button>
-            </div>
-            <span class="studio-pill"><i></i>PREVIEW</span>
+        <div class="hero-visual" data-enter="2">
+          <div class="visual-frame">
+            <span class="visual-label"><i></i> THE CREATOR STUDIO</span>
+            <img src="./assets/product/creator-studio.png" alt="StreamSnip AI native dashboard with creator overview, monitoring status, clip activity, and the desktop workspace">
           </div>
-
-          <div class="studio-body">
-            <div class="studio-panel active" id="tab-pipeline" role="tabpanel">
-              <div class="studio-card">
-                <div class="studio-card-head">
-                  <strong>Session pipeline</strong>
-                  <span class="mono">Python · FFmpeg · Streamlink</span>
-                </div>
-                <div class="pipeline-stages">
-                  <div class="pipeline-stage done">1. Capture</div>
-                  <div class="pipeline-stage done">2. Whisper</div>
-                  <div class="pipeline-stage current">3. Score</div>
-                  <div class="pipeline-stage">4. Render</div>
-                  <div class="pipeline-stage">5. Zernio</div>
-                </div>
-              </div>
-              <div class="studio-row">
-                <div class="studio-card">
-                  <div class="studio-card-head">
-                    <strong>Active configuration</strong>
-                    <span>Odysseus</span>
-                  </div>
-                  <div class="clip-meta-list">
-                    <div><span>Source</span><strong>Twitch / VOD</strong></div>
-                    <div><span>Speech</span><strong>distil-large-v3</strong></div>
-                    <div><span>Scorer</span><strong>Gemini / Ollama / Hooks</strong></div>
-                    <div><span>Formats</span><strong>9:16 / 16:9 / 1:1 / 4:5</strong></div>
-                  </div>
-                </div>
-                <div class="studio-card">
-                  <div class="studio-card-head">
-                    <strong>9:16 Output</strong>
-                    <span>YuNet</span>
-                  </div>
-                  <div class="clip-preview-mini">
-                    <div class="phone-mock">
-                      <div class="phone-cam">FACECAM</div>
-                      <div class="phone-game">GAMEPLAY</div>
-                      <div class="phone-caption">NO WAY <b>THAT HIT</b></div>
-                    </div>
-                    <div class="clip-meta-list" style="flex:1">
-                      <div><span>Layout</span><strong>Split</strong></div>
-                      <div><span>Style</span><strong>GTA Neon</strong></div>
-                      <div><span>Sidecar</span><strong>.txt</strong></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="studio-panel" id="tab-captions" role="tabpanel">
-              <div class="studio-card">
-                <div class="studio-card-head">
-                  <strong>Caption animation presets</strong>
-                  <span class="mono" id="preset-label">GTA Neon</span>
-                </div>
-                <div class="preset-pills" role="group" aria-label="Caption preset selector">
-                  <button type="button" class="preset-pill" aria-pressed="true" data-style="GTA Neon" data-color="#efff43" data-hi="#ff45a8">GTA Neon</button>
-                  <button type="button" class="preset-pill" aria-pressed="false" data-style="Hormozi" data-color="#ffffff" data-hi="#d7ff3f">Hormozi</button>
-                  <button type="button" class="preset-pill" aria-pressed="false" data-style="Neon" data-color="#ffffff" data-hi="#50e8ff">Neon</button>
-                  <button type="button" class="preset-pill" aria-pressed="false" data-style="Fire" data-color="#ffffff" data-hi="#ff664a">Fire</button>
-                  <button type="button" class="preset-pill" aria-pressed="false" data-style="Classic" data-color="#ffffff" data-hi="#efff43">Classic</button>
-                </div>
-                <div class="clip-preview-mini" style="margin-top:6px">
-                  <div class="phone-mock">
-                    <div class="phone-cam">FACECAM</div>
-                    <div class="phone-game">GAMEPLAY</div>
-                    <div class="phone-caption" id="demo-caption">CLUTCH <b>MOMENT</b></div>
-                  </div>
-                  <div class="clip-meta-list" style="flex:1">
-                    <div><span>Modes</span><strong>Karaoke &amp; Classic</strong></div>
-                    <div><span>Formats</span><strong>9:16, 16:9, 1:1, 4:5</strong></div>
-                    <div><span>Profanity</span><strong>Beep or Mute word</strong></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="studio-panel" id="tab-publish" role="tabpanel">
-              <div class="studio-card">
-                <div class="studio-card-head">
-                  <strong>Zernio publishing handoff</strong>
-                  <span class="mono">Explicit user action</span>
-                </div>
-                <div class="clip-meta-list">
-                  <div><span>Destinations</span><strong>YouTube, Instagram, Facebook</strong></div>
-                  <div><span>Metadata</span><strong>Title + transcript-grounded copy (.txt)</strong></div>
-                  <div><span>Scheduling</span><strong>Now or scheduled</strong></div>
-                  <div><span>Tracking</span><strong>Separate Published registry</strong></div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <div class="visual-index"><strong>01 / THE WORKSPACE</strong>One place for the whole session</div>
         </div>
       </div>
     </section>
 
-    <div class="spec-strip">
-      <div class="wrap spec-grid">
-        <div class="spec-item">
-          <strong>Creator monitoring</strong>
-          <span>Independent live and recorded-VOD workflows</span>
-        </div>
-        <div class="spec-item">
-          <strong>Faster-Whisper + BYO</strong>
-          <span>Local speech-to-text or custom CLI</span>
-        </div>
-        <div class="spec-item">
-          <strong>YuNet Facecam Finder</strong>
-          <span>Multi-frame webcam + game crop detection</span>
-        </div>
-        <div class="spec-item">
-          <strong>Zernio Direct Publish</strong>
-          <span>Choose accounts and review returned outcomes</span>
-        </div>
+    <div class="proof-strip" aria-label="Product capabilities">
+      <div class="wrap proof-grid">
+        <div class="proof-item"><strong>Live + recorded VOD</strong><span>Start with a stream or a file</span></div>
+        <div class="proof-item"><strong>Creator-by-creator</strong><span>Separate monitoring and folders</span></div>
+        <div class="proof-item"><strong>Local-first processing</strong><span>Keep media on your PC</span></div>
+        <div class="proof-item"><strong>Review before publish</strong><span>You stay in control</span></div>
       </div>
     </div>
 
-    <section class="section" id="features">
+    <section class="section" id="workflow">
       <div class="wrap">
         <div class="section-head">
-          <h2>Built for creators who want control over every clip.</h2>
-          <p>Capture streams, transcribe locally, frame facecams cleanly, and export post-ready clips without handing your media library to a cloud editor.</p>
+          <span class="eyebrow">The workflow</span>
+          <h2>From a live moment to a post-ready clip.</h2>
+          <p>StreamSnip connects capture, transcription, highlight analysis, framing, rendering, and publishing in one predictable session. Start and stop capture yourself; inspect the result before it leaves your machine.</p>
         </div>
-        <div class="feature-grid">
-          <article class="feature-card">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/></svg></div>
-            <h3>Live streams &amp; VOD inbox</h3>
-            <p>Capture supported Twitch and YouTube live sources, or process local recordings through per-creator VOD watch folders.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4zM8 9h8M8 13h5M8 17h8"/></svg></div>
-            <h3>Flexible highlight scoring</h3>
-            <p>Score transcript windows with offline Hook Words, local Ollama models, Google Gemini, Hugging Face, or any OpenAI-compatible endpoint.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2.5"/><path d="M14 9h4m-4 4h4"/></svg></div>
-            <h3>Local YuNet facecam detection</h3>
-            <p>Analyze multiple frames locally with OpenCV + YuNet to locate the facecam, then drag and resize both facecam and gameplay boxes.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"/></svg></div>
-            <h3>Word-level animated captions</h3>
-            <p>Style animated word-level captions, fine-tune placement, add creator credit, and configure optional profanity masking.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h10M4 18h7"/></svg></div>
-            <h3>Transcript-grounded metadata</h3>
-            <p>Every rendered clip gets a matching .txt sidecar with a post-ready title, grounded description, creator credit, and topical hashtag.</p>
-          </article>
-          <article class="feature-card">
-            <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg></div>
-            <h3>Destination-aware publishing</h3>
-            <p>Connect your Zernio API keys, discover Facebook, Instagram, and YouTube accounts, choose destinations per clip, and track each result in the Published registry.</p>
-          </article>
+        <div class="workflow">
+          <article class="workflow-step"><span>01 / SOURCE</span><h3>Capture</h3><p>Choose a supported live stream, saved creator, recorded VOD, or local video.</p></article>
+          <article class="workflow-step"><span>02 / ANALYSE</span><h3>Find</h3><p>Transcribe speech and score candidate moments with the provider you choose.</p></article>
+          <article class="workflow-step"><span>03 / CREATE</span><h3>Shape</h3><p>Frame facecam and gameplay, choose a format, style captions, and render.</p></article>
+          <article class="workflow-step"><span>04 / PUBLISH</span><h3>Review</h3><p>Check the clip and metadata, choose destinations, and publish through Zernio.</p></article>
         </div>
       </div>
     </section>
 
-    <section class="section section-alt" id="workflow">
-      <div class="wrap workflow-grid">
-        <div class="section-head" style="margin-bottom:0">
-          <h2>From stream source to reviewed short in four steps.</h2>
-          <p>Opening Live Studio never starts recording automatically. Review your source, framing, AI provider, and captions before you press Start capture.</p>
-          <div style="margin-top:24px">
-            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai#the-workflow">Read the full workflow guide</a>
-          </div>
+    <section class="section section-alt" id="studio">
+      <div class="wrap split">
+        <div class="feature-copy">
+          <span class="eyebrow">01 / Live Studio</span>
+          <h2>Stay close to the stream.</h2>
+          <p>Choose a source, review the capture settings, set your AI provider and transcription model, and tune captions before starting. Live capture is an explicit action, not something that begins because a page opened.</p>
+          <ul class="feature-points">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Start and stop a single live session from the top of the studio.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Configure capture, AI, transcription, and captions in one place.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Preview the source and the rendered framing before committing.</span></li>
+          </ul>
         </div>
-        <div class="steps">
-          <article class="step-card">
-            <span class="step-num">01</span>
-            <h3>Select source or creator</h3>
-            <p>Choose a saved Twitch/YouTube creator or browse for a local VOD. Each creator keeps isolated live and VOD folders.</p>
-          </article>
-          <article class="step-card">
-            <span class="step-num">02</span>
-            <h3>Detect &amp; preview framing</h3>
-            <p>Run local YuNet facecam detection and render a 2.5-second MP4 preview using the exact FFmpeg + caption pipeline.</p>
-          </article>
-          <article class="step-card">
-            <span class="step-num">03</span>
-            <h3>Transcribe &amp; score</h3>
-            <p>Faster-Whisper transcribes locally on CUDA/CPU, then Hook Words, Ollama, Gemini, or custom APIs rank highlight windows.</p>
-          </article>
-          <article class="step-card">
-            <span class="step-num">04</span>
-            <h3>Review &amp; publish</h3>
-            <p>Inspect rendered clips and .txt metadata in the Clip library, then queue single or batch posts through Zernio.</p>
-          </article>
+        <div class="feature-visual">
+          <div class="screen-frame wide"><img src="./assets/product/live-studio.png" alt="StreamSnip AI Live Studio with source selection, capture controls, and processing configuration"></div>
         </div>
       </div>
     </section>
 
-    <section class="section section-alt" id="publishing">
-      <div class="wrap workflow-grid">
-        <div class="section-head" style="margin-bottom:0">
-          <h2>Publishing stays deliberate and destination-aware.</h2>
-          <p>Connect Zernio once, discover the social accounts it makes available, and choose exactly where each reviewed clip should go. TikTok is not part of the supported publishing integration.</p>
-          <div class="provider-tags">
-            <span class="provider-tag">Facebook</span>
-            <span class="provider-tag">Instagram</span>
-            <span class="provider-tag">YouTube</span>
-          </div>
-          <div style="margin-top:24px">
-            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai#publishing-with-zernio">Publishing setup &amp; limits</a>
-          </div>
+    <section class="section" id="creators">
+      <div class="wrap split reverse">
+        <div class="feature-copy">
+          <span class="eyebrow">02 / Creator monitoring</span>
+          <h2>Every creator gets a place of their own.</h2>
+          <p>Keep saved channels organised instead of mixing everything into one recording folder. See who is monitored, what is recording, and where that creator’s live and recorded-VOD work belongs.</p>
+          <ul class="feature-points">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Independent creator status and controls.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Separate Live and Recorded VOD folders.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Resource-aware processing with clear session state.</span></li>
+          </ul>
         </div>
-        <div class="steps">
-          <article class="step-card">
-            <span class="step-num">01</span>
-            <h3>Connect Zernio</h3>
-            <p>Add your API key or keys. StreamSnip discovers every supported Facebook, Instagram, and YouTube account returned by Zernio.</p>
-          </article>
-          <article class="step-card">
-            <span class="step-num">02</span>
-            <h3>Choose accounts</h3>
-            <p>Each discovered account has its own posting switch. Select one or several destinations for an individual clip or a batch.</p>
-          </article>
-          <article class="step-card">
-            <span class="step-num">03</span>
-            <h3>Respect provider limits</h3>
-            <p>Zernio controls request budgets and platform quotas. Different API keys may still share one billing-workspace request allowance.</p>
-          </article>
-          <article class="step-card">
-            <span class="step-num">04</span>
-            <h3>Track each outcome</h3>
-            <p>Only confirmed successful destinations enter the Published registry. Partial failures stay visible, and retries reuse the same logical-post idempotency key.</p>
-          </article>
+        <div class="feature-visual">
+          <div class="screen-frame tall"><img src="./assets/product/creator-monitoring.png" alt="StreamSnip AI creator monitoring view showing saved channels and their individual activity"></div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="local-first">
-      <div class="wrap">
-        <div class="local-card">
-          <div>
-            <h2>Local-first architecture, transparent integrations.</h2>
-            <p style="color:var(--body);margin:12px 0 0">The installed WinUI 3 desktop shell starts and supervises a local Python media engine. Capture, transcription, facecam detection, clip files, and FFmpeg rendering stay on your PC; the engine API is bound to loopback.</p>
-            <div class="provider-tags">
-              <span class="provider-tag">Hook Words · Offline</span>
-              <span class="provider-tag">Ollama · Local</span>
-              <span class="provider-tag">Faster-Whisper · Local</span>
-              <span class="provider-tag">Gemini · Optional</span>
-              <span class="provider-tag">Zernio · Optional</span>
-            </div>
-          </div>
-          <div class="local-list">
-            <div class="local-item">
-              <span class="local-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 4 4L19 6"/></svg></span>
-              <div>
-                <strong>Bring-your-own transcriber</strong>
-                <small>Use built-in Faster-Whisper or plug in any CLI transcriber (such as whisper.cpp) emitting timestamped JSON.</small>
-              </div>
-            </div>
-            <div class="local-item">
-              <span class="local-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 4 4L19 6"/></svg></span>
-              <div>
-                <strong>Explicit credential boundaries</strong>
-                <small>API keys stay in local settings and are never returned to the browser. Hosted AI providers only receive transcript text when selected.</small>
-              </div>
-            </div>
-            <div class="local-item">
-              <span class="local-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 4 4L19 6"/></svg></span>
-              <div>
-                <strong>Personalised workspace</strong>
-                <small>Odysseus graphite is the default, with curated themes and selectable interface fonts including JetBrains Mono.</small>
-              </div>
-            </div>
-          </div>
+    <section class="type-moment">
+      <div class="wrap moment-inner">
+        <div>
+          <div class="moment-kicker">The point of the whole workflow</div>
+          <p class="moment-quote">Less hunting.<br><span>More making.</span></p>
+        </div>
+        <p class="moment-copy">The point is not to generate an endless pile of files. It is to help you find a moment, turn it into a clean edit, and make a deliberate decision about what gets published. Your recordings and unfinished clips remain organised for review.</p>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="library">
+      <div class="wrap split">
+        <div class="feature-copy">
+          <span class="eyebrow">03 / Clip library</span>
+          <h2>Keep the good clips. Know what happened to the rest.</h2>
+          <p>Review rendered videos with their matching title and description. Keep unpublished work in the active Clips area and confirmed posts in the separate Published area. Remove individual clips or manage selections without losing track of their source.</p>
+          <ul class="feature-points">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Preview, inspect metadata, download, and delete.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Separate clips from published records.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Use selection and bulk-management controls.</span></li>
+          </ul>
+        </div>
+        <div class="feature-visual">
+          <div class="screen-frame wide"><img src="./assets/product/clip-library.png" alt="StreamSnip AI clip library showing generated clips with preview and management actions"></div>
         </div>
       </div>
     </section>
 
-    <section class="section section-alt" id="download">
-      <div class="wrap">
-        <div class="download-box">
-          <h2>Ready to clip your next stream.</h2>
-          <p>Get the Windows desktop installer from GitHub Releases, verify its SHA-256 checksum, or build the native WinUI 3 application from source.</p>
+    <section class="section" id="publishing">
+      <div class="wrap split reverse">
+        <div class="feature-copy">
+          <span class="eyebrow">04 / Publishing</span>
+          <h2>One last review. Then send it where it belongs.</h2>
+          <p>Connect your Zernio API key, discover the social accounts available to that connection, and choose destinations for each clip. StreamSnip checks and records each destination separately so partial outcomes remain visible.</p>
+          <ul class="feature-points">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Current direct-publishing destinations: Facebook, Instagram, and YouTube.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Per-account controls and per-destination results.</span></li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg><span>Retries reuse an idempotency key to reduce duplicate-post risk.</span></li>
+          </ul>
+        </div>
+        <div class="feature-visual">
+          <div class="screen-frame tall"><img src="./assets/product/publishing.png" alt="StreamSnip AI publishing settings with connected Zernio destinations and account controls"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="local-first">
+      <div class="wrap local-grid">
+        <div class="local-copy">
+          <span class="eyebrow">Under the hood</span>
+          <h2>Your PC does the media work.</h2>
+          <p>The native WinUI 3 desktop shell supervises a local Python engine. Capture, files, transcription, facecam detection, and FFmpeg rendering stay on your computer. Hosted services are used only when you select and configure them.</p>
+          <div class="provider-row" aria-label="Optional integrations">
+            <span class="provider"><img src="https://cdn.simpleicons.org/ollama/FFFFFF" alt="">Ollama</span>
+            <span class="provider"><img src="https://cdn.simpleicons.org/googlegemini/8BD9D4" alt="">Gemini</span>
+            <span class="provider"><img src="https://cdn.simpleicons.org/huggingface/FFD21E" alt="">Hugging Face</span>
+            <span class="provider">Custom AI endpoint</span>
+            <span class="provider">Zernio</span>
+          </div>
+        </div>
+        <div class="local-list">
+          <div class="local-item"><span class="index">01</span><div><strong>Local media pipeline</strong><small>Stream capture, Faster-Whisper, YuNet face detection, OpenCV processing, and FFmpeg rendering run locally when their dependencies are ready.</small></div></div>
+          <div class="local-item"><span class="index">02</span><div><strong>Optional hosted AI</strong><small>Only transcript text is sent to the hosted provider you selected for highlight analysis or metadata generation.</small></div></div>
+          <div class="local-item"><span class="index">03</span><div><strong>Loopback-only engine</strong><small>The local API stays bound to the PC. Keep it off public networks and do not expose it to an untrusted LAN.</small></div></div>
+          <div class="local-item"><span class="index">04</span><div><strong>Your credentials</strong><small>Provider credentials stay in local application settings and are not returned by the browser-facing status API.</small></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="download-section" id="download">
+      <div class="wrap download-grid">
+        <div class="download-copy">
+          <span class="eyebrow">Get started</span>
+          <h2>Bring your next stream into the studio.</h2>
+          <p>Download the native Windows installer from GitHub Releases. The setup checks for a compatible Python runtime, FFmpeg, application dependencies, and speech models — reusing valid components and installing only what is missing or incompatible.</p>
           <div class="download-actions">
-            <a class="btn btn-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">
-              Browse Windows releases
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
-            </a>
-            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Release notes &amp; SHA-256</a>
-            <a class="btn btn-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai#run-from-source">Run from source</a>
+            <a class="button button-primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Download for Windows</a>
+            <a class="button button-secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai#installation">Installation guide</a>
           </div>
-          <div class="download-note">
-            Choose a release that includes StreamSnipAI-Native-Setup.exe and its matching SHA-256 file. Older releases may contain only the legacy Python launcher, which is not the native WinUI 3 desktop package. Proprietary non-commercial source-available licence (see LICENSE).
-          </div>
+        </div>
+        <div class="download-facts">
+          <div class="download-fact"><span>Desktop</span><strong>WinUI 3 · x64</strong></div>
+          <div class="download-fact"><span>Supported OS</span><strong>Windows 10 / 11</strong></div>
+          <div class="download-fact"><span>Installer</span><strong>Per-user · no admin prompt</strong></div>
+          <div class="download-fact"><span>Verification</span><strong>SHA-256 checksum</strong></div>
+          <div class="download-fact"><span>Release notes</span><strong><a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases" style="color:var(--cyan)">GitHub Releases ↗</a></strong></div>
         </div>
       </div>
     </section>
@@ -1118,21 +433,20 @@
     <div class="wrap">
       <div class="footer-top">
         <div class="footer-brand">
-          <a class="brand" href="#top"><img src="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/app-icon.png" alt=""><span>StreamSnip <span class="brand-accent">AI</span></span></a>
-          <p>A native Windows creator studio with a local media engine. Built and maintained by Sifat Jaman.</p>
+          <a class="brand" href="#top"><img src="https://raw.githubusercontent.com/sifat-jaman-13/stream-clip-ai/master/assets/app-icon.png" alt=""><span>StreamSnip <em>AI</em></span></a>
+          <p>A native Windows creator studio for capturing streams, shaping clips, and publishing with control.</p>
         </div>
-        <div class="footer-links">
+        <nav class="footer-links" aria-label="Footer navigation">
           <a href="https://github.com/sifat-jaman-13/stream-clip-ai">GitHub</a>
-          <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Releases</a>
+          <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases">Releases</a>
+          <a href="https://github.com/sifat-jaman-13/stream-clip-ai/issues">Support</a>
           <a href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/README.md">Documentation</a>
           <a href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/LICENSE">License</a>
-          <a href="https://youtube.com/@scarclipfarm">YouTube</a>
-          <a href="https://www.instagram.com/scarzero13/">Instagram</a>
-        </div>
+        </nav>
       </div>
       <div class="footer-bottom">
-        <span>© <span id="year">2026</span> StreamSnip AI. Proprietary non-commercial source-available licence.</span>
-        <span class="mono">Native WinUI 3 · Local-first creator workspace</span>
+        <span>© <span id="year">2026</span> StreamSnip AI. All rights reserved.</span>
+        <span class="mono">Native WinUI 3 · Local-first media pipeline</span>
       </div>
     </div>
   </footer>
@@ -1155,32 +469,6 @@
           });
         });
       }
-
-      var tabs = document.querySelectorAll(".studio-tab");
-      var panels = document.querySelectorAll(".studio-panel");
-      tabs.forEach(function (tab) {
-        tab.addEventListener("click", function () {
-          var target = tab.getAttribute("data-tab");
-          tabs.forEach(function (t) { t.setAttribute("aria-selected", String(t === tab)); });
-          panels.forEach(function (p) { p.classList.toggle("active", p.id === "tab-" + target); });
-        });
-      });
-
-      var presets = document.querySelectorAll(".preset-pill");
-      var caption = document.getElementById("demo-caption");
-      var presetLabel = document.getElementById("preset-label");
-      presets.forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          presets.forEach(function (b) { b.setAttribute("aria-pressed", String(b === btn)); });
-          if (presetLabel) presetLabel.textContent = btn.getAttribute("data-style") || "GTA Neon";
-          if (caption) {
-            caption.style.color = btn.getAttribute("data-color") || "#efff43";
-            var b = caption.querySelector("b");
-            if (b) b.style.color = btn.getAttribute("data-hi") || "#ff45a8";
-          }
-        });
-      });
-
       var year = document.getElementById("year");
       if (year) year.textContent = String(new Date().getFullYear());
     })();

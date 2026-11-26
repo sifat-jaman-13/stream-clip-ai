@@ -36,7 +36,6 @@ Source: "..\zernio_poster.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\zernio_connections.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\facecam_detect.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}\source"; Flags: ignoreversion
-Source: "..\custom_words.txt"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\assets\*"; DestDir: "{app}\source\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\models\face_detection_yunet_2023mar.onnx"; DestDir: "{app}\source\models"; Flags: ignoreversion
 Source: "..\dashboard\dist\*"; DestDir: "{app}\source\dashboard\dist"; Flags: ignoreversion recursesubdirs createallsubdirs

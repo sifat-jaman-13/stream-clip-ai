@@ -109,21 +109,39 @@ Highlight scores are estimates—not guarantees of views, reach or engagement. A
 ## Install on Windows
 
 1. Open [GitHub Releases](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest).
-2. Download **StreamSnipAI-Native-Setup.exe** and its matching SHA-256 file.
-3. Verify the checksum with PowerShell.
-4. Run the installer and follow the setup prompts.
+2. Download **StreamSnipAI-Native-Setup.exe** and its matching **.sha256** file into the same folder.
+3. Open PowerShell and run the following check from that folder. This example uses your Downloads folder; change the path if you saved the files elsewhere.
+4. Run the installer only after the check prints a successful verification.
 5. Launch StreamSnip AI from the Start menu or desktop shortcut.
 
 ```powershell
-$actual = (Get-FileHash .\StreamSnipAI-Native-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-$expected = ((Get-Content .\StreamSnipAI-Native-Setup.exe.sha256).Trim() -split '\s+')[0].ToLowerInvariant()
+$ErrorActionPreference = 'Stop'
+Set-Location "$env:USERPROFILE\Downloads"
+
+$installer = Join-Path (Get-Location) 'StreamSnipAI-Native-Setup.exe'
+$checksumFile = "$installer.sha256"
+
+if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+    throw "Installer not found: $installer"
+}
+if (-not (Test-Path -LiteralPath $checksumFile -PathType Leaf)) {
+    throw "SHA-256 file not found: $checksumFile"
+}
+
+$checksumText = Get-Content -LiteralPath $checksumFile -Raw -ErrorAction Stop
+if ($checksumText -notmatch '^\s*([0-9a-fA-F]{64})(?:\s+.*)?\s*$') {
+    throw 'The SHA-256 file does not contain a valid 64-character hash.'
+}
+$expected = $Matches[1].ToLowerInvariant()
+$actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+
 if ($actual -ne $expected) {
-    throw "SHA-256 mismatch. Do not run this installer."
+    throw "SHA-256 mismatch. Do not run this installer. Expected $expected; received $actual."
 }
 "SHA-256 verified: $actual"
 ```
 
-The script verifies the downloaded installer against the SHA-256 sidecar and stops if the values differ.
+The check stops if either file is missing or unreadable, validates the checksum format, and prints success only after the installer hash matches the sidecar.
 
 ### What setup prepares
 

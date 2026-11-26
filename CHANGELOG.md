@@ -1,5 +1,20 @@
 # Changelog
 
+## [4.0.7] - 2026-11-27
+
+### Fixed
+- Keep the generated WinUI XAML PRI resource index in Release builds and stop installer compilation when it is missing.
+- Repair the Live Studio page-render failure caused by missing native XAML resources in the previous installer.
+- Keep Dashboard session details and progress controls current as captures start, advance, and stop.
+- Preserve the engine-retry notice while navigating between pages.
+- Make configuration-preserving uninstall recoverable across retries and retain dependency ownership state until cleanup succeeds.
+- Replace the stale 4.0.5 error screenshot with screenshots captured from the corrected native application.
+
+### Verification
+- Windows Release build includes `StreamSnip.Desktop.pri` and the native application launches.
+- Live Studio, Dashboard, Creators, Clip Library, and Publishing pages render without the prior page-render diagnostic.
+- Native installer/uninstaller regression tests, config-restore functional tests, and release metadata checks pass.
+
 ## [4.0.6] - 2026-11-26
 
 ### Added

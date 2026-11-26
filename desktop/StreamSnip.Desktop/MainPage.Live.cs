@@ -21,6 +21,7 @@ public sealed partial class MainPage
     private Button? _stopCaptureButton;
     private TabView? _liveTabs;
     private Image? _sourcePreviewImage;
+    private StackPanel? _sourcePreviewPlaceholder;
     private TextBlock? _sourcePreviewInfo;
 
     private void RenderLiveStudioPage()
@@ -52,29 +53,59 @@ public sealed partial class MainPage
                 ? "Choose a local video file…" : "Paste a Twitch or YouTube URL");
         AddLabeled(sourcePanel, "Stream URL or video file", _liveTargetInput,
             "The same source is used for creator detection, frame preview, and capture.");
-        _sourcePreviewInfo = ThemeText("No frame preview loaded yet.", 10, false, "MutedTextBrush");
-        var sourcePreview = new StackPanel { Spacing = 7 };
+        _sourcePreviewInfo = ThemeText("Preview updates from the selected source.", 14, false, "MutedTextBrush");
+        var sourcePreview = new StackPanel { Spacing = 8 };
+        var previewSurface = new Grid { MinHeight = 120 };
         _sourcePreviewImage = new Image
         {
             Stretch = Stretch.Uniform,
             MaxHeight = 260,
-            HorizontalAlignment = HorizontalAlignment.Center
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
         };
+        previewSurface.Children.Add(_sourcePreviewImage);
+
+        _sourcePreviewPlaceholder = new StackPanel
+        {
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        _sourcePreviewPlaceholder.Children.Add(new FontIcon
+        {
+            Glyph = new string((char)0xE714, 1),
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontSize = 22,
+            Width = 30,
+            Height = 30,
+            Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
+        });
+        var previewTitle = ThemeText("Source preview", 14, true, "PrimaryTextBrush");
+        previewTitle.HorizontalAlignment = HorizontalAlignment.Center;
+        _sourcePreviewPlaceholder.Children.Add(previewTitle);
+        var previewHint = ThemeText("Paste a stream URL or choose a video file.", 12, false, "MutedTextBrush");
+        previewHint.HorizontalAlignment = HorizontalAlignment.Center;
+        _sourcePreviewPlaceholder.Children.Add(previewHint);
+        previewSurface.Children.Add(_sourcePreviewPlaceholder);
+        previewSurface.SizeChanged += (_, args) =>
+            previewSurface.Height = Math.Max(120, args.NewSize.Width * 9.0 / 16.0);
+        previewSurface.Loaded += (_, _) =>
+            previewSurface.Height = Math.Max(120, previewSurface.ActualWidth * 9.0 / 16.0);
+
         sourcePreview.Children.Add(new Border
         {
             Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
             BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(8),
-            MinHeight = 100,
-            Child = _sourcePreviewImage
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(10),
+            Child = previewSurface
         });
         sourcePreview.Children.Add(_sourcePreviewInfo);
-        sourcePanel.Children.Add(sourcePreview);
         _liveTargetInput.TextChanged += (_, _) =>
         {
             if (_sourcePreviewImage is not null) _sourcePreviewImage.Source = null;
+            if (_sourcePreviewPlaceholder is not null) _sourcePreviewPlaceholder.Visibility = Visibility.Visible;
             if (_sourcePreviewInfo is not null)
             {
                 var detected = InferCreatorHandle(_liveTargetInput.Text);
@@ -98,7 +129,6 @@ public sealed partial class MainPage
             }
             catch (Exception ex) { await ShowErrorAsync("File selection failed", ex.Message); }
         });
-        sourcePanel.Children.Add(ActionRow(browseButton));
         var detect = CreateButton("Preview source frame", async () =>
         {
             var target = _liveTargetInput.Text.Trim();
@@ -127,6 +157,7 @@ public sealed partial class MainPage
                 var bitmap = new BitmapImage();
                 await bitmap.SetSourceAsync(stream);
                 if (_sourcePreviewImage is not null) _sourcePreviewImage.Source = bitmap;
+                if (_sourcePreviewPlaceholder is not null) _sourcePreviewPlaceholder.Visibility = Visibility.Collapsed;
                 var detected = InferCreatorHandle(target);
                 if (_sourcePreviewInfo is not null)
                     _sourcePreviewInfo.Text = detected is null
@@ -135,14 +166,17 @@ public sealed partial class MainPage
             }
             catch (Exception ex) { await ShowErrorAsync("Source preview failed", ex.Message); }
         });
-        sourcePanel.Children.Add(ActionRow(detect));
+        sourcePanel.Children.Add(ActionRow(browseButton, detect));
+        sourcePanel.Children.Add(sourcePreview);
 
         var tabs = new TabView
         {
             IsAddTabButtonVisible = false,
             CanReorderTabs = false,
             CanDragTabs = false,
-            TabWidthMode = TabViewWidthMode.Equal
+            TabWidthMode = TabViewWidthMode.Equal,
+            FontFamily = CurrentFont,
+            FontSize = 16
         };
         _liveTabs = tabs;
 
@@ -160,10 +194,10 @@ public sealed partial class MainPage
         AddSettingNumber(captureGrid, 1, 2, "Maximum clips per chunk", "max_clips", 1, 50);
         capture.Children.Add(captureGrid);
         capture.Children.Add(ThemeText("Settings are applied to the next capture. Existing work is not changed.", 10, false, "MutedTextBrush"));
-        tabs.TabItems.Add(new TabViewItem { Header = "Capture", Content = capture , IsClosable = false });
+        tabs.TabItems.Add(new TabViewItem { Header = Txt("Capture", 16, true), Content = capture, IsClosable = false });
 
         var ai = BuildAiSettingsTab();
-        tabs.TabItems.Add(new TabViewItem { Header = "AI provider", Content = ai , IsClosable = false });
+        tabs.TabItems.Add(new TabViewItem { Header = Txt("AI provider", 16, true), Content = ai, IsClosable = false });
 
         var speech = new StackPanel { Spacing = 12, Padding = new Thickness(4, 12, 4, 4) };
         var model = new ComboBox { MinWidth = 230, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -182,7 +216,7 @@ public sealed partial class MainPage
         threads.SelectedItem = SettingString("cpu_threads", "4");
         threads.SelectionChanged += (_, _) => SetSetting("cpu_threads", threads.SelectedItem?.ToString() ?? "4");
         AddLabeled(speech, "CPU threads", threads, "Used when transcription runs on the CPU.");
-        tabs.TabItems.Add(new TabViewItem { Header = "Transcription", Content = speech , IsClosable = false });
+        tabs.TabItems.Add(new TabViewItem { Header = Txt("Transcription", 16, true), Content = speech, IsClosable = false });
 
         var captions = new StackPanel { Spacing = 12, Padding = new Thickness(4, 12, 4, 4) };
         var layout = new ComboBox { MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -232,27 +266,29 @@ public sealed partial class MainPage
         profanity.Checked += (_, _) => SetSetting("profanity_filter_enabled", true);
         profanity.Unchecked += (_, _) => SetSetting("profanity_filter_enabled", false);
         captions.Children.Add(profanity);
-        tabs.TabItems.Add(new TabViewItem { Header = "Captions", Content = captions , IsClosable = false });
+        tabs.TabItems.Add(new TabViewItem { Header = Txt("Captions", 16, true), Content = captions, IsClosable = false });
 
         var setupPanel = CreatePanel("Capture setup",
             "Capture, AI provider, transcription, and captions stay together before you start.",
             tabs);
 
         var current = _state ?? new EngineState();
-        var session = new StackPanel { Spacing = 11 };
-        _liveStatusText = Txt(current.Status, 12, true);
-        _liveProgressText = ThemeText($"{PhaseLabel(current.Phase)}  ·  {current.Progress}%", 10, false, "MutedTextBrush");
+        _liveStatusText = Txt(_engine is null ? "Local processing unavailable" : current.Status, 16, true);
+        _liveProgressText = ThemeText(
+            _engine is null ? "Repair the local runtime to restore capture and rendering."
+                : $"{PhaseLabel(current.Phase)} · {current.Progress}% · {current.Session.Clips:N0} clips",
+            14, false, "MutedTextBrush");
         _liveProgress = new ProgressBar
         {
             Minimum = 0,
             Maximum = 100,
             Value = Math.Clamp(current.Progress, 0, 100),
-            Height = 6
+            Height = 7,
+            Visibility = _engine is null ? Visibility.Collapsed : Visibility.Visible,
+            Margin = new Thickness(0, 4, 0, 0),
+            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+            Foreground = Application.Current.Resources["AccentBrush"] as Brush
         };
-        session.Children.Add(_liveStatusText);
-        session.Children.Add(_liveProgress);
-        session.Children.Add(_liveProgressText);
-        var actionRow = ActionRow();
         _startCaptureButton = CreateButton("Start capture", async () =>
         {
             try
@@ -303,17 +339,56 @@ public sealed partial class MainPage
             }
             catch (Exception ex) { await ShowErrorAsync("Could not stop capture", ex.Message); }
         }, danger: true);
-        _startCaptureButton.IsEnabled = !current.Running;
+        _startCaptureButton.IsEnabled = _engine is not null && !current.Running;
         _stopCaptureButton.IsEnabled = current.Running;
-        actionRow.Children.Add(_startCaptureButton);
-        actionRow.Children.Add(_stopCaptureButton);
-        session.Children.Add(actionRow);
+
+        var actionBar = new Grid { ColumnSpacing = 24, VerticalAlignment = VerticalAlignment.Center };
+        actionBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        actionBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var sessionInfo = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+        sessionInfo.Children.Add(_liveStatusText);
+        sessionInfo.Children.Add(_liveProgressText);
+        sessionInfo.Children.Add(_liveProgress);
+        actionBar.Children.Add(sessionInfo);
+
+        var captureActions = _engine is null
+            ? ActionRow(CreateButton("Repair runtime", () =>
+            {
+                var appRoot = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Programs", "StreamSnip AI Native");
+                var setupScript = System.IO.Path.Combine(appRoot, "setup_windows.ps1");
+                if (!System.IO.File.Exists(setupScript))
+                {
+                    _ = ShowErrorAsync("Installer files are missing",
+                        "Run the latest StreamSnip AI installer to restore its setup files, then choose Repair runtime again.");
+                    return;
+                }
+
+                var start = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = System.IO.Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.System),
+                        "WindowsPowerShell", "v1.0", "powershell.exe"),
+                    UseShellExecute = true,
+                    Arguments = "-NoExit -NoProfile -ExecutionPolicy Bypass -File " +
+                        "\"" + setupScript + "\"" + " -AppDir " +
+                        "\"" + appRoot + "\"" +
+                        " -NativeDesktop -NonInteractive -SkipLaunch -NoPause"
+                };
+                System.Diagnostics.Process.Start(start);
+            }))
+            : ActionRow(_startCaptureButton, _stopCaptureButton);
+        captureActions.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(captureActions, 1);
+        actionBar.Children.Add(captureActions);
+        PageActionHost.Child = actionBar;
+        PageActionHost.Visibility = Visibility.Visible;
 
         PageHost.Children.Add(AdaptiveColumns(
             CreatePanel("Source", "Select the stream or recording you want to process.", sourcePanel),
             setupPanel,
-            0.85, 1.15));
-        PageHost.Children.Add(CreatePanel("Capture session", "Starting Live Studio never begins a recording. Capture starts only after your explicit action.", session));
+            0.95, 1.05));
     }
 
     private void AddSettingNumber(Grid grid, int column, int row, string label, string key, double minimum, double maximum)
@@ -560,8 +635,8 @@ public sealed partial class MainPage
         if (_liveStatusText is not null) _liveStatusText.Text = _state.Status;
         if (_liveProgress is not null) _liveProgress.Value = Math.Clamp(_state.Progress, 0, 100);
         if (_liveProgressText is not null)
-            _liveProgressText.Text = $"{PhaseLabel(_state.Phase)}  ·  {_state.Progress}%  ·  {_state.Session.Clips} clips";
-        if (_startCaptureButton is not null) _startCaptureButton.IsEnabled = !_state.Running;
+            _liveProgressText.Text = $"{PhaseLabel(_state.Phase)} · {_state.Progress}% · {_state.Session.Clips:N0} clips";
+        if (_startCaptureButton is not null) _startCaptureButton.IsEnabled = _engine is not null && !_state.Running;
         if (_stopCaptureButton is not null) _stopCaptureButton.IsEnabled = _state.Running;
     }
 }

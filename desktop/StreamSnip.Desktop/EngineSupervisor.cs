@@ -88,6 +88,15 @@ public sealed class EngineSupervisor : IAsyncDisposable
                 "StreamSnip AI", "native-development");
         }
 #endif
+        if (!string.IsNullOrWhiteSpace(developmentConfig?.FfmpegExecutable) &&
+            File.Exists(developmentConfig.FfmpegExecutable))
+        {
+            var ffmpegPath = Path.GetFullPath(developmentConfig.FfmpegExecutable);
+            start.Environment["STREAMSNIP_FFMPEG_PATH"] = ffmpegPath;
+            var ffmpegDirectory = Path.GetDirectoryName(ffmpegPath);
+            if (!string.IsNullOrWhiteSpace(ffmpegDirectory))
+                start.Environment["PATH"] = ffmpegDirectory + Path.PathSeparator + start.Environment["PATH"];
+        }
 
         var process = new Process { StartInfo = start, EnableRaisingEvents = true };
         var supervisor = new EngineSupervisor(process);
@@ -212,7 +221,11 @@ public sealed class EngineSupervisor : IAsyncDisposable
         return payload ?? new JsonObject();
     }
 
-    private sealed record NativeDevelopmentConfig(string SourceRoot, string PythonExecutable, string? DataRoot);
+    private sealed record NativeDevelopmentConfig(
+        string SourceRoot,
+        string PythonExecutable,
+        string? DataRoot,
+        string? FfmpegExecutable);
 
     private static NativeDevelopmentConfig? ReadNativeDevelopmentConfig()
     {
@@ -249,9 +262,10 @@ public sealed class EngineSupervisor : IAsyncDisposable
                 var sourceRoot = config?["source_root"]?.GetValue<string>() ?? "";
                 var python = config?["python_executable"]?.GetValue<string>() ?? "";
                 var dataRoot = config?["data_root"]?.GetValue<string>();
+                var ffmpegExecutable = config?["ffmpeg_executable"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(sourceRoot) || string.IsNullOrWhiteSpace(python))
                     continue;
-                return new NativeDevelopmentConfig(sourceRoot, python, dataRoot);
+                return new NativeDevelopmentConfig(sourceRoot, python, dataRoot, ffmpegExecutable);
             }
             catch (Exception)
             {
@@ -296,20 +310,35 @@ public sealed class EngineSupervisor : IAsyncDisposable
     {
         var configured = Environment.GetEnvironmentVariable("STREAMSNIP_PYTHON");
         var appRoot = Directory.GetParent(sourceRoot)?.FullName;
+        var localPrograms = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var candidates = new[]
         {
             configured,
             developmentPython,
             appRoot is null ? null : Path.Combine(appRoot, "runtime", "Scripts", "python.exe"),
             Path.Combine(AppContext.BaseDirectory, "runtime", "Scripts", "python.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Programs", "StreamSnip AI", "runtime", "Scripts", "python.exe")
+            Path.Combine(localPrograms, "Programs", "StreamSnip AI Native", "runtime", "Scripts", "python.exe"),
+            Path.Combine(localPrograms, "Programs", "StreamSnip AI", "runtime", "Scripts", "python.exe")
         };
         var python = candidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
         if (python is null)
             throw new FileNotFoundException(
                 "The isolated StreamSnip Python runtime was not found. Run the StreamSnip AI setup/repair step first.");
-        return Path.GetFullPath(python);
+
+        var resolvedPython = Path.GetFullPath(python);
+        var scriptsDirectory = Path.GetDirectoryName(resolvedPython);
+        if (string.Equals(Path.GetFileName(scriptsDirectory), "Scripts", StringComparison.OrdinalIgnoreCase))
+        {
+            var runtimeRoot = Directory.GetParent(scriptsDirectory!)?.FullName;
+            var environmentConfig = runtimeRoot is null ? null : Path.Combine(runtimeRoot, "pyvenv.cfg");
+            if (environmentConfig is null || !File.Exists(environmentConfig))
+            {
+                throw new InvalidOperationException(
+                    $"The installed local Python environment is incomplete. The required file is missing: {environmentConfig ?? "runtime\\pyvenv.cfg"}. Run the StreamSnip AI installer again to repair the processing engine.");
+            }
+        }
+
+        return resolvedPython;
     }
 
     private void EnsureStarted()

@@ -17,7 +17,6 @@
     <WindowsAppSDKSelfContained Condition="'$(Configuration)' == 'Release'">true</WindowsAppSDKSelfContained>
     <WindowsAppSdkUndockedRegFreeWinRTInitialize Condition="'$(Configuration)' == 'Release'">true</WindowsAppSdkUndockedRegFreeWinRTInitialize>
     <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
-    <EnableMsixTooling Condition="'$(Configuration)' == 'Release'">false</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>

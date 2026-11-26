@@ -93,7 +93,7 @@ public sealed partial class MainPage
         {
             Content = "Select this page",
             FontFamily = CurrentFont,
-            FontSize = 10
+            FontSize = UiFontSize(10)
         };
         _clipSelectPage.Checked += (_, _) => SetCurrentPageSelection(published, true);
         _clipSelectPage.Unchecked += (_, _) => SetCurrentPageSelection(published, false);
@@ -137,12 +137,37 @@ public sealed partial class MainPage
         {
             preview.Children.Add(Txt("Select a clip to review", 14, true));
             preview.Children.Add(ThemeText("Preview video, edit title and description, or open the original file location.", 10, false, "MutedTextBrush"));
+            var emptyPreview = new Grid { MinHeight = 150 };
+            var emptyPreviewContent = new StackPanel
+            {
+                Spacing = 8,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            emptyPreviewContent.Children.Add(new FontIcon
+            {
+                Glyph = new string((char)0xE714, 1),
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontSize = 22,
+                Width = 32,
+                Height = 32,
+                Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
+            });
+            var selectHint = ThemeText("Choose a clip to preview", 15, true, "PrimaryTextBrush");
+            selectHint.HorizontalAlignment = HorizontalAlignment.Center;
+            emptyPreviewContent.Children.Add(selectHint);
+            emptyPreview.Children.Add(emptyPreviewContent);
+            emptyPreview.SizeChanged += (_, args) =>
+                emptyPreview.Height = Math.Max(150, args.NewSize.Width * 9.0 / 16.0);
+            emptyPreview.Loaded += (_, _) =>
+                emptyPreview.Height = Math.Max(150, emptyPreview.ActualWidth * 9.0 / 16.0);
             preview.Children.Add(new Border
             {
                 Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+                BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
+                BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(10),
-                MinHeight = 190,
-                Child = ThemeText("▶", 32, true, "AccentBrush")
+                Child = emptyPreview
             });
         }
         else

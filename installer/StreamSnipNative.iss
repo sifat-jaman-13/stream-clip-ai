@@ -1,5 +1,5 @@
-#ifndef MyAppVersion
-  #define MyAppVersion "4.0.6"
+﻿#ifndef MyAppVersion
+  #define MyAppVersion "4.0.7"
 #endif
 #define MyAppName "StreamSnip AI"
 #define MyAppPublisher "ScarZero"
@@ -26,6 +26,7 @@ DisableProgramGroupPage=yes
 [Files]
 Source: "..\dist\StreamSnipDesktopNative\*"; DestDir: "{app}\desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\docs\assets\product\*.png"; DestDir: "{app}\docs\assets\product"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\licenses\third-party\*"; DestDir: "{app}\licenses\third-party"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\autoclip.py"; DestDir: "{app}\source"; Flags: ignoreversion
@@ -53,7 +54,19 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Run]
 Filename: "{app}\desktop\{#MyNativeExe}"; WorkingDir: "{app}\desktop"; Description: "Launch StreamSnip AI"; Flags: postinstall nowait skipifsilent
 
+[UninstallDelete]
+Type: files; Name: "{localappdata}\StreamSnip AI\native-engine.json"
+Type: filesandordirs; Name: "{app}\runtime"
+Type: filesandordirs; Name: "{app}\runtime.previous"
+Type: filesandordirs; Name: "{app}\python-base"
+Type: filesandordirs; Name: "{app}\source"
+Type: filesandordirs; Name: "{app}\desktop"
+Type: filesandordirs; Name: "{app}\licenses"
+
 [Code]
+var
+  KeepConfigOnUninstall: Boolean;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
@@ -87,8 +100,48 @@ begin
   end;
 end;
 
-[UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall_windows.ps1"" -AppDir ""{app}"" -NoPause"; WorkingDir: "{app}"; RunOnceId: "StreamSnipAIDependencyCleanup"; Flags: runhidden waituntilterminated
+function InitializeUninstall(): Boolean;
+var
+  Choice: Integer;
+begin
+  Result := True;
+  KeepConfigOnUninstall := Pos('/KEEPCONFIG', Uppercase(GetCmdTail)) > 0;
+  if not UninstallSilent then
+  begin
+    Choice := MsgBox(
+      'Keep only settings and configuration?' + #13#10 + #13#10 +
+      'YES: Keep app settings, AI provider settings/API keys, publishing settings, custom words and desktop preferences.' + #13#10 +
+      'NO: Remove all app data, clips, recordings, models, runtime and configuration.' + #13#10 +
+      'Your personal files outside StreamSnip AI folders are not touched.',
+      mbConfirmation, MB_YESNOCANCEL or MB_DEFBUTTON2);
+    if Choice = IDYES then
+      KeepConfigOnUninstall := True
+    else if Choice = IDNO then
+      KeepConfigOnUninstall := False
+    else
+      Result := False;
+  end;
+end;
 
-[UninstallDelete]
-Type: files; Name: "{localappdata}\StreamSnip AI\native-engine.json"
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+  PowerShellPath: string;
+  Parameters: string;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+    Parameters := '-NoProfile -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{app}\uninstall_windows.ps1') +
+      '" -AppDir "' + ExpandConstant('{app}') + '" -RemoveAllData';
+    if KeepConfigOnUninstall then
+      Parameters := Parameters + ' -KeepConfig';
+    if not Exec(PowerShellPath, Parameters, ExpandConstant('{app}'),
+      SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      RaiseException('Could not start StreamSnip AI cleanup. Check the uninstall cleanup log in your TEMP folder.');
+    if ResultCode <> 0 then
+      RaiseException('StreamSnip AI cleanup failed (exit code ' + IntToStr(ResultCode) +
+        '). Check StreamSnipAI-uninstall-*.log in your TEMP folder.');
+  end;
+end;

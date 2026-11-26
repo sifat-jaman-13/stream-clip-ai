@@ -20,8 +20,8 @@ typography:
   weights: "400, 500, 600, 700"
   numerals: "Tabular for counts, durations, sizes, and progress"
 layout:
-  sidebar-width: "244px"
-  topbar-height: "64px"
+  sidebar-width: "260px"
+  topbar-height: "76px"
   studio-content: "Source first, pre-capture setup tabs, session status, persistent action bar"
 rounded:
   controls: "8px"
@@ -37,9 +37,9 @@ motion:
 
 StreamSnip AI is an operational creator workspace, not a marketing dashboard. Its main job is to let a creator prepare a capture session, monitor processing, review clips, and hand work to publishing.
 
-The visual direction is a restrained graphite studio with arctic-cyan secondary information and a coral action color. The interface should feel like a dependable media workstation: clear states, compact controls, visible configuration, and no decorative UI that competes with the stream or clip.
+The default visual direction is Odysseus: graphite ground, layered charcoal surfaces, arctic-cyan information, coral actions, and semantic green/amber states. Preserve this exact user-selected palette. The native workspace should feel like a considered broadcast workstation: clear source context, a readable processing rundown, and obvious next actions. Avoid costume UI, dashboard vanity metrics, and decorative card grids.
 
-The source repository and prior Odysseus palette informed the default theme. StreamSnip uses its own information architecture and components.
+JetBrains Mono is the user's saved default. Preserve it, but use a genuine role-based type scale so operational labels and metadata are never tiny.
 
 ## Colors
 
@@ -47,25 +47,25 @@ The source repository and prior Odysseus palette informed the default theme. Str
 
 | Token | Value | Role |
 |---|---|---|
-| Canvas | #282c34 | Main application background |
-| Surface | #1b2028 | Panels and menus |
-| Soft surface | #232b35 | Inputs, nested areas, hover bases |
-| Hover surface | #2d3743 | Interactive surface emphasis |
-| Sidebar | #171c23 | Primary navigation |
-| Text | #e8f0f4 | Primary content |
-| Body | #c8d5dc | Secondary content |
-| Muted | #9cdef2 | Labels and supporting information |
-| Border | #355a66 | Structure and separation |
-| Accent | #e06c75 | Primary action and current selection |
-| Success | #80c99a | Ready and completed states |
-| Warning | #e6b96f | Attention and pending states |
-| Danger | #e06c75 | Errors and stop actions |
+| Canvas | #282C34 | Main application background |
+| Surface | #1B2028 | Panels and menus |
+| Soft surface | #232B35 | Inputs and inset work areas |
+| Hover surface | #2D3743 | Interactive surface emphasis |
+| Sidebar | #171C23 | Primary navigation |
+| Text | #E8F0F4 | Primary content |
+| Body | #C8D5DC | Secondary content |
+| Muted | #9CDEF2 | Informational labels and supporting text |
+| Border | #355A66 | Structure and separation |
+| Accent | #E06C75 | Primary action and current selection |
+| Success | #80C99A | Ready and completed states |
+| Warning | #E6B96F | Attention and pending states |
+| Danger | #E06C75 | Errors and stop actions |
 
 ### Available themes
 
 The user may switch themes without changing layout or behavior:
 
-- **Odysseus** - default graphite, cyan, and coral.
+- **Odysseus (default)** - graphite, arctic cyan, coral, and semantic green/amber.
 - **Studio Light** - neutral light canvas with restrained red actions.
 - **Studio Dark** - low-light charcoal with red actions.
 - **GitHub Dark** - repository-inspired slate and signal red.
@@ -91,14 +91,16 @@ Each theme must define the same semantic tokens, with matching app background, s
 
 ## Typography
 
-JetBrains Mono is the application-wide default, as explicitly requested. Use Fira Code, Cascadia Code, and Consolas as fallbacks. The font selector retains Google Sans, Inter, Roboto, Open Sans, Montserrat, Poppins, Lato, Nunito Sans, DM Sans, IBM Plex Sans, Space Grotesk, and Fira Code as alternatives.
+JetBrains Mono is the application-wide default, including WinUI shell controls, dynamically generated text, inputs, buttons, and tabs. The bundled variable font is used directly. The font selector retains the existing alternatives, but a screen must never silently mix the selected font with Segoe UI.
 
-Use 12-14px for core desktop controls and body copy, 10-11px for secondary labels, and 15-22px for page and section headings. Keep line height near 1.5 for explanatory text. Use tabular numerals for durations, counts, sizes, and progress. Subtitle output typography is configured separately from the application interface font.
+Use a role-based native desktop scale: 32px page titles; 20-22px panel headings; 16px body and control text; 15-16px supporting metadata; 14px tertiary status only. Do not shrink controls or use 9-12px interface copy. Interactive controls are at least 48px high. Keep line height near 1.45 for explanatory text. Use tabular numerals for durations, counts, sizes, and progress. Subtitle output typography is configured separately from the application interface font.
 
 ## Layout
 
-- Sidebar width: 244px. Top utility bar: 64px.
-- Main workspace is desktop-first and must remain usable at 320px, 768px, 1024px, and 1440px.
+- Sidebar width: 260px. Top utility bar: 76px. Page content uses a 40px desktop gutter.
+- Main workspace is desktop-first and opens maximized. Two-column work areas stack below 900px; the sidebar remains independently scrollable.
+- Dashboard uses one live seven-stage source-to-publish rundown, then recent clips and creator monitors. Do not use a four-metric hero strip.
+- Live Studio uses a single source field, a real 16:9 preview, four pre-capture setup tabs, and a persistent bottom Start/Stop action bar.
 - Live Studio follows one canonical order: source, configuration, session status, then Start/Stop.
 - Capture, AI provider, Transcription, and Captions are always available as visible tabs inside Live Studio before capture starts. They do not belong in global Settings.
 - Keep the source URL as the canonical source for source preview and creator-handle detection.
@@ -112,8 +114,8 @@ Use a single restrained shadow token for menus and elevated surfaces. Panels are
 
 ## Shapes
 
-- Controls: 8px radius.
-- Panels: 12px radius.
+- Controls: 8px radius, at least 48px high where interactive.
+- Panels: 12px radius with 26px internal padding.
 - Badges and status pills: fully rounded only when they communicate a state.
 - Focus rings: 2px accent outline with 2px offset.
 - Inputs must preserve native affordances and sufficient target height.

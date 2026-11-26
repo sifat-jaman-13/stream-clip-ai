@@ -83,6 +83,7 @@ public sealed partial class MainPage : Page
 	};
 
 	private EngineSupervisor? _engine;
+	private UIElement? _engineNotice;
 
 	private EngineSettings? _settings;
 
@@ -115,14 +116,14 @@ public sealed partial class MainPage : Page
 
 	private static readonly FontFamily JetBrainsFontFamily = new FontFamily("ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono");
 
-	private static FontFamily ActiveFontFamily = new FontFamily("Segoe UI");
+	private static FontFamily ActiveFontFamily = JetBrainsFontFamily;
 
 	private bool _refreshRunning;
 
 	private string _theme = "odysseus";
 	private string _customAccent = "";
 
-	private string _fontName = "Segoe UI";
+	private string _fontName = "JetBrains Mono";
 
 	private string _lastEngineMessage = "";
 	private Border? _clipBadgeBorder;
@@ -150,7 +151,7 @@ public sealed partial class MainPage : Page
 
 	private static readonly string[] FontChoices = new string[15]
 	{
-		"Segoe UI", "JetBrains Mono", "Google Sans", "Inter", "Roboto", "Open Sans", "Montserrat", "Poppins", "Lato", "Nunito Sans", "DM Sans",
+		"JetBrains Mono", "Segoe UI", "Google Sans", "Inter", "Roboto", "Open Sans", "Montserrat", "Poppins", "Lato", "Nunito Sans", "DM Sans",
 		"IBM Plex Sans", "Space Grotesk", "Fira Code", "Consolas"
 	};
 
@@ -208,6 +209,7 @@ public sealed partial class MainPage : Page
 
 	private async void Page_Loaded(object sender, RoutedEventArgs e)
 	{
+		ApplyFontToVisualTree(this);
 		UpdateSidebarSelection();
 		if (!_loaded)
 		{
@@ -228,23 +230,63 @@ public sealed partial class MainPage : Page
 			FooterEngineText.Text = "Local Python engine";
 			await LoadWorkspaceAsync();
 			StartEventListener();
+
+			if (_engineNotice is not null)
+			{
+				PageHost.Children.Remove(_engineNotice);
+				_engineNotice = null;
+			}
 			RenderCurrentPage();
 		}
 		catch (Exception ex)
 		{
 			SetEngineIndicator("Engine unavailable", EngineIndicator.Danger);
 			FooterEngineText.Text = "Engine not available";
+
+			// Keep the workspace usable; engine recovery must not replace the page.
 			PageHost.Children.Clear();
-			AddPageHeading("StreamSnip AI could not start", "The native desktop interface is running, but the local media engine could not be started.");
-			PageHost.Children.Add(CreatePanel("Engine startup", ex.Message, ActionRow(CreateButton("Retry engine", async () =>
-			{
-				await RetryEngineAsync();
-			}, primary: true), CreateButton("Open app data folder", async () =>
-			{
-				await OpenPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-			}))));
-			await ShowErrorAsync("Engine startup failed", ex.Message);
+			RenderCurrentPage();
+			_engineNotice = CreateEngineUnavailableNotice(ex.Message);
+			PageHost.Children.Insert(0, _engineNotice);
 		}
+	}
+
+	private Border CreateEngineUnavailableNotice(string detail)
+	{
+		var message = detail.Contains("pyvenv.cfg", StringComparison.OrdinalIgnoreCase)
+			? "The installed Python environment is missing pyvenv.cfg. Repair the local runtime to restore capture and rendering."
+			: detail;
+
+		var copy = new StackPanel { Spacing = 5 };
+		copy.Children.Add(Txt("LOCAL ENGINE UNAVAILABLE", 11, true, "DangerBrush"));
+		copy.Children.Add(Txt(message, 12.5, false, "BodyTextBrush"));
+
+		var actions = ActionRow(
+			CreateButton("Retry engine", async () => await RetryEngineAsync(), primary: true),
+			CreateButton("Open runtime folder", async () =>
+			{
+				var runtimePath = System.IO.Path.Combine(
+					Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+					"Programs", "StreamSnip AI Native", "runtime");
+				await OpenPath(runtimePath);
+			}));
+
+		var layout = new Grid { ColumnSpacing = 22, VerticalAlignment = VerticalAlignment.Center };
+		layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+		layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+		layout.Children.Add(copy);
+		Grid.SetColumn(actions, 1);
+		layout.Children.Add(actions);
+
+		return new Border
+		{
+			Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+			BorderBrush = Application.Current.Resources["DangerBrush"] as Brush,
+			BorderThickness = new Thickness(1),
+			CornerRadius = new CornerRadius(8),
+			Padding = new Thickness(18, 14, 18, 14),
+			Child = layout
+		};
 	}
 
 	private async Task RetryEngineAsync()
@@ -512,7 +554,7 @@ public sealed partial class MainPage : Page
 		var badgeText = new TextBlock
 		{
 			FontFamily = ActiveFontFamily,
-			FontSize = 9,
+			FontSize = UiFontSize(9),
 			FontWeight = FontWeights.SemiBold,
 			VerticalAlignment = VerticalAlignment.Center,
 			HorizontalAlignment = HorizontalAlignment.Center
@@ -598,16 +640,14 @@ private void UpdateSidebarSelection()
         {
             var selected = string.Equals(button.Tag as string, _currentPage, StringComparison.Ordinal);
             button.Background = selected
-                ? new SolidColorBrush(ParseColor(theme.Hover))
+                ? new SolidColorBrush(ParseColor(theme.Soft))
                 : transparent;
             button.Foreground = Application.Current.Resources[
                 selected ? "PrimaryTextBrush" : "BodyTextBrush"] as Brush;
             button.BorderBrush = selected
                 ? new SolidColorBrush(ParseColor(theme.Accent))
                 : transparent;
-            button.BorderThickness = selected
-                ? new Thickness(3, 0, 0, 0)
-                : new Thickness(0);
+            button.BorderThickness = new Thickness(1);
         }
         UpdateSidebarBadges();
     }
@@ -629,7 +669,7 @@ private void UpdateSidebarSelection()
 		}
 		string result = page switch
 		{
-			"overview" => "Studio overview",
+			"overview" => "Dashboard",
 			"live" => "Live Studio",
 			"creators" => "Creators",
 			"clips" => "Clip library",
@@ -651,6 +691,8 @@ private void UpdateSidebarSelection()
 	private void RenderCurrentPage()
 	{
 		PageHost.Children.Clear();
+		PageActionHost.Child = null;
+		PageActionHost.Visibility = Visibility.Collapsed;
 		try
 		{
 			RenderCurrentPageCore();
@@ -658,12 +700,14 @@ private void UpdateSidebarSelection()
 		catch (Exception ex)
 		{
 			_lastEngineMessage = ex.ToString();
+			PageActionHost.Child = null;
+			PageActionHost.Visibility = Visibility.Collapsed;
 			PageHost.Children.Clear();
 			PageHost.Children.Add(new TextBlock
 			{
 				Text = GetPageTitle(_currentPage),
 				FontFamily = ActiveFontFamily,
-				FontSize = 26,
+				 FontSize = UiFontSize(26),
 				FontWeight = FontWeights.SemiBold,
 				Foreground = Application.Current.Resources["PrimaryTextBrush"] as Brush,
 				Margin = new Thickness(0, 0, 0, 10)
@@ -673,7 +717,7 @@ private void UpdateSidebarSelection()
 			{
 				Text = "This page could not finish rendering.",
 				FontFamily = ActiveFontFamily,
-				FontSize = 13,
+				FontSize = UiFontSize(14),
 				FontWeight = FontWeights.SemiBold,
 				Foreground = Application.Current.Resources["PrimaryTextBrush"] as Brush
 			});
@@ -681,7 +725,7 @@ private void UpdateSidebarSelection()
 			{
 				Text = ex.ToString(),
 				FontFamily = ActiveFontFamily,
-				FontSize = 11,
+				FontSize = UiFontSize(12.5),
 				TextWrapping = TextWrapping.Wrap,
 				Foreground = Application.Current.Resources["BodyTextBrush"] as Brush
 			});
@@ -689,6 +733,19 @@ private void UpdateSidebarSelection()
 				_ = CopyDiagnosticTextAsync(ex.ToString())));
 			PageHost.Children.Add(CreatePanel("Page render error", "The native app is still running. This diagnostic captures the failing control so it can be fixed.", details));
 		}
+		RestoreEngineNotice();
+	}
+
+	private void RestoreEngineNotice()
+	{
+		if (_engineNotice is null)
+			return;
+		foreach (UIElement child in PageHost.Children)
+		{
+			if (ReferenceEquals(child, _engineNotice))
+				return;
+		}
+		PageHost.Children.Insert(0, _engineNotice);
 	}
 
 	private async Task CopyDiagnosticTextAsync(string text)
@@ -1008,20 +1065,22 @@ private void UpdateSidebarSelection()
 		if (1 == 0)
 		{
 		}
-		Color color = kind switch
+		var statusBrushKey = kind switch
 		{
-			EngineIndicator.Success => ColorHelper.FromArgb(byte.MaxValue, 128, 201, 154),
-			EngineIndicator.Danger => ColorHelper.FromArgb(byte.MaxValue, 224, 108, 117),
-			EngineIndicator.Warning => ColorHelper.FromArgb(byte.MaxValue, 230, 185, 111),
-			_ => ColorHelper.FromArgb(byte.MaxValue, 156, 222, 242),
+			EngineIndicator.Success => "SuccessBrush",
+			EngineIndicator.Danger => "DangerBrush",
+			EngineIndicator.Warning => "WarningBrush",
+			_ => "MutedTextBrush"
 		};
-		if (1 == 0)
+		var statusBrush = Application.Current.Resources[statusBrushKey] as Brush;
+		if (statusBrush is not null)
 		{
+			EngineStatusDot.Fill = statusBrush;
+			if (SidebarEngineDot is not null)
+				SidebarEngineDot.Fill = statusBrush;
+			if (FooterEngineDot is not null)
+				FooterEngineDot.Fill = statusBrush;
 		}
-		Color color2 = color;
-		EngineStatusDot.Fill = new SolidColorBrush(color2);
-		if (SidebarEngineDot is not null)
-			SidebarEngineDot.Fill = new SolidColorBrush(color2);
 	}
 
 	private void UpdateEngineIndicator()
@@ -1126,9 +1185,38 @@ private void UpdateSidebarSelection()
 
 	private void ApplyFont(string fontName)
 	{
-		_fontName = (FontChoices.Contains(fontName) ? fontName : "Segoe UI");
-		ActiveFontFamily = ((_fontName == "JetBrains Mono") ? JetBrainsFontFamily : new FontFamily(_fontName));
+		_fontName = FontChoices.Contains(fontName) ? fontName : "JetBrains Mono";
+		ActiveFontFamily = _fontName == "JetBrains Mono" ? JetBrainsFontFamily : new FontFamily(_fontName);
+		Application.Current.Resources["AppFont"] = ActiveFontFamily;
 		SavePreferences();
+		if (XamlRoot is not null)
+			ApplyFontToVisualTree(this);
+	}
+
+	private static void ApplyFontToVisualTree(DependencyObject root)
+	{
+		if (root is TextBlock textBlock)
+			textBlock.FontFamily = ActiveFontFamily;
+		if (root is Control control)
+			control.FontFamily = ActiveFontFamily;
+
+		var childCount = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
+		for (var index = 0; index < childCount; index++)
+			ApplyFontToVisualTree(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index));
+	}
+
+	private static double UiFontSize(double size)
+	{
+		// Slightly tightened native desktop type scale while preserving hierarchy.
+		if (size <= 9.0) return 13.0;
+		if (size <= 10.0) return 13.5;
+		if (size <= 11.5) return 14.0;
+		if (size <= 13.0) return 15.0;
+		if (size <= 15.0) return 16.5;
+		if (size <= 18.0) return 19.0;
+		if (size <= 22.0) return 24.0;
+		if (size <= 26.0) return 29.0;
+		return Math.Max(13.0, Math.Round(size * 1.18, 1) - 1.0);
 	}
 
 	private static bool IsValidAccent(string? value)
@@ -1216,31 +1304,33 @@ private void UpdateSidebarSelection()
 		{
 			Text = text,
 			FontFamily = ActiveFontFamily,
-			FontSize = size,
+			FontSize = UiFontSize(size),
 			FontWeight = (strong ? FontWeights.SemiBold : FontWeights.Normal),
 			TextWrapping = TextWrapping.Wrap
 		};
-		if (color != null)
+		if (!string.IsNullOrWhiteSpace(color))
 		{
-			string text2 = color.ToUpperInvariant();
-			if (1 == 0)
+			if (Application.Current.Resources.TryGetValue(color, out var resource) && resource is Brush resourceBrush)
 			{
+				textBlock.Foreground = resourceBrush;
 			}
-			string? text3 = text2 switch
+			else
 			{
-				"#9CDEF2" => "MutedTextBrush",
-				"#C8D5DC" => "BodyTextBrush",
-				"#E8F0F4" => "PrimaryTextBrush",
-				"#80C99A" => "SuccessBrush",
-				"#E6B96F" => "WarningBrush",
-				"#E06C75" => "DangerBrush",
-				_ => null,
-			};
-			if (1 == 0)
-			{
+				var legacyKey = color.ToUpperInvariant() switch
+				{
+					"#9CDEF2" => "MutedTextBrush",
+					"#C8D5DC" => "BodyTextBrush",
+					"#E8F0F4" => "PrimaryTextBrush",
+					"#80C99A" => "SuccessBrush",
+					"#E6B96F" => "WarningBrush",
+					"#E06C75" => "DangerBrush",
+					_ => null
+				};
+				textBlock.Foreground = legacyKey is not null &&
+					Application.Current.Resources[legacyKey] is Brush legacyBrush
+					? legacyBrush
+					: new SolidColorBrush(ParseColor(color));
 			}
-			string? text4 = text3;
-			textBlock.Foreground = ((text4 != null) ? ((Application.Current.Resources[text4] as Brush) ?? new SolidColorBrush(ParseColor(color))) : new SolidColorBrush(ParseColor(color)));
 		}
 		else
 		{
@@ -1254,9 +1344,9 @@ private void UpdateSidebarSelection()
 		Button button = new Button();
 		button.Content = label;
 		button.FontFamily = CurrentFont;
-		button.FontSize = 12.0;
-		button.Padding = new Thickness(14.0, 7.0, 14.0, 7.0);
-		button.MinHeight = 38.0;
+		button.FontSize = 15.0;
+		button.Padding = new Thickness(18.0, 10.0, 18.0, 10.0);
+		button.MinHeight = 48.0;
 		button.CornerRadius = new CornerRadius(8.0);
 		Button button2 = button;
 		ResourceDictionary resources = Application.Current.Resources;
@@ -1288,8 +1378,8 @@ private void UpdateSidebarSelection()
 		textBox.Text = text;
 		textBox.PlaceholderText = placeholder;
 		textBox.FontFamily = CurrentFont;
-		textBox.FontSize = 12.0;
-		textBox.MinHeight = (multiline ? 112 : 42);
+		textBox.FontSize = 15.0;
+		textBox.MinHeight = (multiline ? 148 : 48);
 		textBox.AcceptsReturn = multiline;
 		textBox.TextWrapping = ((!multiline) ? TextWrapping.NoWrap : TextWrapping.Wrap);
 		textBox.VerticalContentAlignment = ((!multiline) ? VerticalAlignment.Center : VerticalAlignment.Top);
@@ -1304,7 +1394,7 @@ private void UpdateSidebarSelection()
 		StackPanel stackPanel = new StackPanel
 		{
 			Orientation = Orientation.Horizontal,
-			Spacing = 8.0
+			Spacing = 10.0
 		};
 		foreach (UIElement item in children)
 		{
@@ -1317,7 +1407,7 @@ private void UpdateSidebarSelection()
 	{
 		StackPanel stackPanel = new StackPanel
 		{
-			Spacing = 10.0
+			Spacing = 12.0
 		};
 		foreach (UIElement item in children)
 		{
@@ -1330,12 +1420,12 @@ private void UpdateSidebarSelection()
 	{
 		StackPanel stackPanel = new StackPanel
 		{
-			Spacing = 14.0
+			Spacing = 18.0
 		};
-		stackPanel.Children.Add(Txt(title, 15.0, strong: true));
+		stackPanel.Children.Add(Txt(title, 20.0, strong: true));
 		if (!string.IsNullOrWhiteSpace(description))
 		{
-			stackPanel.Children.Add(Txt(description, 11.5, strong: false, "#9CDEF2"));
+			stackPanel.Children.Add(Txt(description, 14.0, strong: false, "BodyTextBrush"));
 		}
 		stackPanel.Children.Add(content);
 		Border border = new Border();
@@ -1343,7 +1433,7 @@ private void UpdateSidebarSelection()
 		border.BorderBrush = Application.Current.Resources["LineBrush"] as Brush;
 		border.BorderThickness = new Thickness(1.0);
 		border.CornerRadius = new CornerRadius(12.0);
-		border.Padding = new Thickness(20.0);
+		border.Padding = new Thickness(26.0);
 		border.Child = stackPanel;
 		return border;
 	}
@@ -1352,13 +1442,13 @@ private void UpdateSidebarSelection()
 	{
 		StackPanel stackPanel = new StackPanel
 		{
-			Spacing = 6.0
+			Spacing = 7.0
 		};
-		stackPanel.Children.Add(Txt(label, 11.0, strong: true));
+		stackPanel.Children.Add(Txt(label, 14.0, strong: true));
 		stackPanel.Children.Add(control);
 		if (!string.IsNullOrWhiteSpace(hint))
 		{
-			stackPanel.Children.Add(Txt(hint, 10.0, strong: false, "#9CDEF2"));
+			stackPanel.Children.Add(Txt(hint, 14.0, strong: false, "BodyTextBrush"));
 		}
 		parent.Children.Add(stackPanel);
 	}
@@ -1367,7 +1457,7 @@ private void UpdateSidebarSelection()
 	{
 		Grid grid = new Grid
 		{
-			ColumnSpacing = 16.0
+			ColumnSpacing = 20.0
 		};
 		grid.ColumnDefinitions.Add(new ColumnDefinition
 		{
@@ -1385,7 +1475,10 @@ private void UpdateSidebarSelection()
 
 	private void AddPageHeading(string title, string description)
 	{
-		PageHost.Children.Add(Vertical(Txt(title, 28.0, strong: true), Txt(description, 12.5, strong: false, "#9CDEF2")));
+		var heading = new StackPanel { Spacing = 10.0 };
+		heading.Children.Add(Txt(title, 30.0, strong: true));
+		heading.Children.Add(Txt(description, 14.0, strong: false, "BodyTextBrush"));
+		PageHost.Children.Add(heading);
 	}
 
 	private void SetBusy(Button button, bool busy, string normalText, string busyText)

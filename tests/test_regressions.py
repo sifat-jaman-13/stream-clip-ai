@@ -1315,6 +1315,19 @@ class RegressionTests(unittest.TestCase):
         finally:
             autoclip._model, autoclip._model_key = old_model, old_key
 
+    def test_transcriber_disables_vad_when_onnxruntime_is_not_installed(self):
+        engine = autoclip.Engine(autoclip.clean_cfg({"model": "distil-large-v3"}), lambda *_: None)
+        engine.load_audio = lambda _path: autoclip.np.zeros(32000, dtype=autoclip.np.float32)
+        word = types.SimpleNamespace(start=0.2, end=0.8, word=" hello")
+        segment = types.SimpleNamespace(words=[word], start=0.0, end=1.0)
+        model = MagicMock()
+        model.transcribe.return_value = (iter([segment]), None)
+        engine.get_model = MagicMock(return_value=model)
+        with patch.dict(sys.modules, {"onnxruntime": None}):
+            result = engine.transcribe("synthetic.wav")
+        self.assertEqual(result, [(0.2, 0.8, "hello")])
+        self.assertFalse(model.transcribe.call_args.kwargs["vad_filter"])
+
     def test_clip_duration_is_capped_at_sixty_seconds(self):
         engine = autoclip.Engine(
             autoclip.clean_cfg({"mode": "file", "pre": 90, "post": 90}),
@@ -1922,20 +1935,27 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("ResultCode <> 0", installer_script)
         self.assertNotIn("setup_native_windows.ps1", installer_script)
         self.assertFalse((root / "installer" / "setup_native_windows.ps1").exists())
-        self.assertEqual(installer_script.count("Exec(PowerShellPath"), 1)
+        self.assertEqual(installer_script.count("ShowCommand, ewWaitUntilTerminated, ResultCode"), 1)
+        self.assertEqual(installer_script.count("SW_HIDE, ewWaitUntilTerminated, ResultCode"), 1)
+        self.assertIn("function InitializeUninstall(): Boolean;", installer_script)
+        self.assertIn("procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);", installer_script)
         self.assertIn("zernio_connections.py", installer_script)
         self.assertIn("StreamSnip.Desktop.exe", installer_script)
         self.assertNotIn("custom_words.txt", installer_script)
         self.assertNotIn('Mark-DependencyInstalled "python"', setup_script)
         self.assertIn('Mark-DependencyInstalled "ffmpeg"', setup_script)
-        self.assertIn('Remove-AppDependency (Join-Path $AppDir "python-base")', uninstall_script)
+        self.assertIn('Remove-PathSafely (Join-Path $AppDir "python-base") "app-local Python base"', uninstall_script)
+        self.assertIn('Remove-PathSafely (Join-Path $AppDir "runtime") "isolated Python runtime"', uninstall_script)
+        self.assertIn('Remove-PathSafely $localRoot "StreamSnip AI app data"', uninstall_script)
         self.assertIn('python_installed_by_streamsnip', uninstall_script)
         self.assertIn('ffmpeg_installed_by_streamsnip', uninstall_script)
         self.assertIn('Python.Python.3.12', uninstall_script)
         self.assertIn('Gyan.FFmpeg', uninstall_script)
         self.assertIn('source\\models', uninstall_script)
         self.assertIn('uninstall_windows.ps1', installer_script)
-        self.assertIn('[UninstallRun]', installer_script)
+        self.assertIn('CurUninstallStepChanged(CurUninstallStep: TUninstallStep)', installer_script)
+        self.assertIn('[UninstallDelete]', installer_script)
+        self.assertIn('filesandordirs; Name: "{app}\\source"', installer_script)
 
     def test_installer_accepts_python_310_plus_and_installs_only_when_none_exists(self):
         root = Path(__file__).resolve().parents[1]
@@ -1954,7 +1974,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("python-3.14.10-amd64.exe", setup_script)
         self.assertNotIn("python-3.15.2-amd64.exe", setup_script)
         self.assertNotIn('Mark-DependencyInstalled "python"', setup_script)
-        self.assertIn('Remove-AppDependency (Join-Path $AppDir "python-base")', uninstall_script)
+        self.assertIn('Remove-PathSafely (Join-Path $AppDir "python-base") "app-local Python base"', uninstall_script)
+        self.assertIn('Remove-PathSafely (Join-Path $AppDir "runtime") "isolated Python runtime"', uninstall_script)
+        self.assertIn('Remove-PathSafely $localRoot "StreamSnip AI app data"', uninstall_script)
         self.assertNotIn("Install-Python312", setup_script)
         self.assertIn('runtime.previous', setup_script)
         self.assertIn('Runtime migration failed. The previous working Python runtime was restored.', setup_script)

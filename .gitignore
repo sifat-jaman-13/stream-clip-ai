@@ -116,5 +116,5 @@ end_to_end_qa.json
 QA_REPORT.md
 UI-HANDOFF.md
 
-# Downloaded build-time font asset (the upstream license is tracked)
-desktop/StreamSnip.Desktop/Assets/Fonts/*.ttf
+# Ship the bundled JetBrains Mono typeface with the native desktop app (SIL OFL).
+!desktop/StreamSnip.Desktop/Assets/Fonts/JetBrainsMono-Variable.ttf

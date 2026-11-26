@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Media;
 
 namespace StreamSnip_Desktop;
@@ -10,6 +11,12 @@ public sealed partial class MainPage
     private TextBlock? _dashboardPublishedCount;
     private TextBlock? _dashboardCreatorCount;
     private TextBlock? _dashboardElapsed;
+    private TextBlock? _dashboardClipDetail;
+    private TextBlock? _dashboardChunkDetail;
+    private TextBlock? _dashboardProgressStatus;
+    private TextBlock? _dashboardProgressPercent;
+    private StackPanel? _dashboardSessionDetails;
+    private Grid? _dashboardProgressRow;
     private TextBlock? _dashboardCaptureTitle;
     private TextBlock? _dashboardCaptureSubtitle;
     private TextBlock? _dashboardCapturePillText;
@@ -34,6 +41,12 @@ public sealed partial class MainPage
         _dashboardPublishedCount = null;
         _dashboardCreatorCount = null;
         _dashboardElapsed = null;
+        _dashboardClipDetail = null;
+        _dashboardChunkDetail = null;
+        _dashboardProgressStatus = null;
+        _dashboardProgressPercent = null;
+        _dashboardSessionDetails = null;
+        _dashboardProgressRow = null;
         _dashboardCaptureTitle = null;
         _dashboardCaptureSubtitle = null;
         _dashboardCapturePillText = null;
@@ -45,131 +58,151 @@ public sealed partial class MainPage
         _dashboardActivityHost = null;
 
         var state = _state ?? new EngineState();
-        var activeCreators = _creators.Count(x => x.Running || x.CaptureActive);
 
-        // Original StreamSnip page heading: title/description with one primary action.
-        var heading = new Grid { ColumnSpacing = 18 };
+        var heading = new Grid { ColumnSpacing = 24, Margin = new Thickness(0, 0, 0, 2) };
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var headingCopy = new StackPanel { Spacing = 7 };
-        headingCopy.Children.Add(Txt("Studio overview", 28, true));
+        var headingCopy = new StackPanel { Spacing = 8 };
+        headingCopy.Children.Add(Txt("Dashboard", 28, true));
         headingCopy.Children.Add(ThemeText(
-            "Monitor sources, review the latest clips, and keep your workflow moving.",
-            11, false, "MutedTextBrush"));
+            "Your capture sessions, clip output and monitored creators.",
+            13, false, "MutedTextBrush"));
         heading.Children.Add(headingCopy);
-        var headingAction = CreateButton("Open Live Studio", () => NavigateTo("live"), primary: true);
-        headingAction.MinHeight = 38;
-        Grid.SetColumn(headingAction, 1);
-        heading.Children.Add(headingAction);
+
+        var openStudio = CreateButton("Open Live Studio", () => NavigateTo("live"), primary: true);
+        openStudio.MinWidth = 190;
+        openStudio.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(openStudio, 1);
+        heading.Children.Add(openStudio);
         PageHost.Children.Add(heading);
 
-        // Four metrics share one bordered strip; they are not four separate cards.
-        var summaryGrid = new Grid { Padding = new Thickness(3, 15, 3, 15) };
-        for (var i = 0; i < 4; i++)
-            summaryGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var metrics = new[]
-        {
-            ("Ready to review", state.ClipTotal.ToString("N0"), "Unpublished clips"),
-            ("Published", state.PostedTotal.ToString("N0"), "In your local registry"),
-            ("Active creators", activeCreators.ToString("N0"), $"{_creators.Count:N0} configured"),
-            ("Current session", FormatDuration(state.Session.Elapsed),
-                $"{state.Session.Clips:N0} clips · {state.Session.Chunks:N0} chunks")
-        };
-
-        _dashboardClipCount = Txt(metrics[0].Item2, 22, true);
-        _dashboardPublishedCount = Txt(metrics[1].Item2, 22, true);
-        _dashboardCreatorCount = Txt(metrics[2].Item2, 22, true);
-        _dashboardElapsed = Txt(metrics[3].Item2, 22, true);
-        var values = new[] { _dashboardClipCount, _dashboardPublishedCount, _dashboardCreatorCount, _dashboardElapsed };
-
-        for (var i = 0; i < metrics.Length; i++)
-        {
-            var stat = new StackPanel { Spacing = 3, Padding = new Thickness(18, 0, 18, 0) };
-            stat.Children.Add(ThemeText(metrics[i].Item1, 11, false, "MutedTextBrush"));
-            stat.Children.Add(values[i]!);
-            stat.Children.Add(ThemeText(metrics[i].Item3, 10, false, "MutedTextBrush"));
-            if (i > 0)
-            {
-                var divider = new Border
-                {
-                    Width = 1,
-                    Background = Application.Current.Resources["LineBrush"] as Brush,
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Stretch
-                };
-                Grid.SetColumn(divider, i);
-                summaryGrid.Children.Add(divider);
-            }
-            Grid.SetColumn(stat, i);
-            summaryGrid.Children.Add(stat);
-        }
-
-        var summary = new Border
-        {
-            Background = Application.Current.Resources["SurfaceBrush"] as Brush,
-            BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Child = summaryGrid
-        };
-        PageHost.Children.Add(summary);
-
-        // Main column: capture state and recent clips.
-        var mainColumn = new StackPanel { Spacing = 17 };
-        mainColumn.Children.Add(CreateCaptureStatusPanel(state));
+        // One source-to-publish rundown replaces the vanity metric strip.
+        PageHost.Children.Add(CreateSessionRundown(state));
 
         _dashboardRecentHost = new StackPanel { Spacing = 0 };
         PopulateRecentClips();
-        mainColumn.Children.Add(CreatePanel(
-            "Recent clips",
-            "Latest output from your capture and VOD workflows.",
-            _dashboardRecentHost));
+        var clipsPanel = CreatePanel(
+            "Latest clips",
+            "Rendered highlights ready for review.",
+            _dashboardRecentHost);
 
-        // Side column: creator activity, latest logs and the local-first information note.
-        var sideColumn = new StackPanel { Spacing = 17 };
         _dashboardCreatorsHost = new StackPanel { Spacing = 0 };
         PopulateCreatorActivity();
-        sideColumn.Children.Add(CreatePanel(
-            "Creator activity",
-            "Live Studio captures and background monitors.",
-            _dashboardCreatorsHost));
+        var creatorsPanel = CreatePanel(
+            "Creator monitors",
+            "Live channels and background VOD watches.",
+            _dashboardCreatorsHost);
+
+        PageHost.Children.Add(AdaptiveColumns(clipsPanel, creatorsPanel, 1.7, 1.0));
 
         _dashboardActivityHost = new StackPanel { Spacing = 0 };
         PopulateRecentActivity();
-        sideColumn.Children.Add(CreatePanel(
-            "Latest activity",
-            "Recent local engine events.",
+        PageHost.Children.Add(CreatePanel(
+            "Recent activity",
+            "The latest messages from capture, processing and publishing.",
             _dashboardActivityHost));
+    }
 
-        var localNote = new Grid { ColumnSpacing = 10, Padding = new Thickness(13, 12, 14, 12) };
-        localNote.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        localNote.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var localIcon = new TextBlock
+    private Border CreateSessionRundown(EngineState state)
+    {
+        var content = new StackPanel { Spacing = 0 };
+        var engineReady = _engine is not null &&
+            state.Phase is not ("offline" or "error");
+        var statusBrushKey = !engineReady
+            ? "DangerBrush"
+            : state.Running
+                ? state.Stopping ? "WarningBrush" : "AccentBrush"
+                : "SuccessBrush";
+        var statusLabel = !engineReady
+            ? "Engine offline"
+            : state.Running
+                ? PhaseLabel(state.Phase)
+                : "Ready";
+
+        _dashboardCaptureTitle = Txt(
+            state.Running
+                ? state.Status
+                : !engineReady ? "Local processing is unavailable" : "No active capture",
+            16, true);
+        _dashboardCaptureSubtitle = ThemeText(
+            state.Running
+                ? (state.Mode == "file" ? "Processing a video file" : "Recording a live stream")
+                    + " · " + FormatDuration(state.Session.Elapsed)
+                : !engineReady
+                    ? "Repair the local engine before starting capture and rendering."
+                    : "Choose a live stream or local video in Live Studio. Nothing records until you press Start capture.",
+            13, false, "MutedTextBrush");
+
+        var header = new Grid { ColumnSpacing = 22 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var copy = new StackPanel { Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
+        copy.Children.Add(_dashboardCaptureTitle);
+        copy.Children.Add(_dashboardCaptureSubtitle);
+        header.Children.Add(copy);
+
+        var pill = MakeStatusPill(statusLabel, statusBrushKey);
+        _dashboardCapturePill = pill;
+        _dashboardCapturePillText = pill.Child as TextBlock;
+        Grid.SetColumn(pill, 1);
+        header.Children.Add(pill);
+        content.Children.Add(header);
+
+        _dashboardWorkflowHost = new StackPanel
         {
-            Text = "◆",
-            FontSize = 15,
-            Foreground = Application.Current.Resources["SuccessBrush"] as Brush,
-            VerticalAlignment = VerticalAlignment.Top
+            Spacing = 0,
+            Margin = new Thickness(0, 30, 0, 0)
         };
-        localNote.Children.Add(localIcon);
-        var localCopy = new StackPanel { Spacing = 3 };
-        localCopy.Children.Add(Txt("Local-first processing", 11, true));
-        localCopy.Children.Add(ThemeText(
-            "Capture and rendering stay on this PC. Hosted AI providers receive transcript text when selected.",
-            10, false, "MutedTextBrush"));
-        Grid.SetColumn(localCopy, 1);
-        localNote.Children.Add(localCopy);
-        sideColumn.Children.Add(new Border
-        {
-            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
-            BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9),
-            Child = localNote
-        });
+        PopulateWorkflowStrip(state);
+        content.Children.Add(_dashboardWorkflowHost);
 
-        PageHost.Children.Add(AdaptiveColumns(mainColumn, sideColumn, 1.55, 0.9));
+        _dashboardSessionDetails = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 22,
+            Margin = new Thickness(0, 24, 0, 8),
+            Visibility = state.Running ? Visibility.Visible : Visibility.Collapsed
+        };
+        _dashboardElapsed = ThemeText($"Elapsed  {FormatDuration(state.Session.Elapsed)}", 12.5, false, "BodyTextBrush");
+        _dashboardClipDetail = ThemeText($"Clips  {state.Session.Clips:N0}", 12.5, false, "BodyTextBrush");
+        _dashboardChunkDetail = ThemeText($"Chunks  {state.Session.Chunks:N0}", 12.5, false, "BodyTextBrush");
+        _dashboardSessionDetails.Children.Add(_dashboardElapsed);
+        _dashboardSessionDetails.Children.Add(_dashboardClipDetail);
+        _dashboardSessionDetails.Children.Add(_dashboardChunkDetail);
+        content.Children.Add(_dashboardSessionDetails);
+
+        _dashboardProgressRow = new Grid
+        {
+            Margin = new Thickness(0, 4, 0, 0),
+            Visibility = state.Running ? Visibility.Visible : Visibility.Collapsed
+        };
+        _dashboardProgressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _dashboardProgressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _dashboardProgressStatus = ThemeText(state.Status, 12, false, "MutedTextBrush");
+        _dashboardProgressPercent = Txt($"{Math.Clamp(state.Progress, 0, 100)}%", 12, true);
+        _dashboardProgressRow.Children.Add(_dashboardProgressStatus);
+        Grid.SetColumn(_dashboardProgressPercent, 1);
+        _dashboardProgressRow.Children.Add(_dashboardProgressPercent);
+        content.Children.Add(_dashboardProgressRow);
+
+        _dashboardProgress = new ProgressBar
+        {
+            Minimum = 0,
+            Maximum = 100,
+            Value = Math.Clamp(state.Progress, 0, 100),
+            Height = 7,
+            Margin = new Thickness(0, 8, 0, 0),
+            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+            Foreground = Application.Current.Resources["AccentBrush"] as Brush,
+            Visibility = state.Running ? Visibility.Visible : Visibility.Collapsed
+        };
+        content.Children.Add(_dashboardProgress);
+
+        return CreatePanel(
+            "Session rundown",
+            "Follow the real source-to-clip path. Each stage changes only when the local engine reports progress.",
+            content);
     }
 
     private Border CreateCaptureStatusPanel(EngineState state)
@@ -186,7 +219,15 @@ public sealed partial class MainPage
             Height = 46,
             CornerRadius = new CornerRadius(11),
             Background = Application.Current.Resources[state.Running ? "SurfaceSoftBrush" : "SurfaceSoftBrush"] as Brush,
-            Child = ThemeText("◉", 23, true, state.Running ? "AccentBrush" : "MutedTextBrush"),
+            Child = new FontIcon
+            {
+                Glyph = new string((char)0xE714, 1),
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontSize = 22,
+                Width = 22,
+                Height = 22,
+                Foreground = Application.Current.Resources[state.Running ? "AccentBrush" : "MutedTextBrush"] as Brush
+            },
             VerticalAlignment = VerticalAlignment.Center
         };
         status.Children.Add(symbol);
@@ -254,75 +295,166 @@ public sealed partial class MainPage
         if (_dashboardWorkflowHost is null) return;
         _dashboardWorkflowHost.Children.Clear();
 
+        var engineReady = _engine is not null;
+        var phase = (state.Phase ?? "idle").Trim().ToLowerInvariant();
+        var hasSource = !string.IsNullOrWhiteSpace(SettingString("target"));
+        var hasReviewableClips = state.ClipTotal > 0 || state.Session.Clips > 0;
+        var postingComplete = state.Posting.Total > 0 &&
+            state.Posting.Completed >= state.Posting.Total && !state.Posting.Active;
+
+        var current = !engineReady ? -1 : state.Posting.Active ? 6 : phase switch
+        {
+            "waiting" or "recording" or "stopping" => 1,
+            "transcribing" when state.Progress >= 100 ||
+                state.Status.Contains("finding", StringComparison.OrdinalIgnoreCase) => 3,
+            "transcribing" => 2,
+            "rendering" => 4,
+            "done" => hasReviewableClips ? 5 : 0,
+            "error" => -2,
+            _ when postingComplete => -3,
+            _ when hasReviewableClips => 5,
+            _ when hasSource => 1,
+            _ => 0
+        };
+
         var stages = new[]
         {
-            ("Capture", new[] { "waiting", "recording", "stopping" }),
-            ("Transcribe", new[] { "transcribing" }),
-            ("Analyze", new[] { "analyzing" }),
-            ("Render", new[] { "rendering" }),
-            ("Publish", new[] { "queued" })
+            (Name: "Source", Detail: hasSource ? "Source selected" : "Choose stream or VOD"),
+            (Name: "Capture", Detail: "Live or local video"),
+            (Name: "Transcribe", Detail: "Speech to text"),
+            (Name: "Analyze", Detail: "Find highlights"),
+            (Name: "Render", Detail: "Captioned clips"),
+            (Name: "Review", Detail: "Edit title and details"),
+            (Name: "Publish", Detail: "Manual approval")
         };
-        var activeIndex = Array.FindIndex(stages, stage => stage.Item2.Contains(state.Phase));
-        var strip = new Grid { Padding = new Thickness(8, 12, 8, 9) };
+
+        var strip = new Grid
+        {
+            Padding = new Thickness(4, 14, 4, 4),
+            RowSpacing = 10
+        };
         for (var i = 0; i < stages.Length; i++)
             strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        strip.RowDefinitions.Add(new RowDefinition { Height = new GridLength(38) });
         strip.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         strip.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var completedCount = current switch
+        {
+            >= 0 => current,
+            -3 => stages.Length,
+            _ => 0
+        };
 
         var track = new Border
         {
-            Height = 1,
+            Height = 3,
             Background = Application.Current.Resources["LineBrush"] as Brush,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(10, 0, 10, 0)
+            Margin = new Thickness(25, 0, 25, 0)
         };
         Grid.SetColumnSpan(track, stages.Length);
+        Grid.SetRow(track, 0);
         strip.Children.Add(track);
+
+        if (completedCount > 0)
+        {
+            var progressTrack = new Border
+            {
+                Height = 3,
+                Background = Application.Current.Resources["SuccessBrush"] as Brush,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Width = 0
+            };
+            void SizeProgress(double width) =>
+                progressTrack.Width = Math.Max(0, width * completedCount / stages.Length);
+            strip.SizeChanged += (_, args) => SizeProgress(args.NewSize.Width - 50);
+            strip.Loaded += (_, _) => SizeProgress(strip.ActualWidth - 50);
+            Grid.SetColumnSpan(progressTrack, stages.Length);
+            Grid.SetRow(progressTrack, 0);
+            strip.Children.Add(progressTrack);
+        }
 
         for (var i = 0; i < stages.Length; i++)
         {
-            var active = activeIndex == i;
-            var passed = activeIndex > i;
-            var stage = new StackPanel { Spacing = 7, HorizontalAlignment = HorizontalAlignment.Center };
-            var circle = new Border
+                var isUnavailable = !engineReady && i > 0;
+            var isFailed = current == -2 && i == (phase == "rendering" ? 4 : phase == "transcribing" ? 2 : 1);
+            var isComplete = i < completedCount || (!engineReady && i == 0 && hasSource);
+            var isCurrent = i == current || (current == -2 && isFailed) ||
+                (current == -1 && i == 0 && !hasSource);
+            var tone = isUnavailable
+                ? "MutedTextBrush"
+                : isFailed ? "DangerBrush"
+                : isComplete ? "SuccessBrush"
+                : isCurrent ? "AccentBrush"
+                : "MutedTextBrush";
+
+            var marker = new Border
             {
-                Width = 23,
-                Height = 23,
-                CornerRadius = new CornerRadius(99),
-                Background = Application.Current.Resources[active ? "AccentBrush" : "SurfaceSoftBrush"] as Brush,
-                BorderBrush = Application.Current.Resources[active ? "AccentBrush" : passed ? "SuccessBrush" : "LineBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Child = ThemeText(passed ? "✓" : (i + 1).ToString(), 10, true,
-                    active ? "AccentInkBrush" : passed ? "SuccessBrush" : "MutedTextBrush"),
-                HorizontalAlignment = HorizontalAlignment.Center
+                Width = 34,
+                Height = 34,
+                CornerRadius = new CornerRadius(17),
+                Background = Application.Current.Resources[isCurrent ? "AccentSoftBrush" : "SurfaceSoftBrush"] as Brush,
+                BorderBrush = Application.Current.Resources[tone] as Brush,
+                BorderThickness = new Thickness(isCurrent ? 2 : 1),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    FontFamily = CurrentFont,
+                    FontSize = 15,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = Application.Current.Resources[tone] as Brush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
             };
-            stage.Children.Add(circle);
-            stage.Children.Add(ThemeText(stages[i].Item1, 10, active || passed,
-                passed ? "SuccessBrush" : active ? "PrimaryTextBrush" : "MutedTextBrush"));
-            Grid.SetColumn(stage, i);
-            Grid.SetRow(stage, 0);
-            strip.Children.Add(stage);
+            Grid.SetColumn(marker, i);
+            Grid.SetRow(marker, 0);
+            strip.Children.Add(marker);
+
+            var label = ThemeText(stages[i].Name, 15.5, isCurrent || isComplete,
+                isCurrent ? "PrimaryTextBrush" : tone);
+            label.HorizontalAlignment = HorizontalAlignment.Center;
+            label.TextAlignment = TextAlignment.Center;
+            label.TextTrimming = TextTrimming.CharacterEllipsis;
+            Grid.SetColumn(label, i);
+            Grid.SetRow(label, 1);
+            strip.Children.Add(label);
+
+            var detail = ThemeText(
+                isUnavailable ? "Unavailable"
+                : isFailed ? "Failed"
+                : isComplete ? "Complete"
+                : isCurrent ? StageCurrentDetail(i, state, hasSource, hasReviewableClips)
+                : i == 6 ? "Manual approval"
+                : "Waiting",
+                13.5, isCurrent || isFailed, tone);
+            detail.HorizontalAlignment = HorizontalAlignment.Center;
+            detail.TextAlignment = TextAlignment.Center;
+            detail.TextTrimming = TextTrimming.CharacterEllipsis;
+            Grid.SetColumn(detail, i);
+            Grid.SetRow(detail, 2);
+            strip.Children.Add(detail);
         }
 
-        if (!state.Running && activeIndex < 0)
-        {
-            var ready = ThemeText("Ready", 10, false, "MutedTextBrush");
-            ready.HorizontalAlignment = HorizontalAlignment.Center;
-            ready.Margin = new Thickness(0, 7, 0, 0);
-            Grid.SetRow(ready, 1);
-            Grid.SetColumnSpan(ready, stages.Length);
-            strip.Children.Add(ready);
-        }
-
-        _dashboardWorkflowHost.Children.Add(new Border
-        {
-            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
-            BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9),
-            Child = strip
-        });
+        _dashboardWorkflowHost.Children.Add(strip);
     }
+
+    private static string StageCurrentDetail(int index, EngineState state, bool hasSource, bool hasReviewableClips) =>
+        index switch
+        {
+            0 => hasSource ? "Selected" : "Choose a source",
+            1 => state.Running ? PhaseLabel(state.Phase) : "Ready to start",
+            2 => "Transcribing",
+            3 => "Finding moments",
+            4 => state.Status,
+            5 => hasReviewableClips ? "Ready to review" : "Waiting for clips",
+            6 => state.Posting.Current.Length > 0 ? state.Posting.Current : "Uploading",
+            _ => "Waiting"
+        };
 
     private void PopulateRecentClips()
     {
@@ -339,11 +471,19 @@ public sealed partial class MainPage
                 VerticalAlignment = VerticalAlignment.Center,
                 Padding = new Thickness(12, 22, 12, 22)
             };
-            empty.Children.Add(ThemeText("▣", 22, true, "MutedTextBrush"));
+            empty.Children.Add(new FontIcon
+            {
+                Glyph = new string((char)0xE714, 1),
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontSize = 22,
+                Width = 28,
+                Height = 28,
+                Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
+            });
             empty.Children.Add(Txt("No clips yet", 12, true));
             empty.Children.Add(ThemeText(
                 "Generated clips appear here after the engine finds and renders a highlight.",
-                10, false, "MutedTextBrush"));
+                14, false, "BodyTextBrush"));
             empty.Children.Add(CreateButton("Choose a source", () => NavigateTo("live")));
             _dashboardRecentHost.Children.Add(empty);
             return;
@@ -352,18 +492,25 @@ public sealed partial class MainPage
         foreach (var clip in recent)
         {
             var row = new Grid { ColumnSpacing = 11, Padding = new Thickness(4, 11, 4, 11) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var clipIcon = new Border
             {
-                Width = 34,
-                Height = 34,
+                Width = 40,
+                Height = 40,
                 CornerRadius = new CornerRadius(8),
                 Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
-                Child = ThemeText("▣", 17, true, "MutedTextBrush"),
+                Child = new FontIcon
+                {
+                    Glyph = new string((char)0xE714, 1),
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontSize = 22,
+                    Width = 20,
+                    Height = 20,
+                    Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
+                },
                 VerticalAlignment = VerticalAlignment.Center
             };
             row.Children.Add(clipIcon);
@@ -382,12 +529,6 @@ public sealed partial class MainPage
             size.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(size, 2);
             row.Children.Add(size);
-            var arrow = ThemeText("↗", 14, false, "MutedTextBrush");
-            arrow.VerticalAlignment = VerticalAlignment.Center;
-            arrow.Margin = new Thickness(8, 0, 0, 0);
-            Grid.SetColumn(arrow, 3);
-            row.Children.Add(arrow);
-
             var button = new Button
             {
                 Content = row,
@@ -411,7 +552,7 @@ public sealed partial class MainPage
             });
         }
 
-        var open = CreateButton("Open library  ↗", () => NavigateTo("clips"));
+        var open = CreateButton("Open clip library", () => NavigateTo("clips"));
         open.Margin = new Thickness(4, 7, 0, 0);
         _dashboardRecentHost.Children.Add(open);
     }
@@ -477,7 +618,7 @@ public sealed partial class MainPage
             });
         }
 
-        var manage = CreateButton("Manage  ↗", () => NavigateTo("creators"));
+        var manage = CreateButton("Manage creators", () => NavigateTo("creators"));
         manage.Margin = new Thickness(0, 7, 0, 0);
         _dashboardCreatorsHost.Children.Add(manage);
     }
@@ -524,26 +665,44 @@ public sealed partial class MainPage
         _dashboardPublishedCount?.SetValue(TextBlock.TextProperty, _state.PostedTotal.ToString("N0"));
         _dashboardCreatorCount?.SetValue(TextBlock.TextProperty,
             _creators.Count(x => x.Running || x.CaptureActive).ToString("N0"));
-        _dashboardElapsed?.SetValue(TextBlock.TextProperty, FormatDuration(_state.Session.Elapsed));
+        if (_dashboardElapsed is not null)
+            _dashboardElapsed.Text = $"Elapsed  {FormatDuration(_state.Session.Elapsed)}";
+        if (_dashboardClipDetail is not null)
+            _dashboardClipDetail.Text = $"Clips  {_state.Session.Clips:N0}";
+        if (_dashboardChunkDetail is not null)
+            _dashboardChunkDetail.Text = $"Chunks  {_state.Session.Chunks:N0}";
+        if (_dashboardSessionDetails is not null)
+            _dashboardSessionDetails.Visibility = _state.Running ? Visibility.Visible : Visibility.Collapsed;
+        if (_dashboardProgressRow is not null)
+            _dashboardProgressRow.Visibility = _state.Running ? Visibility.Visible : Visibility.Collapsed;
+        if (_dashboardProgressStatus is not null)
+            _dashboardProgressStatus.Text = _state.Status;
+        if (_dashboardProgressPercent is not null)
+            _dashboardProgressPercent.Text = $"{Math.Clamp(_state.Progress, 0, 100)}%";
 
         if (_dashboardCaptureTitle is not null)
-            _dashboardCaptureTitle.Text = _state.Running ? _state.Status : "No active capture";
+            _dashboardCaptureTitle.Text = _state.Running ? _state.Status :
+                _engine is null ? "Local processing is unavailable" : "No active capture";
         if (_dashboardCaptureSubtitle is not null)
         {
             _dashboardCaptureSubtitle.Text = _state.Running
                 ? (_state.Mode == "file" ? "Processing a video file" : "Recording a live stream") + " · " + FormatDuration(_state.Session.Elapsed)
-                : "Choose a live source or a recorded video to begin.";
+                : _engine is null
+                    ? "Repair the local engine before starting capture and rendering."
+                    : "Choose a live stream or local video in Live Studio. Nothing records until you press Start capture.";
         }
+        var currentPhaseBrush = _engine is null ? "DangerBrush" : PhaseBrushKey(_state);
         if (_dashboardCapturePillText is not null)
         {
-            _dashboardCapturePillText.Text = PhaseLabel(_state.Phase);
-            _dashboardCapturePillText.Foreground = Application.Current.Resources[PhaseBrushKey(_state)] as Brush;
+            _dashboardCapturePillText.Text = _engine is null ? "Offline" : PhaseLabel(_state.Phase);
+            _dashboardCapturePillText.Foreground = Application.Current.Resources[currentPhaseBrush] as Brush;
         }
         if (_dashboardCapturePill is not null)
-            _dashboardCapturePill.BorderBrush = Application.Current.Resources[PhaseBrushKey(_state)] as Brush;
+            _dashboardCapturePill.BorderBrush = Application.Current.Resources[currentPhaseBrush] as Brush;
         if (_dashboardProgress is not null)
         {
             _dashboardProgress.Value = Math.Clamp(_state.Progress, 0, 100);
+            _dashboardProgress.Visibility = _state.Running ? Visibility.Visible : Visibility.Collapsed;
         }
 
         PopulateWorkflowStrip(_state);

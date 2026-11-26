@@ -30,9 +30,18 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertIn('<html lang="en" data-type="software">', html)
         self.assertIn('<meta name="page-type" content="software">', html)
         self.assertIn('<meta name="site-kind" content="software">', html)
-        self.assertIn('@media (max-width: 900px)', html)
-        self.assertIn('class="nav-download-mobile"', html)
+        css = (ROOT / "docs" / "assets" / "site.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"@media\s*\(max-width:\s*900px\)")
+        self.assertIn('class="mobile-menu"', html)
+        self.assertIn('class="mobile-download"', html)
         self.assertIn('id="menu-toggle"', html)
+        self.assertIn('class="source-link"', html)
+        self.assertIn('aria-label="Choose website theme"', html)
+        self.assertEqual(html.count('class="theme-option"'), 13)
+        social_card = ROOT / "docs" / "assets" / "streamsnipai-social-card.png"
+        self.assertTrue(social_card.is_file(), "A raster social card is required for link previews.")
+        self.assertIn('property="og:image" content="https://sifat-jaman-13.github.io/stream-clip-ai/assets/streamsnipai-social-card.png"', html)
+        self.assertIn('name="twitter:image" content="https://sifat-jaman-13.github.io/stream-clip-ai/assets/streamsnipai-social-card.png"', html)
         parser = PageInspector()
         parser.feed(html)
         self.assertEqual(len(parser.ids), len(set(parser.ids)), "Landing page contains duplicate IDs.")
@@ -40,15 +49,21 @@ class PublicReleaseAssetTests(unittest.TestCase):
         for image in parser.images:
             self.assertIn("alt", image, f"Image has no alt text: {image}")
             src = image.get("src", "")
-            if src.startswith("./"):
-                self.assertTrue((html_path.parent / src[2:]).is_file(), f"Missing local image: {src}")
+            if not re.match(r"^(?:[a-z][a-z0-9+.-]*:|/|#)", src, re.IGNORECASE):
+                local_path = src[2:] if src.startswith("./") else src
+                self.assertTrue((html_path.parent / local_path).is_file(), f"Missing local image: {src}")
         for anchor in parser.links:
             self.assertIn(f'id="{anchor}"', html, f"Broken in-page link: #{anchor}")
 
     def test_readme_screenshots_exist_and_feature_truth_is_clear(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        for image in re.findall(r'src="(docs/assets/product/[^"]+)"', readme):
+        screenshots = re.findall(r'src="(docs/assets/product/[^"]+)"', readme)
+        for image in screenshots:
             self.assertTrue((ROOT / image).is_file(), f"Missing README screenshot: {image}")
+        for image in ("dashboard.png", "live-studio.png", "creator-monitoring.png", "clip-library.png", "publishing.png"):
+            self.assertIn(f"docs/assets/product/{image}", screenshots)
+        self.assertIn("4.0.7 native Windows Release build", readme)
+        self.assertNotIn("Page render error", readme)
         self.assertIn("Facebook", readme)
         self.assertIn("Instagram", readme)
         self.assertIn("YouTube", readme)
@@ -75,10 +90,10 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertIn("custom_words.txt", gitignore)
 
     def test_release_version_is_consistent(self):
-        self.assertIn('APP_VERSION = "4.0.6"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
-        self.assertIn('version = "4.0.6"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('#define MyAppVersion "4.0.6"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
-        self.assertIn('Version="4.0.6.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
+        self.assertIn('APP_VERSION = "4.0.7"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
+        self.assertIn('version = "4.0.7"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('#define MyAppVersion "4.0.7"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
+        self.assertIn('Version="4.0.7.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

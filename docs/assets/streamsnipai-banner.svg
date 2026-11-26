@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="440" viewBox="0 0 1440 440" role="img" aria-labelledby="title desc">
+<title id="title">StreamSnip AI — A clip studio for live creators</title>
+<desc id="desc">Graphite and coral StreamSnip AI banner with a stylised audio waveform and a seven-stage clip workflow.</desc>
+<defs>
+  <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+    <stop stop-color="#151b22"/>
+    <stop offset="1" stop-color="#242e38"/>
+  </linearGradient>
+  <linearGradient id="trace" x1="0" y1="0" x2="1" y2="0">
+    <stop stop-color="#e06c75"/>
+    <stop offset=".53" stop-color="#9cdef2"/>
+    <stop offset="1" stop-color="#e06c75"/>
+  </linearGradient>
+</defs>
+<rect width="1440" height="440" rx="24" fill="url(#background)"/>
+<path d="M0 355H1440" stroke="#43515c" stroke-width="1"/>
+<circle cx="1240" cy="80" r="230" fill="#9cdef2" opacity=".045"/>
+<g transform="translate(84 81)">
+  <rect width="68" height="68" rx="18" fill="#e06c75"/>
+  <path d="M11 35h8l6-14 10 29 9-22 7 12h7" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="88" y="22" fill="#9cdef2" font-family="'IBM Plex Mono',Consolas,monospace" font-size="14" font-weight="600" letter-spacing="3">WINDOWS CREATOR STUDIO</text>
+  <text x="0" y="132" fill="#f1f5f7" font-family="'IBM Plex Sans',Segoe UI,sans-serif" font-size="70" font-weight="650" letter-spacing="-2.8">StreamSnip AI</text>
+  <text x="2" y="183" fill="#d0dce1" font-family="'IBM Plex Sans',Segoe UI,sans-serif" font-size="27">From live stream to a clip worth sharing.</text>
+  <text x="2" y="227" fill="#aebdc6" font-family="'IBM Plex Sans',Segoe UI,sans-serif" font-size="18">Capture · Transcribe · Find moments · Review · Publish</text>
+  <g transform="translate(0 264)" font-family="'IBM Plex Mono',Consolas,monospace" font-size="12" font-weight="600">
+    <rect width="188" height="36" rx="7" fill="#e06c75" fill-opacity=".14" stroke="#e06c75" stroke-opacity=".62"/>
+    <text x="94" y="23" text-anchor="middle" fill="#ffdfe1">LOCAL MEDIA PIPELINE</text>
+    <rect x="202" width="188" height="36" rx="7" fill="#9cdef2" fill-opacity=".10" stroke="#9cdef2" stroke-opacity=".5"/>
+    <text x="296" y="23" text-anchor="middle" fill="#d8f3fb">AI-ASSISTED MOMENTS</text>
+    <rect x="404" width="188" height="36" rx="7" fill="#fff" fill-opacity=".04" stroke="#84949e" stroke-opacity=".55"/>
+    <text x="498" y="23" text-anchor="middle" fill="#d8e2e7">HUMAN APPROVAL</text>
+  </g>
+</g>
+<g transform="translate(780 77)">
+  <rect width="570" height="236" rx="18" fill="#1a222b" stroke="#52616d"/>
+  <text x="25" y="34" fill="#a9bac4" font-family="'IBM Plex Mono',Consolas,monospace" font-size="11" letter-spacing="1.5">SESSION SIGNAL / AUDIO TIMELINE</text>
+  <path d="M24 120H546" stroke="#43515c" stroke-width="1"/>
+  <g fill="url(#trace)">
+    <rect x="34" y="104" width="5" height="32" rx="2"/><rect x="46" y="87" width="5" height="66" rx="2"/>
+    <rect x="58" y="98" width="5" height="44" rx="2"/><rect x="70" y="71" width="5" height="98" rx="2"/>
+    <rect x="82" y="91" width="5" height="58" rx="2"/><rect x="94" y="105" width="5" height="30" rx="2"/>
+    <rect x="106" y="77" width="5" height="86" rx="2"/><rect x="118" y="93" width="5" height="54" rx="2"/>
+    <rect x="130" y="64" width="5" height="112" rx="2"/><rect x="142" y="100" width="5" height="40" rx="2"/>
+    <rect x="154" y="86" width="5" height="68" rx="2"/><rect x="166" y="110" width="5" height="20" rx="2"/>
+    <rect x="178" y="72" width="5" height="96" rx="2"/><rect x="190" y="91" width="5" height="58" rx="2"/>
+    <rect x="202" y="101" width="5" height="38" rx="2"/><rect x="214" y="62" width="5" height="116" rx="2"/>
+    <rect x="226" y="83" width="5" height="74" rx="2"/><rect x="238" y="103" width="5" height="34" rx="2"/>
+    <rect x="250" y="76" width="5" height="88" rx="2"/><rect x="262" y="94" width="5" height="52" rx="2"/>
+    <rect x="274" y="109" width="5" height="22" rx="2"/><rect x="286" y="73" width="5" height="94" rx="2"/>
+    <rect x="298" y="88" width="5" height="64" rx="2"/><rect x="310" y="60" width="5" height="120" rx="2"/>
+    <rect x="322" y="98" width="5" height="44" rx="2"/><rect x="334" y="81" width="5" height="78" rx="2"/>
+    <rect x="346" y="106" width="5" height="28" rx="2"/><rect x="358" y="69" width="5" height="102" rx="2"/>
+    <rect x="370" y="92" width="5" height="56" rx="2"/><rect x="382" y="105" width="5" height="30" rx="2"/>
+    <rect x="394" y="78" width="5" height="84" rx="2"/><rect x="406" y="90" width="5" height="60" rx="2"/>
+    <rect x="418" y="65" width="5" height="110" rx="2"/><rect x="430" y="101" width="5" height="38" rx="2"/>
+    <rect x="442" y="85" width="5" height="70" rx="2"/><rect x="454" y="108" width="5" height="24" rx="2"/>
+    <rect x="466" y="74" width="5" height="92" rx="2"/><rect x="478" y="94" width="5" height="52" rx="2"/>
+    <rect x="490" y="81" width="5" height="78" rx="2"/><rect x="502" y="105" width="5" height="30" rx="2"/>
+  </g>
+  <path d="M24 188H546" stroke="#4b5b66" stroke-width="1" stroke-dasharray="3 6"/>
+  <path d="M316 52V194" stroke="#e06c75" stroke-width="2"/>
+  <circle cx="316" cy="120" r="7" fill="#e06c75" stroke="#ffd9dc" stroke-width="2"/>
+  <text x="25" y="218" fill="#91a2ad" font-family="'IBM Plex Mono',Consolas,monospace" font-size="10">SOURCE</text>
+  <text x="546" y="218" text-anchor="end" fill="#91a2ad" font-family="'IBM Plex Mono',Consolas,monospace" font-size="10">REVIEWABLE OUTPUT</text>
+</g>
+<g transform="translate(786 371)" font-family="'IBM Plex Mono',Consolas,monospace" font-size="10">
+  <path d="M9 10H548" stroke="#64737d" stroke-width="1"/>
+  <g fill="#9cdef2">
+    <circle cx="10" cy="10" r="4"/><circle cx="98" cy="10" r="4"/><circle cx="186" cy="10" r="4"/>
+    <circle cx="274" cy="10" r="4"/><circle cx="362" cy="10" r="4"/><circle cx="450" cy="10" r="4"/><circle cx="548" cy="10" r="4"/>
+  </g>
+  <g fill="#c2cdd3">
+    <text x="10" y="34" text-anchor="middle">SOURCE</text><text x="98" y="34" text-anchor="middle">CAPTURE</text>
+    <text x="186" y="34" text-anchor="middle">TRANSCRIBE</text><text x="274" y="34" text-anchor="middle">ANALYZE</text>
+    <text x="362" y="34" text-anchor="middle">RENDER</text><text x="450" y="34" text-anchor="middle">REVIEW</text>
+    <text x="548" y="34" text-anchor="middle">PUBLISH</text>
+  </g>
+</g>
+</svg>

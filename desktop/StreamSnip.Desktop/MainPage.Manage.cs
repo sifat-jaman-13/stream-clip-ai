@@ -39,12 +39,7 @@ public sealed partial class MainPage
 
     private void RenderSettingsPage()
     {
-        AddPageHeading("Settings", "Choose the AI model for moment selection and post metadata, then manage storage and appearance.");
-
-        PageHost.Children.Add(CreatePanel(
-            "AI provider",
-            "One selected provider analyzes viral moments and generates titles, descriptions, and topical tags.",
-            BuildAiSettingsTab()));
+        AddPageHeading("Settings", "Choose where recordings and finished clips are stored, then tune the appearance of your workspace.");
 
         var storage = new StackPanel { Spacing = 10 };
         var recordings = Input(SettingString("rec_dir"));
@@ -787,7 +782,7 @@ public sealed partial class MainPage
         brand.Children.Add(Txt("StreamSnip AI", 20, true));
         brand.Children.Add(Txt("Creator Studio  ·  Native Windows desktop interface", 10, false, "#9CDEF2"));
         brand.Children.Add(Txt("The WinUI desktop app owns the windows and native controls. The Python engine handles Streamlink capture, FFmpeg media processing, Faster-Whisper transcription, AI highlight analysis, and clip rendering.", 11));
-        brand.Children.Add(Txt("Application version 4.0.6", 10, false, "#9CDEF2"));
+        brand.Children.Add(Txt("Application version 4.0.7", 10, false, "#9CDEF2"));
         brand.Children.Add(ActionRow(
             CreateButton("GitHub source", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai")),
             CreateButton("Latest releases", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"))));

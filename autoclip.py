@@ -34,7 +34,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            ollama_models, select_moments, test_provider)
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
-APP_VERSION = "4.0.6"
+APP_VERSION = "4.0.7"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -67,7 +67,7 @@ except Exception:
 
 # ------------------------------------------------------------------ setup
 def _add_cuda_dlls():
-    """Windows: let ctranslate2 find the cuBLAS DLLs installed by the nvidia-cublas-cu12 wheel."""
+    """Expose CUDA 12 cuBLAS, runtime, cuDNN and NVRTC wheel DLLs on Windows."""
     if os.name != "nt":
         return
     roots = [pathlib.Path(p) for p in sys.path if p]
@@ -76,15 +76,23 @@ def _add_cuda_dlls():
         if p:
             roots.append(pathlib.Path(p))
     seen = set()
+    path_entries = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if entry]
     for base in roots:
-        d = base / "nvidia" / "cublas" / "bin"
-        if str(d).lower() in seen:
-            continue
-        seen.add(str(d).lower())
-        if d.is_dir():
-            try: os.add_dll_directory(str(d))
-            except OSError: pass
-            os.environ["PATH"] = str(d) + os.pathsep + os.environ["PATH"]
+        for package in ("cublas", "cuda_runtime", "cudnn", "cuda_nvrtc"):
+            d = base / "nvidia" / package / "bin"
+            key = str(d).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if d.is_dir():
+                try:
+                    os.add_dll_directory(str(d))
+                except OSError:
+                    pass
+                if not any(entry.lower() == key for entry in path_entries):
+                    path_entries.insert(0, str(d))
+    if path_entries:
+        os.environ["PATH"] = os.pathsep.join(path_entries)
 _add_cuda_dlls()
 
 def _patch_pyav():
@@ -227,7 +235,10 @@ def apply_huggingface_token():
     return False
 
 def ffmpeg_exe():
-    """Prefer a bundled FFmpeg in portable builds, then fall back to system PATH."""
+    """Use the installer-verified FFmpeg path, then bundled or PATH FFmpeg."""
+    configured = os.environ.get("STREAMSNIP_FFMPEG_PATH", "").strip()
+    if configured and pathlib.Path(configured).is_file():
+        return configured
     name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
     roots = [HERE, pathlib.Path(sys.executable).resolve().parent]
     for root in roots:
@@ -1993,10 +2004,19 @@ class Engine:
         audio = self.load_audio(path)
         src = audio if audio is not None else str(path)
         self.dur_audio = (len(audio) / 16000) if audio is not None else 0
+        try:
+            import onnxruntime  # noqa: F401
+            vad_filter = True
+        except ImportError:
+            # Python 3.15 currently omits the unsupported ONNX Runtime wheel.
+            # VAD is an optional preprocessing filter; disable it rather than
+            # making the core Whisper transcription path fail entirely.
+            vad_filter = False
+            self.log("ONNX Runtime is not installed; speech transcription will run without the optional VAD filter.")
         for attempt in range(2):
             try:
                 model = self.get_model(self.cfg["model"])
-                segs, _ = model.transcribe(src, word_timestamps=True, vad_filter=True, language=lang)
+                segs, _ = model.transcribe(src, word_timestamps=True, vad_filter=vad_filter, language=lang)
                 words = []
                 self.status("Transcribing audio... 0%", "transcribing", 0)
                 for s in segs:

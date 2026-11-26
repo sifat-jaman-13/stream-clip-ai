@@ -32,6 +32,11 @@ Write-Host "Publishing the self-contained native WinUI 3 desktop app..." -Foregr
 & dotnet publish $project -c Release -r win-x64 -p:Platform=x64 -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:SelfContained=true -p:PublishTrimmed=false -p:PublishSingleFile=false -p:PublishReadyToRun=true -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw "Native WinUI 3 Release publish failed." }
 
+$appResourceIndex = Join-Path $publishDir "StreamSnip.Desktop.pri"
+if (-not (Test-Path -LiteralPath $appResourceIndex)) {
+    throw "Native publish is missing StreamSnip.Desktop.pri; compiled XAML resources would fail at startup."
+}
+
 $nativeExe = Join-Path $publishDir "StreamSnip.Desktop.exe"
 if (-not (Test-Path -LiteralPath $nativeExe)) {
     throw "The native publish did not produce StreamSnip.Desktop.exe."
@@ -62,7 +67,7 @@ if (-not $iscc) {
 if (-not $iscc) { throw "Inno Setup 6 is required to create the native StreamSnip AI installer." }
 
 $versionMatch = Select-String -Path (Join-Path $PSScriptRoot "autoclip.py") -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
-$version = if ($versionMatch) { $versionMatch.Matches[0].Groups[1].Value } else { "4.0.6" }
+$version = if ($versionMatch) { $versionMatch.Matches[0].Groups[1].Value } else { "4.0.7" }
 
 Write-Host "Compiling StreamSnipAI-Native-Setup.exe (version $version)..." -ForegroundColor Cyan
 & $iscc "/DMyAppVersion=$version" $iss

@@ -11,7 +11,7 @@
   <meta property="og:title" content="StreamSnip AI — Stream clipping for creators">
   <meta property="og:description" content="Capture live streams and VODs, review AI-ranked highlights, and publish selected clips from a native Windows desktop app.">
   <meta property="og:url" content="https://sifat-jaman-13.github.io/stream-clip-ai/">
-  <meta property="og:image" content="https://sifat-jaman-13.github.io/stream-clip-ai/assets/product/creator-studio.png">
+  <meta property="og:image" content="https://sifat-jaman-13.github.io/stream-clip-ai/assets/streamsnipai-banner.svg">
   <meta name="twitter:card" content="summary_large_image">
   <title>StreamSnip AI — Stream clipping software for creators</title>
   <script>document.documentElement.classList.add("m-enter");setTimeout(()=>document.documentElement.classList.add("m-enter-done"),700);</script>
@@ -105,6 +105,7 @@
     .stage--deep .section-intro { color: var(--deep-muted); }
     .feature-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); align-items: start; }
     .feature-copy { grid-column: 1 / span 5; }
+    .feature-grid:has(> .feature-copy:only-child) .feature-copy { grid-column: 1 / -1; max-width: 760px; }
     .feature-visual { grid-column: 7 / span 6; min-width: 0; }
     .feature-copy p { max-width: 500px; margin: 0 0 18px; color: var(--muted); }
     .stage--deep .feature-copy p { color: var(--deep-muted); }
@@ -308,9 +309,6 @@
           <a class="btn btn--primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows</a>
           <a class="btn btn--secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai">View source</a>
         </div>
-        <div class="hero-window m-zoom" data-enter-media data-moment="cursor-spotlight">
-          <img src="assets/product/creator-studio.png" alt="StreamSnip AI native creator workspace with capture, monitoring and clip review tools" width="1380" height="746" fetchpriority="high">
-        </div>
       </div>
     </section>
 
@@ -361,11 +359,10 @@
               <li>Keep source recordings available for review before extraction.</li>
             </ul>
           </div>
-          <div class="feature-visual">
-            <figure class="visual-frame m-zoom">
-              <img src="assets/product/live-studio.png" alt="Live Studio screen showing stream capture controls and output settings" width="1380" height="746" loading="lazy" decoding="async">
-            </figure>
-            <div class="visual-caption"><span>LIVE STUDIO</span><span>Capture configuration</span></div>
+          <div class="capture-steps" role="list" aria-label="Live capture setup steps">
+            <div role="listitem"><span>01</span><strong>Choose source</strong><small>Twitch or YouTube</small></div>
+            <div role="listitem"><span>02</span><strong>Configure capture</strong><small>Quality and output</small></div>
+            <div role="listitem"><span>03</span><strong>Start when ready</strong><small>Explicit start and stop</small></div>
           </div>
         </div>
       </div>
@@ -375,9 +372,6 @@
       <div class="wrap">
         <h2 class="section-title">Creator-specific workspaces</h2>
         <p class="section-intro">Each saved creator has a separate workspace. Live recordings and recorded-VOD work have separate folders for every creator.</p>
-        <figure class="visual-frame m-zoom">
-          <img src="assets/product/creator-monitoring.png" alt="Creator monitoring workspace showing saved creators and their separate monitoring status" width="1380" height="746" loading="lazy" decoding="async">
-        </figure>
         <div class="folder-board" role="img" aria-label="Example folder structure with separate creator roots, each containing Live and Recorded VOD folders">
           <div class="folder-root">
             <div class="folder-root__head">
@@ -417,12 +411,7 @@
             </ul>
             <p>Facecam detection is available, with manual crop adjustment when you want to refine the result.</p>
           </div>
-          <div class="feature-visual">
-            <figure class="visual-frame m-zoom">
-              <img src="assets/product/clip-library.png" alt="Clip library with generated video items and review actions" width="1380" height="746" loading="lazy" decoding="async">
-            </figure>
-            <div class="visual-caption"><span>CLIP LIBRARY</span><span>Review before publishing</span></div>
-          </div>
+
         </div>
       </div>
     </section>
@@ -451,11 +440,7 @@
               <li>See publishing results for each destination.</li>
             </ul>
           </div>
-          <div class="feature-visual">
-            <figure class="visual-frame m-zoom">
-              <img src="assets/product/publishing.png" alt="Zernio publishing settings and connected social accounts in StreamSnip AI" width="1380" height="746" loading="lazy" decoding="async">
-            </figure>
-          </div>
+
         </div>
         <div class="publish-note"><p>Only destinations confirmed as successful are recorded as published. Zernio and the connected platforms control account availability and posting quotas.</p><span>FACEBOOK · INSTAGRAM · YOUTUBE</span></div>
       </div>

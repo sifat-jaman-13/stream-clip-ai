@@ -27,9 +27,6 @@ StreamSnip AI turns supported live streams, recorded VODs, and local videos into
 
 The installed application is a **native WinUI 3 Windows desktop app** backed by a supervised local Python media engine. Your recordings and rendered files stay on your PC. Hosted AI services are optional and receive transcript text only when you choose and configure them.
 
-<div align="center">
-  <img src="docs/assets/product/creator-studio.png" width="100%" alt="StreamSnip AI native creator studio overview">
-</div>
 
 ## From stream to short
 
@@ -51,35 +48,22 @@ flowchart LR
 
 ### Live Studio
 
-Prepare the source, capture settings, AI provider, transcription model, and captions before starting. The app does not begin recording simply because you opened Live Studio. Start and stop actions remain explicit.
-
-<div align="center">
-  <img src="docs/assets/product/live-studio.png" width="100%" alt="Native Live Studio source, capture, and processing configuration">
-</div>
+Prepare the source, capture settings, AI provider, transcription model, and captions before starting. Opening Live Studio does not start a recording; capture begins only after you explicitly start it. The screenshots below focus on stable, non-error workspace views.
 
 ### Creator monitoring
 
 Save creators independently and keep their monitoring status, live recordings, and recorded-VOD work organised. Each creator has separate Live and Recorded VOD folders, rather than mixing every source into one queue.
 
-<div align="center">
-  <img src="docs/assets/product/creator-monitoring.png" width="100%" alt="Creator monitoring workspace showing individual saved creators">
-</div>
 
 ### Clip library
 
 Review the rendered video and its matching post metadata. Keep work that is still being reviewed separate from clips confirmed as published. Preview, download, copy metadata, delete individual items, or manage selections in bulk.
 
-<div align="center">
-  <img src="docs/assets/product/clip-library.png" width="100%" alt="Clip library with generated clips and review actions">
-</div>
 
 ### Publishing
 
 Connect one or more Zernio API keys, discover the social accounts available to each connection, and choose destinations for an individual clip or batch. StreamSnip checks results per destination; partial success and failures stay visible.
 
-<div align="center">
-  <img src="docs/assets/product/publishing.png" width="100%" alt="Zernio publishing settings and connected social accounts">
-</div>
 
 ## Capabilities
 

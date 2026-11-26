@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="440" viewBox="0 0 1440 440" role="img" aria-labelledby="title desc">
+<title id="title">StreamSnip AI — Find the moment. Make it a clip.</title>
+<desc id="desc">A dark, cinematic banner with an AI video editing timeline, waveform, and vertical clip previews.</desc>
+<defs>
+  <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#080b10"/><stop offset=".55" stop-color="#121a1b"/><stop offset="1" stop-color="#151029"/></linearGradient>
+  <linearGradient id="lime" x2="1"><stop stop-color="#d4ff62"/><stop offset="1" stop-color="#a8f1d1"/></linearGradient>
+  <linearGradient id="violet" x2="1"><stop stop-color="#8f73e8"/><stop offset="1" stop-color="#c4b4ff"/></linearGradient>
+  <radialGradient id="glow"><stop stop-color="#b7d65a" stop-opacity=".22"/><stop offset="1" stop-color="#b7d65a" stop-opacity="0"/></radialGradient>
+  <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#d9e6d9" opacity=".18"/></pattern>
+  <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="20" stdDeviation="18" flood-color="#000" flood-opacity=".42"/></filter>
+</defs>
+<rect width="1440" height="440" rx="30" fill="url(#bg)"/>
+<rect width="1440" height="440" rx="30" fill="url(#glow)"/>
+<rect width="1440" height="440" rx="30" fill="url(#dots)" opacity=".75"/>
+<path d="M0 342C240 260 370 425 610 330s360-95 500-5 210 50 330-18" fill="none" stroke="#b9a4ff" stroke-opacity=".18" stroke-width="2"/>
+<circle cx="1290" cy="85" r="210" fill="#b9a4ff" opacity=".06"/>
+<g transform="translate(86 90)">
+  <rect width="68" height="68" rx="20" fill="url(#lime)"/>
+  <path d="M27 18v32l27-16z" fill="#19220b"/>
+  <path d="M18 56l-8 10h47l-8-10" fill="none" stroke="#19220b" stroke-width="4" stroke-linecap="round"/>
+  <text x="88" y="31" fill="#d4ff62" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="5">LOCAL-FIRST CLIP STUDIO</text>
+  <text x="0" y="143" fill="#f5f7f2" font-family="Segoe UI,Arial,sans-serif" font-size="69" font-weight="800" letter-spacing="-3">StreamSnip <tspan fill="#d4ff62">AI</tspan></text>
+  <text x="2" y="197" fill="#d8dfd8" font-family="Segoe UI,Arial,sans-serif" font-size="29">Find the moment. Make it a clip.</text>
+  <text x="2" y="238" fill="#9ba7a0" font-family="Segoe UI,Arial,sans-serif" font-size="19">Capture · Transcribe · Discover highlights · Create captions</text>
+  <g transform="translate(0 279)">
+    <rect width="174" height="38" rx="19" fill="#d4ff62" fill-opacity=".12" stroke="#d4ff62" stroke-opacity=".45"/>
+    <text x="87" y="25" text-anchor="middle" fill="#e6f4c1" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="700">LOCAL WHISPER</text>
+    <rect x="188" width="188" height="38" rx="19" fill="#b9a4ff" fill-opacity=".12" stroke="#b9a4ff" stroke-opacity=".45"/>
+    <text x="282" y="25" text-anchor="middle" fill="#e4dcff" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="700">AI HIGHLIGHTS</text>
+    <rect x="390" width="172" height="38" rx="19" fill="#7ee7db" fill-opacity=".10" stroke="#7ee7db" stroke-opacity=".45"/>
+    <text x="476" y="25" text-anchor="middle" fill="#c5fff3" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="700">AUTO CAPTIONS</text>
+  </g>
+</g>
+<g transform="translate(735 60)" filter="url(#shadow)">
+  <rect width="620" height="320" rx="22" fill="#10171a" stroke="#dbe8dc" stroke-opacity=".22"/>
+  <rect width="620" height="42" rx="22" fill="#1b2527"/>
+  <path d="M0 22v20h620V22" fill="#1b2527"/>
+  <circle cx="23" cy="21" r="5" fill="#ef7771"/><circle cx="41" cy="21" r="5" fill="#e6bf69"/><circle cx="59" cy="21" r="5" fill="#75c98f"/>
+  <text x="82" y="26" fill="#aebbb4" font-family="Segoe UI,Arial,sans-serif" font-size="12" letter-spacing="2">STREAMSNIP · CLIP WORKSPACE</text>
+  <rect x="22" y="62" width="365" height="154" rx="12" fill="#182427" stroke="#ffffff" stroke-opacity=".1"/>
+  <rect x="32" y="72" width="345" height="134" rx="8" fill="#263b3b"/>
+  <path d="M32 170L110 108l65 36 64-69 138 99v32H32z" fill="#40554d"/>
+  <path d="M32 184l77-36 65 23 69-52 134 70v17H32z" fill="#657458"/>
+  <circle cx="291" cy="107" r="18" fill="#d4ff62" opacity=".8"/>
+  <circle cx="203" cy="141" r="28" fill="#070c0d" fill-opacity=".58"/>
+  <path d="M195 126v30l25-15z" fill="#d4ff62"/>
+  <rect x="405" y="62" width="190" height="154" rx="12" fill="#171f25" stroke="#ffffff" stroke-opacity=".1"/>
+  <text x="421" y="84" fill="#aebbb4" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="700">CLIP PREVIEWS</text>
+  <g transform="translate(421 96)">
+    <rect width="46" height="91" rx="6" fill="#46406a"/><path d="M0 58l20-20 26 14v39H0z" fill="#9f92bd"/>
+    <rect x="56" width="46" height="91" rx="6" fill="#384e4a"/><path d="M56 62l22-29 24 22v33H56z" fill="#a4b76f"/>
+    <rect x="112" width="46" height="91" rx="6" fill="#30495b"/><path d="M112 64l22-24 24 20v27h-46z" fill="#65a8bb"/>
+  </g>
+  <text x="23" y="242" fill="#879791" font-family="Segoe UI,Arial,sans-serif" font-size="11">AUDIO &amp; TRANSCRIPT</text>
+  <rect x="23" y="254" width="573" height="42" rx="8" fill="#0b1114" stroke="#ffffff" stroke-opacity=".08"/>
+  <g fill="#d4ff62" opacity=".88">
+    <rect x="38" y="270" width="5" height="10" rx="2"/><rect x="49" y="262" width="5" height="26" rx="2"/><rect x="60" y="267" width="5" height="16" rx="2"/><rect x="71" y="258" width="5" height="34" rx="2"/><rect x="82" y="264" width="5" height="22" rx="2"/><rect x="93" y="260" width="5" height="30" rx="2"/><rect x="104" y="271" width="5" height="8" rx="2"/><rect x="115" y="256" width="5" height="38" rx="2"/><rect x="126" y="264" width="5" height="22" rx="2"/><rect x="137" y="269" width="5" height="12" rx="2"/><rect x="148" y="260" width="5" height="30" rx="2"/><rect x="159" y="255" width="5" height="40" rx="2"/><rect x="170" y="265" width="5" height="20" rx="2"/><rect x="181" y="270" width="5" height="10" rx="2"/><rect x="192" y="257" width="5" height="36" rx="2"/><rect x="203" y="262" width="5" height="26" rx="2"/><rect x="214" y="269" width="5" height="12" rx="2"/><rect x="225" y="258" width="5" height="34" rx="2"/><rect x="236" y="264" width="5" height="22" rx="2"/><rect x="247" y="270" width="5" height="10" rx="2"/><rect x="258" y="260" width="5" height="30" rx="2"/><rect x="269" y="255" width="5" height="40" rx="2"/><rect x="280" y="263" width="5" height="24" rx="2"/><rect x="291" y="270" width="5" height="10" rx="2"/><rect x="302" y="258" width="5" height="34" rx="2"/><rect x="313" y="264" width="5" height="22" rx="2"/><rect x="324" y="268" width="5" height="14" rx="2"/><rect x="335" y="260" width="5" height="30" rx="2"/><rect x="346" y="266" width="5" height="18" rx="2"/><rect x="357" y="257" width="5" height="36" rx="2"/><rect x="368" y="270" width="5" height="10" rx="2"/><rect x="379" y="264" width="5" height="22" rx="2"/><rect x="390" y="259" width="5" height="32" rx="2"/><rect x="401" y="270" width="5" height="10" rx="2"/><rect x="412" y="262" width="5" height="26" rx="2"/><rect x="423" y="267" width="5" height="16" rx="2"/><rect x="434" y="258" width="5" height="34" rx="2"/><rect x="445" y="270" width="5" height="10" rx="2"/><rect x="456" y="263" width="5" height="24" rx="2"/><rect x="467" y="257" width="5" height="36" rx="2"/><rect x="478" y="269" width="5" height="12" rx="2"/><rect x="489" y="261" width="5" height="28" rx="2"/><rect x="500" y="268" width="5" height="14" rx="2"/><rect x="511" y="258" width="5" height="34" rx="2"/><rect x="522" y="264" width="5" height="22" rx="2"/><rect x="533" y="270" width="5" height="10" rx="2"/><rect x="544" y="261" width="5" height="28" rx="2"/><rect x="555" y="257" width="5" height="36" rx="2"/><rect x="566" y="269" width="5" height="12" rx="2"/>
+  </g>
+</g>
+</svg>

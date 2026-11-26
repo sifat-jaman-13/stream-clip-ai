@@ -30,9 +30,14 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertIn('<html lang="en" data-type="software">', html)
         self.assertIn('<meta name="page-type" content="software">', html)
         self.assertIn('<meta name="site-kind" content="software">', html)
-        self.assertIn('@media (max-width: 900px)', html)
-        self.assertIn('class="nav-download-mobile"', html)
+        css = (ROOT / "docs" / "assets" / "site.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"@media\s*\(max-width:\s*900px\)")
+        self.assertIn('class="mobile-menu"', html)
+        self.assertIn('class="mobile-download"', html)
         self.assertIn('id="menu-toggle"', html)
+        self.assertIn('class="source-link"', html)
+        self.assertIn('aria-label="Choose website theme"', html)
+        self.assertEqual(html.count('class="theme-option"'), 13)
         parser = PageInspector()
         parser.feed(html)
         self.assertEqual(len(parser.ids), len(set(parser.ids)), "Landing page contains duplicate IDs.")
@@ -40,8 +45,9 @@ class PublicReleaseAssetTests(unittest.TestCase):
         for image in parser.images:
             self.assertIn("alt", image, f"Image has no alt text: {image}")
             src = image.get("src", "")
-            if src.startswith("./"):
-                self.assertTrue((html_path.parent / src[2:]).is_file(), f"Missing local image: {src}")
+            if not re.match(r"^(?:[a-z][a-z0-9+.-]*:|/|#)", src, re.IGNORECASE):
+                local_path = src[2:] if src.startswith("./") else src
+                self.assertTrue((html_path.parent / local_path).is_file(), f"Missing local image: {src}")
         for anchor in parser.links:
             self.assertIn(f'id="{anchor}"', html, f"Broken in-page link: #{anchor}")
 

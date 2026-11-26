@@ -55,7 +55,7 @@ No capture, transcription, AI provider routing, clip rendering, creator monitor,
 - Theme parity audit: all 12 palettes match across React, CSS and WinUI.
 - Native dashboard palette residual audit: no fixed hex palette values remain there.
 
-No commit or push has been made. Do not assume the working tree belongs to one contributor.
+The React UI theme/design/documentation subset was committed as `8efacf3` and pushed to `origin/feat/native-winui3-desktop`. The native WinUI source edits remain local and were intentionally excluded because the desktop project is wholly untracked and includes parallel-session work. Do not assume the remaining working tree belongs to one contributor.
 
 
 ## Follow-up UI audit — 2026-11-26
@@ -85,4 +85,4 @@ The following are in surfaces that overlap the other session's Zernio/publishing
 - Theme contrast audit: all 12 palettes pass.
 - Theme parity audit: 12/12 React/CSS/WinUI palettes match.
 - The temporary Vite preview job was stopped after the attempted visual check. No ChatGPT browser window was focused or changed.
-- No commit or push was made.
+- Commit `8efacf3` (`StreamSnip-UI-refresh`) with only the seven React/design/documentation files was pushed to `origin/feat/native-winui3-desktop`. The WinUI desktop source files were not staged or pushed.

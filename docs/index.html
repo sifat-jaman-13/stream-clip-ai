@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="page-type" content="software">
   <meta name="site-kind" content="software">
-  <meta name="theme-color" content="#f7f9fa">
+  <meta name="theme-color" content="#f7f9fa" id="theme-color-meta">
   <meta name="description" content="StreamSnip AI is native Windows stream clipping software for creators. Capture Twitch and YouTube streams, process VODs, review highlights and publish through Zernio.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="StreamSnip AI — Stream clipping for creators">
@@ -50,7 +50,22 @@
       --gap: 24px;
       --nav-h: 76px;
       --surface-color: var(--surface);
+      --toggle-bg: #ffffff;
+      --toggle-ink: #1f3038;
     }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0b1115; --surface: #121c22; --surface-2: #1a272e;
+      --ink: #e7f0f2; --muted: #b0c0c6; --border: #30414a;
+      --accent: #70d5d1; --action: #168b8d; --action-hover: #21a5a3;
+      --action-ink: #061315; --deep: #070c10; --deep-surface: #101b20;
+      --deep-ink: #edf6f6; --deep-muted: #b2c5ca; --white: #17242b;
+      --toggle-bg: #1b2a31; --toggle-ink: #e7f0f2;
+    }
+    :root[data-theme="dark"] .folder-child { background: rgba(255,255,255,.035); }
+    :root[data-theme="dark"] .hero::before { background: radial-gradient(ellipse at 50% 0%, rgba(65,190,185,.14), transparent 62%); }
+    :root[data-theme="dark"] .closing-bottom { border-top-color: var(--border); }
+    :root[data-theme="dark"] .hero-window { border-color: var(--border); }
     * { box-sizing: border-box; }
     html { background: var(--bg); color: var(--ink); scroll-behavior: smooth; }
     body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.55 var(--font-text); text-rendering: optimizeLegibility; }
@@ -76,8 +91,11 @@
     .btn--primary:hover { background: var(--action-hover); }
     .btn--secondary { color: var(--ink); background: var(--white); border-color: var(--border); }
     .btn--secondary:hover { background: var(--white); border-color: #9cabb1; }
+    .theme-toggle { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--toggle-bg); color: var(--toggle-ink); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .theme-toggle:hover { border-color: var(--accent); }
     .nav__toggle { display: none; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--white); color: var(--ink); }
     .mobile-menu { display: none; position: absolute; top: var(--nav-h); left: 0; right: 0; padding: 12px 24px 20px; background: var(--bg); border-bottom: 1px solid var(--border); }
+    .mobile-menu .theme-toggle { width: 100%; margin-top: 12px; }
     .mobile-menu a { display: block; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 15px; }
     .mobile-menu.is-open { display: block; }
     main > section { position: relative; min-height: 100svh; padding: 132px 0 72px; }
@@ -284,6 +302,7 @@
         <a href="#library">Clip library</a>
         <a href="#publishing">Publishing</a>
       </nav>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span class="theme-icon" aria-hidden="true">&#9790;</span><span class="theme-label">Dark</span></button>
       <a class="btn btn--primary nav__desktop-cta" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows</a>
       <button class="nav__toggle" id="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open navigation menu"><span>Menu</span></button>
     </div>
@@ -294,6 +313,7 @@
       <a href="#library">Clip library</a>
       <a href="#publishing">Publishing</a>
       <a href="#local">Local processing</a>
+      <button class="theme-toggle" id="theme-toggle-mobile" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span class="theme-icon" aria-hidden="true">&#9790;</span><span class="theme-label">Dark mode</span></button>
       <div class="nav-download-mobile"><a class="btn btn--primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows</a></div>
     </nav>
   </header>
@@ -503,6 +523,35 @@
     </div>
   </footer>
 
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const meta = document.getElementById("theme-color-meta");
+      const buttons = [document.getElementById("theme-toggle"), document.getElementById("theme-toggle-mobile")].filter(Boolean);
+      let saved = null;
+      try { saved = localStorage.getItem("streamsnip-theme"); } catch (_) {}
+      const systemDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const apply = theme => {
+        const dark = theme === "dark";
+        root.dataset.theme = dark ? "dark" : "light";
+        if (meta) meta.setAttribute("content", dark ? "#0b1115" : "#f7f9fa");
+        buttons.forEach(button => {
+          button.setAttribute("aria-pressed", String(dark));
+          button.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+          const icon = button.querySelector(".theme-icon");
+          const label = button.querySelector(".theme-label");
+          if (icon) icon.textContent = dark ? "\u2600" : "\u263e";
+          if (label) label.textContent = dark ? "Light" : (button.id.endsWith("mobile") ? "Dark mode" : "Dark");
+        });
+      };
+      apply(saved === "dark" || saved === "light" ? saved : (systemDark ? "dark" : "light"));
+      buttons.forEach(button => button.addEventListener("click", () => {
+        const next = root.dataset.theme === "dark" ? "light" : "dark";
+        apply(next);
+        try { localStorage.setItem("streamsnip-theme", next); } catch (_) {}
+      }));
+    })();
+  </script>
   <script>
     (() => {
       const toggle = document.querySelector(".nav__toggle");

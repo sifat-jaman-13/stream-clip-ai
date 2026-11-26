@@ -439,6 +439,7 @@ try {
         "ai_highlights.py",
         "post_metadata.py",
         "zernio_poster.py",
+        "zernio_connections.py",
         "facecam_detect.py",
         "requirements.txt",
         "models\face_detection_yunet_2023mar.onnx",
@@ -516,7 +517,7 @@ try {
         $requirementsHash = (Get-FileHash $requirements -Algorithm SHA256).Hash.ToLowerInvariant()
         $expectedMarker = "$RuntimeSchema|$requirementsHash"
         $savedMarker = if (Test-Path $runtimeMarker) { (Get-Content $runtimeMarker -Raw).Trim() } else { "" }
-        $dependencyProbe = & $runtimePython -c "import importlib.util,sys; sys.exit(0 if all(importlib.util.find_spec(x) for x in ('numpy','faster_whisper','streamlink','cv2')) else 1)" 2>$null
+        $dependencyProbe = & $runtimePython -c "import importlib.util,sys; sys.exit(0 if all(importlib.util.find_spec(x) for x in ('numpy','faster_whisper','streamlink','cv2','fastapi','uvicorn','annotated_doc','anyio','attrs','annotated_types')) else 1)" 2>$null
         $dependenciesReady = ($LASTEXITCODE -eq 0)
         if ($savedMarker -ne $expectedMarker -or -not $dependenciesReady) {
             Write-Host "Installing StreamSnip AI dependencies. The first setup can take several minutes..." -ForegroundColor Cyan
@@ -525,7 +526,7 @@ try {
             Install-StreamSnipDependencies $runtimePython $requirements $python.Version
             if ($LASTEXITCODE -ne 0) { throw "Could not install StreamSnip AI dependencies." }
             Test-StreamSnipDependencyConsistency $runtimePython $python.Version
-            & $runtimePython -c "import numpy, faster_whisper, streamlink, cv2"
+            & $runtimePython -c "import numpy, faster_whisper, streamlink, cv2, fastapi, uvicorn, annotated_doc, anyio, attrs, annotated_types"
             if ($LASTEXITCODE -ne 0) { throw "A required StreamSnip AI package could not be loaded after installation." }
             Set-Content -Path $runtimeMarker -Value $expectedMarker -Encoding ASCII
         } else {

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "StreamSnip.Desktop (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "StreamSnip.Desktop (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

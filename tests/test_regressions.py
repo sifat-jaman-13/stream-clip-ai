@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import autoclip
+import json
 import ai_highlights
 from zernio_poster import ZernioPublisher
 
@@ -140,6 +141,74 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result, [])
         self.assertEqual(backend.call_count, 3)
         self.assertEqual(config["_ai_window"], (360, 400))
+
+    def test_openai_highlight_provider_uses_the_selected_chatgpt_model(self):
+        config = {
+            "openai_api_base": "https://api.openai.com/v1",
+            "openai_model": "gpt-test-model",
+            "openai_api_key": "openai-private-key",
+        }
+        response = {"choices": [{"message": {"content": json.dumps(
+            {"moments": [{"time": 12, "score": 88}]}
+        )}}]}
+        with patch.object(ai_highlights, "_json_request", return_value=response) as request:
+            result = ai_highlights._openai("transcript prompt", config)
+
+        self.assertEqual(result["moments"][0]["time"], 12)
+        self.assertEqual(request.call_args.args[0], "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(request.call_args.args[1]["model"], "gpt-test-model")
+        self.assertEqual(request.call_args.kwargs["headers"]["Authorization"], "Bearer openai-private-key")
+
+    def test_anthropic_highlight_provider_uses_the_messages_api(self):
+        config = {
+            "anthropic_api_base": "https://api.anthropic.com",
+            "anthropic_model": "claude-test-model",
+            "anthropic_api_key": "anthropic-private-key",
+        }
+        response = {"content": [{"type": "text", "text": json.dumps(
+            {"moments": [{"time": 14, "score": 91}]}
+        )}]}
+        with patch.object(ai_highlights, "_json_request", return_value=response) as request:
+            result = ai_highlights._anthropic("transcript prompt", config)
+
+        self.assertEqual(result["moments"][0]["time"], 14)
+        self.assertEqual(request.call_args.args[0], "https://api.anthropic.com/v1/messages")
+        self.assertEqual(request.call_args.args[1]["model"], "claude-test-model")
+        self.assertEqual(request.call_args.kwargs["headers"]["x-api-key"], "anthropic-private-key")
+        self.assertEqual(request.call_args.kwargs["headers"]["anthropic-version"], "2023-06-01")
+
+    def test_ai_settings_migrate_legacy_hook_scoring_to_gemini(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            path.write_text(json.dumps({"provider": "hooks"}), encoding="utf-8")
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                settings = autoclip.load_ai_settings()
+        self.assertEqual(settings["provider"], "gemini")
+
+    def test_ai_settings_store_openai_and_anthropic_keys_as_private_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+                saved = autoclip.save_ai_settings({
+                    "provider": "anthropic",
+                    "openai_api_base": "https://api.openai.com/v1",
+                    "openai_model": "gpt-test",
+                    "openai_api_key": "openai-private-key",
+                    "anthropic_api_base": "https://api.anthropic.com",
+                    "anthropic_model": "claude-test",
+                    "anthropic_api_key": "anthropic-private-key",
+                })
+                loaded = autoclip.load_ai_settings()
+                stored = path.read_text(encoding="utf-8")
+        self.assertTrue(saved["openai_key_set"])
+        self.assertTrue(saved["anthropic_key_set"])
+        self.assertEqual(saved["provider"], "anthropic")
+        self.assertEqual(loaded["openai_model"], "gpt-test")
+        self.assertEqual(loaded["anthropic_model"], "claude-test")
+        self.assertNotIn("openai-private-key", str(saved))
+        self.assertNotIn("anthropic-private-key", str(saved))
+        self.assertIn("openai-private-key", stored)
+        self.assertIn("anthropic-private-key", stored)
 
     def test_creator_monitor_accepts_twitch_and_youtube_but_rejects_lookalike_hosts(self):
         core = object.__new__(autoclip.Core)
@@ -881,15 +950,21 @@ class RegressionTests(unittest.TestCase):
             video.write_bytes(b"video")
             publisher = ZernioPublisher(lambda _: None, {"api_key": "test-key"})
             publisher._upload = MagicMock(return_value="https://media.example/clip.mp4")
-            publisher._json_request = MagicMock(return_value={"data": {"post": {"status": "published"}}})
+            publisher._json_request = MagicMock(return_value={"data": {"post": {
+                "status": "published",
+                "platforms": [
+                    {"platform": "instagram", "accountId": "ig-account", "status": "published"},
+                    {"platform": "facebook", "accountId": "fb-account", "status": "published"},
+                ],
+            }}})
             publisher.publish_one(
                 video,
-                accounts={"tiktok": "tt-account", "facebook": "fb-account"},
+                accounts={"instagram": "ig-account", "facebook": "fb-account"},
                 caption_override="That was damn wild!\n\nThe streamer could not believe it.",
             )
             body = publisher._json_request.call_args.args[2]
             self.assertEqual(body["content"], "That was damn wild!\n\nThe streamer could not believe it.")
-            self.assertEqual({item["platform"] for item in body["platforms"]}, {"tiktok", "facebook"})
+            self.assertEqual({item["platform"] for item in body["platforms"]}, {"instagram", "facebook"})
             facebook = next(item for item in body["platforms"] if item["platform"] == "facebook")
             self.assertEqual(facebook["platformSpecificData"]["contentType"], "reel")
 
@@ -902,7 +977,7 @@ class RegressionTests(unittest.TestCase):
             {"platform": "youtube", "accountId": "yt1"},
         ]}})
         accounts = publisher.accounts()
-        self.assertEqual({item["platform"] for item in accounts}, {"tiktok", "facebook", "youtube"})
+        self.assertEqual({item["platform"] for item in accounts}, {"facebook", "youtube"})
 
     def test_zernio_empty_success_response_is_valid(self):
         publisher = ZernioPublisher(lambda _: None)
@@ -1057,10 +1132,10 @@ class RegressionTests(unittest.TestCase):
     def test_ai_settings_preserve_an_explicit_saved_provider(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ai_settings.json"
-            path.write_text('{"provider": "hooks"}', encoding="utf-8")
+            path.write_text('{"provider": "openai"}', encoding="utf-8")
             with patch.object(autoclip, "AI_SETTINGS_FILE", path):
                 settings = autoclip.load_ai_settings()
-        self.assertEqual(settings["provider"], "hooks")
+        self.assertEqual(settings["provider"], "openai")
 
     def test_streamer_credit_infers_supported_channel_handles(self):
         for target, expected in (
@@ -1168,9 +1243,14 @@ class RegressionTests(unittest.TestCase):
                                         on_success=callback)
             publisher.accounts_map = {"instagram": "account"}
             publisher._upload = MagicMock(return_value="https://cdn.invalid/clip.mp4")
-            publisher._json_request = MagicMock(return_value={"data": {"post": {"status": "published"}}})
+            publisher._json_request = MagicMock(return_value={"data": {"post": {
+                "status": "published",
+                "platforms": [
+                    {"platform": "instagram", "accountId": "account", "status": "published"}
+                ],
+            }}})
             publisher._publish(video, raise_errors=True)
-            callback.assert_called_once_with(video)
+            callback.assert_called_once_with(video, ["instagram:account"])
 
     def test_zernio_scheduled_post_does_not_claim_it_is_already_posted(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1182,7 +1262,12 @@ class RegressionTests(unittest.TestCase):
             publisher.accounts_map = {"instagram": "account"}
             publisher.schedule_minutes = 10
             publisher._upload = MagicMock(return_value="https://cdn.invalid/clip.mp4")
-            publisher._json_request = MagicMock(return_value={"data": {"post": {"status": "scheduled"}}})
+            publisher._json_request = MagicMock(return_value={"data": {"post": {
+                "status": "scheduled",
+                "platforms": [
+                    {"platform": "instagram", "accountId": "account", "status": "scheduled"}
+                ],
+            }}})
             publisher._publish(video, raise_errors=True)
             callback.assert_not_called()
 
@@ -1400,14 +1485,14 @@ class RegressionTests(unittest.TestCase):
         with patch.object(autoclip, "save_publishing_settings"):
             result = core.publishing_save({
                 "provider": "zernio", "api_key": "", "account_ids": {
-                    "tiktok": "tt-account", "facebook": "fb-account"
+                    "tiktok": "tt-account", "instagram": "ig-account", "facebook": "fb-account"
                 }
             })
         self.assertEqual(core.publishing["zernio"]["accounts"], {
-            "tiktok": "tt-account", "facebook": "fb-account"
+            "instagram": "ig-account", "facebook": "fb-account"
         })
         self.assertEqual(result["providers"]["zernio"]["accounts"], {
-            "tiktok": "tt-account", "facebook": "fb-account"
+            "instagram": "ig-account", "facebook": "fb-account"
         })
 
     def test_render_retries_video_only_when_aac_has_no_packets(self):

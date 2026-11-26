@@ -1,238 +1,308 @@
+<div align="center">
+
+<img src="assets/streamsnipai-banner.svg" alt="StreamSnip AI — Find the moment. Make it a clip." width="100%" />
+
 # StreamSnip AI
 
-**A local-first creator studio for capturing streams, finding moments, rendering clips, and preparing posts.**
+**A local-first creator studio for capturing streams, finding standout moments, making short-form clips, and publishing through Zernio.**
 
-[![Latest release](https://img.shields.io/github/v/release/sifat-jaman-13/stream-clip-ai)](https://github.com/sifat-jaman-13/stream-clip-ai/releases)
-[![Website](https://img.shields.io/badge/website-live-16a34a)](https://sifat-jaman-13.github.io/stream-clip-ai/)
-[![Windows](https://img.shields.io/badge/platform-Windows-2563eb)](https://github.com/sifat-jaman-13/stream-clip-ai)
-[![Tests](https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml/badge.svg)](https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml)
-[![License](https://img.shields.io/badge/license-proprietary%20non--commercial-orange)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/sifat-jaman-13/stream-clip-ai?display_name=tag&style=flat-square)](https://github.com/sifat-jaman-13/stream-clip-ai/releases)
+[![Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-2563eb?style=flat-square&logo=windows)](https://github.com/sifat-jaman-13/stream-clip-ai)
+[![CI](https://img.shields.io/github/actions/workflow/status/sifat-jaman-13/stream-clip-ai/tests.yml?branch=master&style=flat-square&label=tests)](https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml)
+[![License](https://img.shields.io/badge/license-proprietary%20%2F%20non--commercial-orange?style=flat-square)](LICENSE)
+[![Project site](https://img.shields.io/badge/project%20site-live-16a34a?style=flat-square)](https://sifat-jaman-13.github.io/stream-clip-ai/)
 
-StreamSnip AI is a desktop-hosted creator workspace. It combines Twitch and YouTube capture, creator monitoring, local transcription, AI-assisted highlight selection, captioned video rendering, clip review, and publishing handoff in one local application.
+[**Download for Windows**](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest) · [Documentation](https://github.com/sifat-jaman-13/stream-clip-ai#readme) · [Report a bug](https://github.com/sifat-jaman-13/stream-clip-ai/issues)
 
-The React Creator Studio is the default interface. The Python engine continues to handle capture and media processing; a loopback-only FastAPI server exposes the local application API. The Windows installer prepares the isolated Python runtime, dependencies, and speech models during installation or repair. It discovers installed stable 64-bit Python 3.10+ interpreters, tests the current dependency set in a disposable environment, and chooses the newest compatible version. Only when no installed interpreter can resolve the dependencies does it install a checksum-verified Python 3.14.10 privately inside the StreamSnip folder; it never replaces a system Python or changes global PATH. After setup, the desktop shortcut starts the prepared runtime directly; normal app launches do not rerun setup or re-download models. Python 3.15 is supported: StreamSnip installs faster-whisper without its optional ONNX Runtime VAD dependency because the application does not enable VAD; standard transcription remains available.
+</div>
 
-> **Current release: 4.0.5.** The Windows installer is attached to the GitHub release. Verify the published SHA-256 checksum before installing.
+---
 
-## The creator workflow
+## Overview
 
-1. **Dashboard** - Check engine health, current capture status, recent clips, and creator activity.
-2. **Live Studio** - Select a Twitch or YouTube live source, or a local video/VOD. Review the session configuration before starting.
-3. **Session setup** - Configure the four tabs in Live Studio:
-   - **Capture:** source mode, capture behavior, and processing options.
-   - **AI provider:** highlight-analysis provider, model, and credentials.
-   - **Transcription:** local speech model, language, and optional custom transcriber.
-   - **Captions:** aspect ratio, framing, subtitle appearance, creator credit, and profanity filtering.
-4. **Creators** - Save channels for independent live monitoring and recorded-VOD folder watching.
-5. **Clip library** - Preview generated clips, inspect or edit their title and description, and prepare a Zernio post.
-6. **Publishing / Published** - Publish and schedule through Zernio. Successfully published clips are tracked separately.
+StreamSnip AI turns live streams and recorded video into review-ready short-form clips. It brings capture, creator monitoring, transcription, highlight analysis, video rendering, captions, metadata, and publishing into one desktop-hosted workspace.
 
-Opening Live Studio does not start a recording. Capture starts only after the user presses **Start capture**. The application saves the visible session settings before sending the start request.
+The application is **local-first**. Capture, media processing, clip files, and application settings stay on your computer. Hosted AI providers receive transcript text only when you select and configure one. Social publishing is handled by your own Zernio API connection.
 
-## Features
+### From source to published clip
 
-- Capture supported Twitch and YouTube live streams with Streamlink.
-- Process local video files and recorded VODs.
-- Monitor multiple saved creators independently.
-- Keep each creator's live recordings, live clips, VOD inbox, processed originals, and failed VODs in separate folders.
-- Transcribe speech locally with faster-whisper, or connect a custom command-line transcriber.
-- Analyze transcript windows for high-potential moments using local scoring or a configured AI provider.
-- Choose Hook Words, Ollama, Gemini, Hugging Face, or a custom OpenAI-compatible chat-completions provider, subject to provider configuration.
-- Render portrait, landscape, square, and 4:5 clips with configurable framing and captions.
-- Detect facecam regions across multiple video frames, then adjust the facecam and gameplay crops independently.
-- Preview a short rendered MP4 using the same crop, layout, and caption pipeline as the final clip.
-- Choose six word-level caption animations, including GTA Neon, and place captions at five preset positions.
-- Mask detected profanity in captions and post copy, then beep or mute only the matching word in rendered audio.
-- Record live streams at a configurable 8,000–50,000 Kbps target (8,000 Kbps minimum).
-- Generate transcript-grounded titles, descriptions, and hashtags.
-- Review clips before sharing and keep posted clips in a separate Published view.
-- Publish and schedule clips exclusively through Zernio when an API key and eligible connected social account are available.
-- Track completed posts in a persistent Published view; scheduled posts are not marked as published before they are accepted.
-- Choose an application theme and font. Odysseus is the default theme; JetBrains Mono is the default interface font. Google Sans, Inter, Roboto, and other font options are available.
+```mermaid
+flowchart LR
+    A["Twitch / YouTube live"] --> C["Capture & recordings"]
+    B["Local video / VOD"] --> D["Transcription"]
+    C --> D
+    D --> E["Highlight analysis"]
+    E --> F["Clip rendering"]
+    F --> G["Review & metadata"]
+    G --> H["Zernio"]
+    H --> I["Facebook"]
+    H --> J["Instagram"]
+    H --> K["YouTube"]
+```
 
-Highlight scores are estimates, not guarantees of reach or engagement.
+## What you can do
 
-Third-party notices for bundled caption/model components are included as LICENSE-NeonClipping.txt and LICENSE-YuNet.txt. The YuNet model is distributed under its upstream MIT license; these notices do not change StreamSnip AI's own license.
-
-## AI providers, API keys, and privacy
-
-The capture and media-processing workflow does not require a StreamSnip cloud account or a StreamSnip API key.
-
-| Capability | Credential / network requirement |
+| Workspace | What it is for |
 | --- | --- |
-| Local capture and FFmpeg rendering | No StreamSnip API key; stream capture needs internet access |
-| Built-in faster-whisper transcription | Runs locally; speech models must be available on the PC |
-| Custom local transcriber | No StreamSnip API key; the transcriber may have its own requirements |
-| Hook Words scoring | Local; no hosted AI key |
-| Ollama | Local service; no hosted AI key when using a local Ollama instance |
-| Gemini, Hugging Face, or another hosted AI provider | The selected provider may require its own key or token |
-| Direct social publishing | Zernio API key and connected social accounts |
+| **Dashboard** | Check engine status, active work, recent clips, and creator activity. |
+| **Live Studio** | Configure a live source or local video before starting capture. |
+| **Creators** | Monitor saved Twitch and YouTube creators independently and watch recorded-VOD folders. |
+| **Clip library** | Preview clips, inspect or edit titles and descriptions, and choose publishing destinations. |
+| **Published** | Review clips recorded in the local published registry. |
+| **Hype words** | Maintain phrases used by local highlight scoring. |
+| **Publishing** | Connect Zernio API keys, discover social accounts, and control posting per account. |
+| **Settings** | Configure application-wide storage, appearance, and fonts. |
+| **Activity** | Follow capture, processing, and publishing events. |
 
-When no AI provider has been saved, Gemini is the initial provider selection. Gemini-backed capture requires a saved Gemini API key. Select another provider in Live Studio when you do not want to use Gemini.
+Opening Live Studio does not start recording. Capture and creator monitoring begin only after an explicit user action.
 
-Hosted AI providers receive the transcript text needed for highlight analysis and generated post copy. Choose local Hook Words scoring or a local Ollama instance when you do not want transcript text sent to a hosted AI provider.
+### Capture and creator monitoring
 
-Provider credentials are stored in local application settings and are not returned to the browser interface. The local API binds to loopback by default. Keep it on localhost; do not expose it to a LAN or the public internet. Never commit settings files, API keys, OAuth tokens, recordings, or generated clips to Git.
+- Capture supported Twitch and YouTube live streams.
+- Process local video files and recorded VODs.
+- Keep each creator's live recordings, live clips, VOD inbox, processed originals, and failed VODs in separate folders.
+- Run creator monitoring independently from the foreground Live Studio session.
+- Configure recording quality and capture behavior from the session setup.
 
-## Bring-your-own transcriber
+### Transcription and highlight analysis
 
-Choose the custom CLI/script option in the **Transcription** tab. The command supports these placeholders:
+- Transcribe locally with faster-whisper when the selected Python environment has the speech dependency installed.
+- Bring your own command-line transcriber when you prefer another local or hosted transcription tool.
+- Score moments with local Hook Words logic.
+- Choose Ollama, Gemini, Hugging Face, or a compatible custom chat-completions provider for transcript analysis and post copy.
+- Generate transcript-grounded titles, descriptions, and hashtags.
 
-- {input} - absolute path to the source video or audio file.
-- {output} - temporary JSON output path.
-- {language} - selected language value; defaults to auto.
+### Clip rendering and review
 
-Example command for whisper.cpp:
+- Render portrait, landscape, square, and 4:5 layouts.
+- Configure captions, framing, subtitle appearance, creator credit, and profanity handling.
+- Detect facecam regions across video frames and tune facecam/gameplay crops independently.
+- Preview a short render before producing the final clip.
+- Edit metadata and review the result before publishing.
 
-~~~text
-whisper-cli -f "{input}" -oj -of "{output}"
-~~~
+Highlight scores are estimates. They are not guarantees of views, reach, or engagement.
 
-The transcriber can write JSON to the output file or print JSON to stdout. Word-level timestamps are preferred:
+## Publishing through Zernio
 
-~~~json
-{
-  "words": [
-    { "start": 0.10, "end": 0.48, "word": "hello" },
-    { "start": 0.50, "end": 0.82, "word": "there" }
-  ]
-}
-~~~
+StreamSnip's supported publishing destinations are **Facebook, Instagram, and YouTube**. Zernio is the publishing provider; StreamSnip does not ask you to configure separate direct-upload API credentials for each social platform.
 
-Segment-based output is also accepted:
+1. Add the Zernio API key or keys you want to use.
+2. Save the connections and let StreamSnip discover the supported social accounts available to each key.
+3. Choose which discovered accounts are enabled for posting.
+4. Review the clip and its generated copy, then submit it to the selected destinations.
+5. Check Activity and Published for the returned publishing results.
 
-~~~json
-{
-  "segments": [
-    { "start": 0.0, "end": 2.4, "text": "Hello there, welcome back." }
-  ]
-}
-~~~
+**Limits are provider-controlled.** StreamSnip does not impose its own maximum number of Zernio connections, per-platform account slots, or posting quotas. Zernio and the connected social platforms determine account availability and posting limits. API keys in the same Zernio billing workspace share that workspace's request allowance; adding another key does not create a separate quota.
 
-Word timestamps provide more accurate subtitle and censor timing. Segment-only output is accepted, but word timing is approximated by distributing words across the segment duration. Commands are launched without a shell, so use an executable and arguments rather than shell operators or pipes. Do not put API keys in the command field; use environment variables or the transcriber's own secure local configuration.
+When Zernio reports an account-specific posting cap, StreamSnip can pause that account without disabling other eligible accounts. Workspace-level request throttling is handled separately. A reset is only applied when Zernio supplies reset information; otherwise the account can be re-enabled manually.
 
-## Creator folder layout
+A real publish creates an external side effect. Use account discovery and other read-only checks for integration testing; do not run a live publish test unless you intend to create a public or scheduled post.
 
-Live capture and recorded VODs are kept separate for each creator:
+## AI providers, credentials, and privacy
 
-~~~text
-Creators/
-  Creator_Name_ID/
-    Live/
-      Recordings/
-      Clips/
-    Recorded_VODs/
-      Watch_Inbox/
-      Clips/
-      Processed_Originals/
-      Failed/
-~~~
+| Capability | What it needs |
+| --- | --- |
+| Stream capture | Internet access and the relevant source URL. |
+| FFmpeg rendering | FFmpeg installed and available to the application. |
+| Built-in transcription | A compatible Python environment and locally available speech model. |
+| Custom transcriber | Your own executable or script and its dependencies. |
+| Hook Words scoring | Local processing; no hosted AI key. |
+| Ollama | A reachable local Ollama service and selected model. |
+| Gemini / Hugging Face / custom AI | The selected provider's own endpoint, model, and credential where required. |
+| Social publishing | Your Zernio API key and connected social accounts. |
 
-Enable a creator's VOD folder watcher and place a completed recording in its Watch_Inbox. StreamSnip waits for the copy to finish before processing it. Removing a creator profile does not automatically delete that creator's existing files.
+Hosted AI providers receive transcript text when you select them for analysis or copy generation. Use Hook Words or a local Ollama model when you do not want transcript text sent to a hosted AI provider.
 
-## Publishing
-
-For direct publishing, configure the Zernio API key and connect the social accounts you intend to use. Select destinations and edit the post copy before publishing. Availability depends on account permissions and each platform's media requirements.
-
-
-Do not run a real publishing test unless you intend to create a public or scheduled post. Account and credential checks that do not submit a post are safe read-only checks.
+Credentials are stored in local application settings and are not returned to the browser interface. The local API uses loopback access and a per-process token for state-changing requests. **Do not expose the application directly to an untrusted LAN or the public internet.** Never commit API keys, OAuth tokens, local settings, recordings, databases, or generated clips.
 
 ## Install on Windows
 
-Download the latest published installer from [GitHub Releases](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest).
+1. Open [GitHub Releases](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest).
+2. Download the latest `StreamSnipAI-Setup.exe` and its SHA-256 checksum file when available.
+3. Verify the installer checksum.
+4. Run the installer and follow the setup prompts.
+5. Launch StreamSnip AI from the installed shortcut.
 
-Review the release notes and SHA-256 checksum before running an installer. The published installer is unsigned. Keep the support terminal open while StreamSnip AI is running. Use **Quit** inside the app and wait for shutdown before closing the terminal; closing it directly may interrupt recording, processing, or uploads.
+The installer checks for a compatible 64-bit Python runtime, installs dependencies in an app-managed environment, prepares speech models, and installs FFmpeg when needed. It does not replace a system Python installation or change the global PATH. First-time setup requires an internet connection and can take longer while packages and models are downloaded. Python 3.15 is supported by the installer: it installs faster-whisper without its optional ONNX Runtime VAD dependency, which StreamSnip does not enable. Standard transcription remains available.
+
+The published installer is currently unsigned, so Windows may show a publisher or SmartScreen warning. Review the release and checksum before proceeding.
 
 ## Run from source
 
-Requirements:
+### Requirements
 
-- Windows 10 or 11.
-- Python 3.10 or later; `py -3` selects the newest installed Python 3 runtime.
-- Node.js and npm compatible with the Vite version in the dashboard.
-- FFmpeg available on PATH.
-- Internet access for live stream capture and hosted integrations.
+- Windows 10 or Windows 11 for the primary desktop workflow.
+- Python 3.12 recommended for source development (the automated test matrix also covers Python 3.10).
+- Node.js 22 and npm for the React dashboard.
+- FFmpeg available on `PATH`.
+- Internet access for live capture, package installation, and hosted integrations.
 
-Clone the repository and install the Python dependencies:
+### Set up the Python environment
 
-~~~powershell
+Run from the repository root:
+
+```powershell
 git clone https://github.com/sifat-jaman-13/stream-clip-ai.git
 cd stream-clip-ai
-py -3 -m venv .venv
+
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-if ((python -c "import sys; print(sys.version_info >= (3,15))") -eq "True") { python -m pip install --no-deps faster-whisper==1.2.1 }
-~~~
+```
 
-Install and build the React dashboard:
+### Install and build the dashboard
 
-~~~powershell
+```powershell
 Set-Location .\dashboard
 npm ci
+npm run lint
 npm run build
 Set-Location ..
-~~~
+```
 
-Start the application from the repository root:
+### Start StreamSnip AI
 
-~~~powershell
+From the repository root:
+
+```powershell
 python autoclip.py
-~~~
+```
 
-The app prints its local address and opens the Creator Studio when the production dashboard build is present. Open the printed local address followed by /dashboard/ if you need to open it manually. The root URL redirects to the Creator Studio.
+The Python application starts the local engine, serves the production dashboard when `dashboard/dist` is present, and opens the Creator Studio. It prints the selected local address in the terminal.
 
 ## Frontend development
 
 Use two PowerShell terminals.
 
-**Terminal 1 - local Python engine:**
+**Terminal 1 — Python engine**
 
-~~~powershell
+```powershell
 $env:STREAMSNIP_PORT = "8204"
 .\.venv\Scripts\python.exe .\autoclip.py
-~~~
+```
 
-**Terminal 2 - Vite development server:**
+**Terminal 2 — Vite**
 
-~~~powershell
+```powershell
 Set-Location .\dashboard
 npm ci
 npm run dev
-~~~
+```
 
-Open http://127.0.0.1:5173/dashboard/. Vite proxies /api and /clips requests to the Python engine on port 8204. The backend chooses an available port when STREAMSNIP_PORT is not set, so use the fixed port above for this development proxy configuration.
+Open [http://127.0.0.1:5173/dashboard/](http://127.0.0.1:5173/dashboard/). Vite proxies `/api` and `/clips` to the Python engine on port 8204. The fixed port keeps the proxy target predictable during development.
 
-The local API documentation is available at http://127.0.0.1:8204/api/docs while the development server is running. Keep the backend bound to localhost.
+The local API documentation is available at [http://127.0.0.1:8204/api/docs](http://127.0.0.1:8204/api/docs) while the development engine is running.
 
-## Development checks
+## Tests and quality checks
 
-From the repository root, run the Python tests and syntax checks:
+Install the test runner once, then run the checks from the repository root:
 
-~~~powershell
+```powershell
+python -m pip install "pytest>=8"
+
+# Python syntax
+python -m py_compile autoclip.py api_server.py ai_highlights.py post_metadata.py zernio_poster.py facecam_detect.py zernio_connections.py
+
+# Python regression and API/publishing tests
 python -m pytest -q
-python -m py_compile autoclip.py api_server.py
-~~~
+```
 
-From the dashboard folder, run the frontend checks:
+From the dashboard folder:
 
-~~~powershell
+```powershell
 npm run lint
 npm run build
-~~~
+```
 
-The production dashboard bundle is written to dashboard/dist. GitHub Actions runs the repository's automated test workflow.
+The Windows installer workflow additionally builds the dashboard and packages the installer with Inno Setup. Changes to the optional WinUI 3 shell should also be validated with the .NET Windows project build.
 
-## Project resources
+## Architecture
 
-- [Issues](https://github.com/sifat-jaman-13/stream-clip-ai/issues)
+```text
+StreamSnip AI
+├── autoclip.py                 Python application, workers, legacy service adapter
+├── api_server.py               Loopback FastAPI transport and request protection
+├── ai_highlights.py            Local and hosted highlight analysis
+├── post_metadata.py            Transcript-grounded social copy
+├── zernio_poster.py            Zernio API client, upload, and publish outcomes
+├── zernio_connections.py       Multi-key connections and per-account selection
+├── facecam_detect.py           Facecam detection helpers
+├── models/                     Bundled YuNet face-detection model
+├── dashboard/                  React + TypeScript + Vite Creator Studio
+├── desktop/                    Optional WinUI 3 native Windows shell (in development)
+├── installer/                  Windows setup, launcher, and uninstall scripts
+├── tests/                      Python regression tests
+├── docs/                       Project website
+└── assets/                     App branding and images
+```
+
+The React dashboard owns presentation and local workspace interactions. The Python application owns capture, creator monitoring, transcription, AI orchestration, rendering, local files, and publishing. FastAPI exposes those established services over localhost; it is not a separate media-processing engine.
+
+## Creator storage layout
+
+Each saved creator has a separate working directory:
+
+```text
+Creators/
+└── Creator_Name_ID/
+    ├── Live/
+    │   ├── Recordings/
+    │   └── Clips/
+    └── Recorded_VODs/
+        ├── Watch_Inbox/
+        ├── Clips/
+        ├── Processed_Originals/
+        └── Failed/
+```
+
+Enable a creator's recorded-VOD watcher and place a completed recording in its `Watch_Inbox`. StreamSnip waits for the copy to finish before processing it. Removing a creator profile does not automatically delete the files already stored in that creator's folder.
+
+## Troubleshooting
+
+| Problem | What to check |
+| --- | --- |
+| Engine unavailable | Confirm the Python process is running and check the local address printed at startup. |
+| Vite API requests fail | Start the backend with `STREAMSNIP_PORT=8204` and keep the Vite proxy on the same port. |
+| Missing video preview | Confirm the clip still exists in the configured output folder and the backend is running. |
+| Capture or rendering fails | Check FFmpeg, source availability, free disk space, and the Activity log. |
+| AI request fails | Check the selected provider, model, endpoint, API key, and network access. |
+| Zernio account is unavailable | Refresh account discovery and check the account's connection and provider status in Publishing. |
+| Zernio returns a rate limit | Determine whether the response is account-specific or workspace-wide; other API keys in the same billing workspace share its request allowance. |
+
+For security issues, follow [SECURITY.md](SECURITY.md) and use GitHub's private vulnerability reporting instead of opening a public issue.
+
+## Optional container deployment
+
+The repository includes a multi-stage Docker build that compiles the React dashboard and packages the Python engine. The Windows installer remains the primary desktop distribution; treat the container path as an optional self-hosted deployment.
+
+From the repository root:
+
+```powershell
+docker compose up --build
+```
+
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080). Docker Compose stores runtime data in the local `./data` directory and binds the published port to localhost. Keep that binding private; do not expose the container directly to an untrusted network. A Docker daemon is required to build and run the image.
+
+## Project links
+
+- [GitHub repository](https://github.com/sifat-jaman-13/stream-clip-ai)
+- [Releases and Windows installer](https://github.com/sifat-jaman-13/stream-clip-ai/releases)
+- [Issues and bug reports](https://github.com/sifat-jaman-13/stream-clip-ai/issues)
 - [Discussions](https://github.com/sifat-jaman-13/stream-clip-ai/discussions)
-- [Project site](https://sifat-jaman-13.github.io/stream-clip-ai/)
+- [Project website](https://sifat-jaman-13.github.io/stream-clip-ai/)
 
 ## Licence
 
-This repository uses a **Proprietary Non-Commercial Use Licence**. It is source-available, not an OSI-approved open-source licence. Personal, private, and individual educational use is permitted under the licence. Commercial use requires prior written permission. Read [LICENSE](LICENSE) before using or redistributing the software.
+StreamSnip AI is released under a **Proprietary Non-Commercial Use Licence**. It is source-available, not open source. The licence permits personal, private, and individual educational use under its terms. Commercial use, paid services, organisational use, and public redistribution require prior written permission from the applicable copyright holder(s). Read [LICENSE](LICENSE) before using the software.
 
----
+Third-party notices for bundled components are provided in [LICENSE-NeonClipping.txt](LICENSE-NeonClipping.txt) and [LICENSE-YuNet.txt](LICENSE-YuNet.txt). Their separate licence terms remain in effect.
+
+<div align="center">
+
+**Find the moment. Make it a clip.**
 
 Built by [Sifat Jaman / ScarZero](https://github.com/sifat-jaman-13).
+
+</div>

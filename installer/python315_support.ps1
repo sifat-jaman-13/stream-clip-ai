@@ -10,7 +10,7 @@ function New-StreamSnipRequirementsProfile([string]$Version,[string]$Requirement
         if ($trimmed -and -not $seen.Add($trimmed)) { continue }
         $lines.Add($line)
     }
-    foreach ($dep in @("av>=11","ctranslate2>=4.0,<5","huggingface-hub>=0.21","tokenizers>=0.13,<1","tqdm>=4")) {
+    foreach ($dep in @("av>=11","ctranslate2>=4.0,<5","huggingface-hub>=0.21","tokenizers>=0.13,<1","tqdm>=4","annotated-doc>=0.0.2","anyio>=4.1","attrs>=23.2","annotated-types>=0.6")) {
         $pkg = ($dep -split '[<>=!~ ]')[0]
         $alreadyPresent = $lines | Where-Object { $_ -match "(?i)^[ ]*$([regex]::Escape($pkg))([<>=!~]|[ ]|$)" }
         if (-not $alreadyPresent) { $lines.Add($dep) }

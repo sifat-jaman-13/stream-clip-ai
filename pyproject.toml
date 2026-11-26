@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [
   { name = "Sifat Jaman" },
 ]
-keywords = ["twitch", "youtube", "clips", "shorts", "tiktok", "reels", "streaming", "auto-clip", "ai-clipper", "whisper", "faster-whisper", "captions", "stream-clipper", "highlight-detection", "vertical-video", "ffmpeg", "ollama", "gemini", "local-ai", "zernio"]
+keywords = ["twitch", "youtube", "clips", "shorts", "reels", "streaming", "auto-clip", "ai-clipper", "whisper", "faster-whisper", "captions", "stream-clipper", "highlight-detection", "vertical-video", "ffmpeg", "ollama", "gemini", "local-ai", "zernio"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: End Users/Desktop",
@@ -41,6 +41,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dev = [
+  "pytest>=8",
+]
 gpu = [
   "nvidia-cublas-cu12; platform_system == 'Windows'",
 ]
@@ -66,7 +69,7 @@ Download = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 Security = "https://github.com/sifat-jaman-13/stream-clip-ai/security/policy"
 
 [tool.setuptools]
-py-modules = ["autoclip", "api_server", "ai_highlights", "post_metadata", "zernio_poster", "facecam_detect"]
+py-modules = ["autoclip", "api_server", "ai_highlights", "post_metadata", "zernio_poster", "zernio_connections", "facecam_detect"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

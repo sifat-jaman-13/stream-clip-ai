@@ -30,6 +30,7 @@ Source: "..\dashboard\dist\*"; DestDir: "{app}\source\dashboard\dist"; Flags: ig
 Source: "..\ai_highlights.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\post_metadata.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\zernio_poster.py"; DestDir: "{app}\source"; Flags: ignoreversion
+Source: "..\zernio_connections.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\facecam_detect.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\models\face_detection_yunet_2023mar.onnx"; DestDir: "{app}\source\models"; Flags: ignoreversion
 Source: "..\LICENSE-NeonClipping.txt"; DestDir: "{app}"; Flags: ignoreversion

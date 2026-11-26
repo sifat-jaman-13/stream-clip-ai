@@ -24,6 +24,35 @@ export interface PublishingAccount {
   platform: string;
   name?: string;
   username?: string;
+  connection_id?: string;
+  connection_label?: string;
+  ref?: string;
+  profile_name?: string;
+  profile_color?: string;
+  profile_picture?: string;
+  profile_url?: string;
+  is_active?: boolean;
+  provider_enabled?: boolean;
+  is_over_limit?: boolean;
+  posting_enabled?: boolean;
+
+
+
+  rate_limited?: boolean;
+  rate_limited_auto_paused?: boolean;
+  rate_limit_until?: number | null;
+  last_error?: string;
+}
+
+export interface PublishingConnection {
+  id: string;
+
+  label: string;
+  api_key_set?: boolean;
+  account_count?: number;
+  identity_verified?: boolean;
+  identity_shared?: boolean;
+  accounts: PublishingAccount[];
 }
 
 export interface PublishingStatus {
@@ -35,6 +64,7 @@ export interface PublishingStatus {
   schedule_minutes?: number;
   visibility?: "public" | "private" | "unlisted";
   accounts?: Record<string, string>;
+  connections?: PublishingConnection[];
   providers?: Record<string, PublishingStatus>;
 }
 
@@ -81,6 +111,16 @@ const emptyAI: AISettings = {
   huggingface_token_set: false,
   metadata_copy_enabled: true,
 };
+
+const flattenPublishingAccounts = (status: PublishingStatus): PublishingAccount[] =>
+  (status.connections || []).flatMap((connection) =>
+    (connection.accounts || []).map((account) => ({
+      ...account,
+      connection_id: connection.id,
+      connection_label: connection.label,
+      ref: connection.id + ":" + account.id,
+    })),
+  );
 
 export function useWorkspace() {
   const [state, setState] = useState<DashboardState>(emptyState);
@@ -136,6 +176,7 @@ export function useWorkspace() {
     try {
       const status = await apiGet<PublishingStatus>("/api/publishing/status");
       setPublishing(status);
+      setAccounts(flattenPublishingAccounts(status));
     } catch {
       setPublishing({ provider: "zernio", available: false });
     }
@@ -273,15 +314,28 @@ export function useWorkspace() {
     return result.accounts || [];
   }, []);
 
-  const savePublishing = useCallback(async (payload: Record<string, string | number | boolean | Record<string, string>>) => {
+  const savePublishing = useCallback(async (payload: Record<string, any>) => {
     const result = await apiPost<PublishingStatus>("/api/publishing", { provider: "zernio", ...payload });
     setPublishing(result);
+    setAccounts(flattenPublishingAccounts(result));
     return result;
   }, []);
 
   const refreshPublishing = useCallback(async () => {
     const result = await apiGet<PublishingStatus>("/api/publishing/status");
     setPublishing(result);
+    setAccounts(flattenPublishingAccounts(result));
+    return result;
+  }, []);
+
+  const setPublishingAccount = useCallback(async (
+    connectionId: string, accountId: string, enabled: boolean,
+  ) => {
+    const result = await apiPost<PublishingStatus>("/api/publishing/account", {
+      connection_id: connectionId, account_id: accountId, enabled,
+    });
+    setPublishing(result);
+    setAccounts(flattenPublishingAccounts(result));
     return result;
   }, []);
 
@@ -329,6 +383,7 @@ export function useWorkspace() {
     fetchAccounts,
     savePublishing,
     refreshPublishing,
+    setPublishingAccount,
     saveWords,
     setClipTab,
     setClipOffset,

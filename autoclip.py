@@ -40,9 +40,29 @@ PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 try:
     from zernio_poster import ZernioPublisher
+    from zernio_connections import (
+        ZernioMultiPublisher, SUPPORTED_ZERNIO_PLATFORMS,
+        apply_account_slots, connection_identity_status,
+        is_zernio_rate_limit, is_zernio_workspace_rate_limit, zernio_rate_limit_until,
+    )
     ZERNIO_AVAILABLE = True
 except Exception:
     ZernioPublisher = None
+    ZernioMultiPublisher = None
+    SUPPORTED_ZERNIO_PLATFORMS = {"facebook", "instagram", "youtube"}
+    def is_zernio_workspace_rate_limit(error):
+        return False
+    def apply_account_slots(accounts, previous_accounts=None):
+        return []
+    def connection_identity_status(connections):
+        return {str(item.get("id") or ""): {
+            "identity_verified": bool(item.get("identity_user_id")),
+            "identity_shared": False,
+        } for item in (connections or []) if isinstance(item, dict)}
+    def zernio_rate_limit_until(error, now=None):
+        return None
+    def is_zernio_rate_limit(error):
+        return False
     ZERNIO_AVAILABLE = False
 
 # ------------------------------------------------------------------ setup
@@ -314,6 +334,7 @@ ZERNIO_FILE = _data_root / "zernio.json"
 PUBLISHING_FILE = _data_root / "publishing.json"
 AI_SETTINGS_FILE = _data_root / "ai_settings.json"
 POSTED_FILE = _data_root / "posted.json"
+ZERNIO_IDEMPOTENCY_FILE = _data_root / "zernio-idempotency.json"
 INSTANCE_LOCK_FILE = _data_root / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
 STORAGE_PATH_WARNING = ""
@@ -857,9 +878,14 @@ def record_zernio_posted(name, accounts=None):
     if not path:
         raise ValueError("Clip not found.")
     registry = load_posted_registry()
+    previous = registry.get(name, {}) if isinstance(registry.get(name), dict) else {}
+    destinations = list(dict.fromkeys(
+        [str(x)[:150] for x in (previous.get("accounts", []) if isinstance(previous.get("accounts"), list) else [])]
+        + [str(x)[:150] for x in (accounts or [])]
+    ))[:20]
     registry[name] = {
         "posted_at": time.time(), "platform": "zernio",
-        "accounts": [str(x)[:100] for x in (accounts or [])][:20],
+        "accounts": destinations,
     }
     save_posted_registry(registry)
     invalidate_clip_cache()
@@ -881,6 +907,8 @@ def load_ai_settings():
                 "gemini_model": DEFAULT_GEMINI_COPY_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
                 "custom_api_base": "https://api.openai.com/v1", "custom_api_model": "",
                 "custom_api_key": "", "gemini_api_key": "",
+                "openai_api_base": "https://api.openai.com/v1", "openai_model": "", "openai_api_key": "",
+                "anthropic_api_base": "https://api.anthropic.com", "anthropic_model": "", "anthropic_api_key": "",
                 "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", "")),
                 "metadata_copy_enabled": "true", "huggingface_setup_completed": "false"}
     try:
@@ -888,9 +916,12 @@ def load_ai_settings():
         if isinstance(data, dict): defaults.update({k: str(v) for k, v in data.items() if k in defaults and v is not None})
     except Exception:
         pass
-    # AI-written titles and descriptions are always enabled; ignore legacy opt-out values.
+    # AI-written titles, descriptions, and tags are the normal workflow. Migrate
+    # the old local phrase-score mode to the current Gemini default.
     defaults["metadata_copy_enabled"] = "true"
-    if defaults["provider"] not in {"hooks", "ollama", "gemini", "huggingface", "custom"}:
+    if defaults["provider"] in {"hooks", "huggingface"}:
+        defaults["provider"] = "gemini"
+    if defaults["provider"] not in {"ollama", "gemini", "huggingface", "custom", "openai", "anthropic"}:
         defaults["provider"] = "gemini"
     if defaults["gemini_model"] in RETIRED_GEMINI_MODELS:
         defaults["gemini_model"] = DEFAULT_GEMINI_COPY_MODEL
@@ -906,6 +937,10 @@ def public_ai_settings():
             "custom_api_base": cfg["custom_api_base"], "custom_api_model": cfg["custom_api_model"],
             "custom_api_key_set": bool(cfg["custom_api_key"]),
             "gemini_key_set": bool(cfg["gemini_api_key"]),
+            "openai_api_base": cfg["openai_api_base"], "openai_model": cfg["openai_model"],
+            "openai_key_set": bool(cfg["openai_api_key"]),
+            "anthropic_api_base": cfg["anthropic_api_base"], "anthropic_model": cfg["anthropic_model"],
+            "anthropic_key_set": bool(cfg["anthropic_api_key"]),
             "huggingface_token_set": bool(cfg["huggingface_token"]),
             "metadata_copy_enabled": str(cfg.get("metadata_copy_enabled", "true")).strip().lower() not in {"0", "false", "no", "off"}}
 
@@ -913,19 +948,22 @@ def save_ai_settings(body):
     cfg = load_ai_settings()
     previous_huggingface_token = str(cfg.get("huggingface_token", "")).strip()
     provider = str(body.get("provider", cfg["provider"]))
-    if provider not in {"hooks", "ollama", "gemini", "huggingface", "custom"}:
-        raise ValueError("Unknown AI highlight provider.")
+    if provider not in {"ollama", "gemini", "huggingface", "custom", "openai", "anthropic"}:
+        raise ValueError("Unknown AI provider.")
     cfg["provider"] = provider
     # Retain a true value for compatibility with older settings files and clients.
     cfg["metadata_copy_enabled"] = "true"
     for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model",
-                "custom_api_base", "custom_api_model"):
+                "custom_api_base", "custom_api_model", "openai_api_base", "openai_model",
+                "anthropic_api_base", "anthropic_model"):
         if key in body:
             cfg[key] = str(body[key]).strip()[:1000]
-    for key in ("gemini_api_key", "huggingface_token", "custom_api_key"):
-        if body.get(key): cfg[key] = str(body[key]).strip()[:2000]
+    for key in ("gemini_api_key", "huggingface_token", "custom_api_key", "openai_api_key", "anthropic_api_key"):
+        if body.get(key): cfg[key] = str(body[key]).strip()[:4000]
     if body.get("clear_gemini_key"): cfg["gemini_api_key"] = ""
     if body.get("clear_custom_api_key"): cfg["custom_api_key"] = ""
+    if body.get("clear_openai_key"): cfg["openai_api_key"] = ""
+    if body.get("clear_anthropic_key"): cfg["anthropic_api_key"] = ""
     if body.get("clear_huggingface_token"):
         cfg["huggingface_token"] = ""
         for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
@@ -940,16 +978,17 @@ def test_ai_settings(body):
     body = body if isinstance(body, dict) else {}
     cfg = load_ai_settings()
     provider = str(body.get("provider", cfg["provider"]))
-    if provider not in {"hooks", "ollama", "gemini", "huggingface", "custom"}:
-        raise ValueError("Unknown AI highlight provider.")
+    if provider not in {"ollama", "gemini", "huggingface", "custom", "openai", "anthropic"}:
+        raise ValueError("Unknown AI provider.")
     cfg["provider"] = provider
     for key in ("ollama_url", "ollama_model", "gemini_model", "huggingface_model",
-                "custom_api_base", "custom_api_model"):
+                "custom_api_base", "custom_api_model", "openai_api_base", "openai_model",
+                "anthropic_api_base", "anthropic_model"):
         if key in body:
             cfg[key] = str(body[key]).strip()[:1000]
-    for key in ("gemini_api_key", "huggingface_token", "custom_api_key"):
+    for key in ("gemini_api_key", "huggingface_token", "custom_api_key", "openai_api_key", "anthropic_api_key"):
         if body.get(key):
-            cfg[key] = str(body[key]).strip()[:2000]
+            cfg[key] = str(body[key]).strip()[:4000]
     return test_provider(provider, cfg)
 
 # ------------------------------------------------------------------ hype words
@@ -2134,7 +2173,7 @@ class Engine:
                 ai_cfg = load_ai_settings()
             # Reuse the exact provider selected for highlight detection; there is no separate copy provider.
             provider = str(ai_cfg.get("provider", "gemini")).strip().lower()
-            if transcript and provider in {"ollama", "gemini", "huggingface", "custom"}:
+            if transcript and provider in {"ollama", "gemini", "huggingface", "custom", "openai", "anthropic"}:
                 post_copy = generate_social_copy(transcript, tag, ai_cfg, log=self.log)
             elif transcript and provider == "hooks":
                 self.log("Hook words is selected; the strongest exact hook phrase is used as the title.")
@@ -3078,16 +3117,78 @@ class Core:
         provider = "zernio"
         if enabled is None:
             enabled = bool(self._config_for().get("auto_post", False))
-        cfg = dict(self._config_for(), enabled=enabled)
+        cfg = dict(self._config_for(), enabled=enabled, idempotency_path=str(ZERNIO_IDEMPOTENCY_FILE))
+        if not ZERNIO_AVAILABLE:
+            return None
+        connections = cfg.get("connections")
+        if isinstance(connections, list) and connections and ZernioMultiPublisher:
+            return ZernioMultiPublisher(
+                self.push, connections,
+                on_success=lambda path, platforms: record_zernio_posted(path.name, platforms),
+                on_account_success=self._record_zernio_account_success,
+                on_account_error=self._record_zernio_account_error,
+                on_account_resume=self._record_zernio_account_resume,
+                enabled=enabled, visibility=cfg.get("visibility", "public"),
+                schedule_minutes=cfg.get("schedule_minutes", 0),
+                idempotency_path=ZERNIO_IDEMPOTENCY_FILE,
+            )
         return ZernioPublisher(
             self.push, cfg,
-            on_success=lambda path: record_zernio_posted(path.name, list(cfg.get("accounts", {}).keys()) or
-                                                     [key for key in ("instagram", "youtube") if cfg.get(key + "_id")]),
-        ) if ZERNIO_AVAILABLE else None
+            on_success=lambda path, destinations: record_zernio_posted(path.name, destinations),
+        )
+
+    def _record_zernio_account_success(self, account):
+        self._update_zernio_account_state(
+            account, last_error="", rate_limited=False,
+            rate_limited_auto_paused=False, rate_limit_until=None,
+        )
+
+    def _record_zernio_account_resume(self, account):
+        self._update_zernio_account_state(
+            account, posting_enabled=True, rate_limited=False,
+            rate_limited_auto_paused=False, rate_limit_until=None, last_error="",
+        )
+
+    def _record_zernio_account_error(self, account, error):
+        message = str(error)[:400]
+        rate_limited = is_zernio_rate_limit(error)
+        updates = {"last_error": message, "rate_limited": rate_limited}
+        if rate_limited:
+            updates.update({
+                "posting_enabled": False,
+                "rate_limited_auto_paused": True,
+                "rate_limit_until": zernio_rate_limit_until(error),
+            })
+        self._update_zernio_account_state(account, **updates)
+
+    def _update_zernio_account_state(self, account, **updates):
+        connection_id = str(account.get("connection_id", ""))
+        account_id = str(account.get("id", ""))
+        if not connection_id or not account_id:
+            return
+        with self.lock:
+            cfg = dict(self._config_for())
+            connections = self._configured_zernio_connections(cfg)
+            connection = next((item for item in connections if str(item.get("id")) == connection_id), None)
+            if not connection:
+                return
+            saved = next((item for item in connection.get("accounts", [])
+                          if isinstance(item, dict) and str(item.get("id")) == account_id), None)
+            if saved is None:
+                return
+            saved.update(updates)
+            cfg["connections"] = connections
+            self.publishing["zernio"] = cfg
+            self.zernio = cfg
+            save_publishing_settings(self.publishing)
 
     def _provider_status(self, provider):
         cfg = self._config_for()
-        return {"configured": bool(cfg.get("api_key")), "api_key_set": bool(cfg.get("api_key")),
+        connected = bool(cfg.get("api_key")) or any(
+            isinstance(item, dict) and str(item.get("api_key", "")).strip()
+            for item in cfg.get("connections", [])
+        )
+        return {"configured": connected, "api_key_set": connected,
                 "available": ZERNIO_AVAILABLE, "base_url": "https://zernio.com"}
 
     def push(self, msg):
@@ -3264,28 +3365,292 @@ class Core:
             self.phase, self.status = "idle", "StreamSnip AI has closed."
             self.progress = 0
 
+    def _configured_zernio_connections(self, cfg=None):
+        cfg = cfg if isinstance(cfg, dict) else self._config_for("zernio")
+        connections = cfg.get("connections")
+        if isinstance(connections, list) and connections:
+            return [dict(item) for item in connections if isinstance(item, dict)]
+        legacy_key = str(cfg.get("api_key", "")).strip()
+        if not legacy_key:
+            return []
+        legacy_accounts = []
+        account_map = cfg.get("accounts", {})
+        if isinstance(account_map, dict):
+            for platform, account_id in account_map.items():
+                if account_id:
+                    legacy_accounts.append({
+                        "id": str(account_id), "platform": str(platform), "name": str(platform).title(),
+                        "username": "", "is_active": True, "provider_enabled": True,
+                        "posting_enabled": True,
+                    })
+        for platform in ("instagram", "youtube"):
+            account_id = cfg.get(platform + "_id")
+            if account_id and not any(item["platform"] == platform for item in legacy_accounts):
+                legacy_accounts.append({
+                    "id": str(account_id), "platform": platform, "name": platform.title(),
+                    "username": "", "is_active": True, "provider_enabled": True,
+                    "posting_enabled": True,
+                })
+        return [{"id": "legacy", "label": "Zernio API connection 1", "api_key": legacy_key,
+                 "accounts": legacy_accounts}]
+
+    def _public_zernio_connections(self, cfg=None):
+        configured_connections = self._configured_zernio_connections(cfg)
+        identities = connection_identity_status(configured_connections)
+        safe = []
+        for connection in configured_connections:
+            accounts = []
+            for account in connection.get("accounts", []):
+                if not isinstance(account, dict):
+                    continue
+                accounts.append({
+                    key: account.get(key) for key in (
+                        "id", "platform", "name", "username", "profile_id", "profile_name",
+                        "profile_color", "profile_picture", "profile_url", "is_active", "provider_enabled",
+                        "is_over_limit", "posting_enabled", "last_error", "rate_limited",
+                        "rate_limited_auto_paused", "rate_limit_until",
+                    ) if key in account
+                })
+            safe.append({
+                "id": str(connection.get("id", "")),
+                "label": str(connection.get("label") or "Zernio workspace"),
+                "api_key_set": bool(str(connection.get("api_key", "")).strip()),
+                "accounts": accounts,
+                "account_count": len(accounts),
+                **identities.get(str(connection.get("id", "")), {
+                    "identity_verified": False, "identity_shared": False,
+                }),
+            })
+        return safe
+
     def zernio_status(self):
         cfg = self._config_for("zernio")
-        return dict(self._provider_status("zernio"), accounts=dict(cfg.get("accounts", {})) if isinstance(cfg.get("accounts"), dict) else {}, auto_post=bool(cfg.get("auto_post")),
+        return dict(self._provider_status("zernio"), accounts=dict(cfg.get("accounts", {})) if isinstance(cfg.get("accounts"), dict) else {},
+                    workspace_independence_verified=False,
+                    workspace_warning="API-key slots are not verified independent billing workspaces. Zernio request limits are shared across a billing team.",
+                    auto_post=bool(cfg.get("auto_post")),
                     schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
                     visibility=cfg.get("visibility", "public"),
-                    instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""))
+                    instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""),
+                    connections=self._public_zernio_connections(cfg))
 
     def publishing_status(self):
         cfg = self._config_for()
-        return {"provider": "zernio", "providers": {"zernio": dict(self._provider_status("zernio"),
-                schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
-                visibility=cfg.get("visibility", "public"),
-                instagram_id=cfg.get("instagram_id", ""),
-                youtube_id=cfg.get("youtube_id", ""),
-                accounts=dict(cfg.get("accounts", {})) if isinstance(cfg.get("accounts"), dict) else {},
-                auto_post=bool(cfg.get("auto_post", False)))},
-                **self._provider_status("zernio")}
+        if isinstance(cfg.get("connections"), list) and ZERNIO_AVAILABLE:
+            publisher = self._make_publisher("zernio", False)
+            if isinstance(publisher, ZernioMultiPublisher):
+                publisher.refresh_expired()
+            cfg = self._config_for()
+        public_connections = self._public_zernio_connections(cfg)
+        configured = any(item["api_key_set"] for item in public_connections) or bool(cfg.get("api_key"))
+        status = dict(self._provider_status("zernio"), api_key_set=configured, configured=configured,
+                      connections=public_connections,
+                      schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
+                      visibility=cfg.get("visibility", "public"),
+                      instagram_id=cfg.get("instagram_id", ""),
+                      youtube_id=cfg.get("youtube_id", ""),
+                      accounts=dict(cfg.get("accounts", {})) if isinstance(cfg.get("accounts"), dict) else {},
+                      auto_post=bool(cfg.get("auto_post", False)),
+                      workspace_independence_verified=False,
+                      workspace_warning="API-key slots are not verified independent billing workspaces. Zernio request limits are shared across a billing team.")
+        return {"provider": "zernio", "providers": {"zernio": status}, **status}
+
+    def publishing_connections_save(self, body):
+        raw_connections = body.get("connections")
+        if not isinstance(raw_connections, list):
+            raise ValueError("Zernio connections must be a list.")
+        cfg = dict(self._config_for())
+        existing = {str(item.get("id", "")): item
+                    for item in self._configured_zernio_connections(cfg)}
+        saved = []
+        seen = set()
+        seen_api_keys = set()
+        for position, raw in enumerate(raw_connections, 1):
+            if not isinstance(raw, dict):
+                raise ValueError("Each Zernio connection must be an object.")
+            connection_id = str(raw.get("id", "")).strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", connection_id):
+                raise ValueError("Invalid Zernio connection identifier.")
+            if connection_id in seen:
+                raise ValueError("Duplicate Zernio connection identifier.")
+            seen.add(connection_id)
+            previous = existing.get(connection_id, {})
+            api_key = str(raw.get("api_key") or previous.get("api_key") or "").strip()
+            if not api_key:
+                raise ValueError(f"Enter the API key for {raw.get('label') or 'Zernio connection ' + str(position)}.")
+            if api_key in seen_api_keys:
+                raise ValueError("Each API-key connection slot must use a different key. Different keys can still share the same Zernio billing-team request quota.")
+            seen_api_keys.add(api_key)
+            label = str(raw.get("label") or previous.get("label") or f"Zernio API connection {position}").strip()[:80]
+            previous_accounts = {
+                str(item.get("id")): item for item in previous.get("accounts", [])
+                if isinstance(item, dict) and item.get("id")
+            }
+            requested_accounts = {
+                str(item.get("id")): item for item in raw.get("accounts", [])
+                if isinstance(item, dict) and item.get("id")
+            } if isinstance(raw.get("accounts"), list) else {}
+            identity = {}
+            identity_publisher = ZernioPublisher(self.push, {"enabled": True, "api_key": api_key})
+            try:
+                identity = identity_publisher.verify_identity()
+            except Exception as exc:
+                self.push(
+                    f"Zernio identity for {label} could not be verified. "
+                    "This API key slot cannot be confirmed as an independent billing workspace."
+                )
+            try:
+                discovered = identity_publisher.accounts()
+            except Exception as exc:
+                raise ValueError(f"Could not verify {label} or discover its accounts: {exc}") from exc
+            accounts = []
+            for account in apply_account_slots(discovered, previous_accounts):
+                account_id = str(account["id"])
+                requested = requested_accounts.get(account_id, {})
+                prior = previous_accounts.get(account_id, {})
+                active = bool(account.get("is_active", True)) and bool(account.get("provider_enabled", True))
+                posting_enabled = bool(requested.get(
+                    "posting_enabled",
+                    requested.get("enabled", prior.get("posting_enabled", prior.get("enabled", active))),
+                )) and active
+                accounts.append({
+                    **account,
+                    "posting_enabled": posting_enabled,
+                    "last_error": str(prior.get("last_error", "")),
+                    "rate_limited": bool(prior.get("rate_limited", False)),
+                    "rate_limited_auto_paused": bool(prior.get("rate_limited_auto_paused", False)),
+                    "rate_limit_until": prior.get("rate_limit_until"),
+                })
+            saved.append({
+                "id": connection_id, "label": label, "api_key": api_key,
+                "identity_user_id": str(identity.get("user_id") or ""),
+                "accounts": accounts, "visibility": cfg.get("visibility", "public"),
+            })
+        cfg["connections"] = saved
+        # The multi-connection list is now authoritative; clear the legacy
+        # single-key fields so removing the final slot really disconnects it.
+        cfg["api_key"] = ""
+        cfg["accounts"] = {}
+        cfg["instagram_id"] = ""
+        cfg["youtube_id"] = ""
+        cfg["auto_post"] = bool(body.get("auto_post", cfg.get("auto_post", False)))
+        try:
+            cfg["schedule_minutes"] = max(0, int(body.get("schedule_minutes", cfg.get("schedule_minutes", 0))))
+        except (TypeError, ValueError):
+            cfg["schedule_minutes"] = 0
+        visibility = body.get("visibility", cfg.get("visibility", "public"))
+        cfg["visibility"] = str(visibility) if visibility in ("public", "private", "unlisted") else "public"
+        self.publishing["zernio"] = cfg
+        self.publishing["provider"] = "zernio"
+        self.zernio = cfg
+        save_publishing_settings(self.publishing)
+        self.publisher = self._make_publisher("zernio", cfg["auto_post"])
+        return self.publishing_status()
+
+    def publishing_account_toggle(self, body):
+        connection_id = str(body.get("connection_id", "")).strip()
+        account_id = str(body.get("account_id", "")).strip()
+        enabled = bool(body.get("enabled", False))
+        cfg = dict(self._config_for())
+        connections = self._configured_zernio_connections(cfg)
+        connection = next((item for item in connections if str(item.get("id")) == connection_id), None)
+        if not connection:
+            raise ValueError("Zernio connection was not found.")
+        account = next((item for item in connection.get("accounts", [])
+                        if str(item.get("id")) == account_id), None)
+        if not account:
+            raise ValueError("Social account was not found. Refresh account discovery.")
+        if enabled and (
+            not account.get("is_active", True)
+            or not account.get("provider_enabled", True)
+        ):
+            raise ValueError("This account is unavailable for posting. Check its Zernio connection status.")
+        account["posting_enabled"] = enabled
+        account["rate_limited_auto_paused"] = False
+        if enabled:
+            account["rate_limited"] = False
+            account["rate_limit_until"] = None
+            account["last_error"] = ""
+        cfg["connections"] = connections
+        self.publishing["zernio"] = cfg
+        self.zernio = cfg
+        save_publishing_settings(self.publishing)
+        return self.publishing_status()
+
+    def publishing_accounts(self, provider=None, connection_id=None):
+        cfg = dict(self._config_for())
+        publisher = self._make_publisher("zernio", False)
+        if isinstance(publisher, ZernioMultiPublisher):
+            publisher.refresh_expired()
+            cfg = dict(self._config_for())
+        connections = self._configured_zernio_connections(cfg)
+        if not connections:
+            raise ValueError("Add a Zernio API key to discover connected social accounts.")
+        selected = [item for item in connections if connection_id is None or str(item.get("id")) == str(connection_id)]
+        if connection_id is not None and not selected:
+            raise ValueError("Zernio connection was not found.")
+        all_accounts = []
+        errors = []
+        for connection in selected:
+            try:
+                discovered = ZernioPublisher(
+                    self.push, {"enabled": True, "api_key": connection["api_key"]}
+                ).accounts()
+                previous = {str(item.get("id")): item for item in connection.get("accounts", [])
+                            if isinstance(item, dict) and item.get("id")}
+                connection["accounts"] = []
+                for account in apply_account_slots(discovered, previous):
+                    prior = previous.get(str(account["id"]), {})
+                    active = bool(account.get("is_active", True)) and bool(account.get("provider_enabled", True))
+                    posting_enabled = bool(prior.get(
+                        "posting_enabled", prior.get("enabled", active)
+                    )) and active
+                    saved_account = {
+                        **account,
+                        "posting_enabled": posting_enabled,
+                        "last_error": str(prior.get("last_error", "")),
+                        "rate_limited": bool(prior.get("rate_limited", False)),
+                        "rate_limited_auto_paused": bool(prior.get("rate_limited_auto_paused", False)),
+                        "rate_limit_until": prior.get("rate_limit_until"),
+                    }
+                    connection["accounts"].append(saved_account)
+                    all_accounts.append({
+                        **saved_account, "connection_id": connection["id"],
+                        "connection_label": connection.get("label", "Zernio workspace"),
+                        "ref": f"{connection['id']}:{account['id']}",
+                    })
+            except Exception as exc:
+                errors.append(f"{connection.get('label', connection.get('id'))}: {exc}")
+                self.push(f"Zernio account discovery failed for {connection.get('label')}: {exc}")
+        cfg["connections"] = connections
+        self.publishing["zernio"] = cfg
+        self.zernio = cfg
+        save_publishing_settings(self.publishing)
+        if errors and not all_accounts:
+            raise ValueError("; ".join(errors))
+        if errors:
+            self.push("Some Zernio workspaces could not refresh: " + "; ".join(errors))
+        return all_accounts
 
     def publishing_save(self, body):
         provider = str(body.get("provider", "zernio")).lower()
         if provider != "zernio": raise ValueError("Only Zernio publishing is supported.")
+        if "connections" in body:
+            return self.publishing_connections_save(body)
         cfg = dict(self._config_for())
+        if isinstance(cfg.get("connections"), list) or ("api_key" not in body and not cfg.get("api_key")):
+            cfg["auto_post"] = bool(body.get("auto_post", cfg.get("auto_post", False)))
+            try:
+                cfg["schedule_minutes"] = max(0, int(body.get("schedule_minutes", cfg.get("schedule_minutes", 0))))
+            except (TypeError, ValueError):
+                raise ValueError("Schedule interval must be a non-negative whole number of minutes.")
+            visibility = body.get("visibility", cfg.get("visibility", "public"))
+            cfg["visibility"] = str(visibility) if visibility in ("public", "private", "unlisted") else "public"
+            self.publishing["zernio"] = cfg
+            self.zernio = cfg
+            save_publishing_settings(self.publishing)
+            self.publisher = self._make_publisher("zernio", cfg["auto_post"])
+            return self.publishing_status()
         for key in ("api_key", "instagram_id", "youtube_id"):
             if key in {"instagram_id", "youtube_id"} and key not in body:
                 continue
@@ -3296,8 +3661,7 @@ class Core:
             raw_accounts = body.get("account_ids")
             if not isinstance(raw_accounts, dict):
                 raise ValueError("Connected account selection must be a platform-to-account map.")
-            supported = {"twitter", "instagram", "facebook", "linkedin", "tiktok", "youtube",
-                         "pinterest", "reddit", "bluesky", "threads", "googlebusiness"}
+            supported = {"instagram", "facebook", "youtube"}
             cfg["accounts"] = {
                 str(platform).strip().lower(): str(account_id).strip()
                 for platform, account_id in raw_accounts.items()
@@ -3316,11 +3680,6 @@ class Core:
         self.publisher = self._make_publisher(provider, cfg["auto_post"])
         return self.publishing_status()
 
-    def publishing_accounts(self, provider=None):
-        pub = self._make_publisher("zernio", False)
-        if not pub: raise ValueError("Zernio posting is unavailable.")
-        return pub.accounts()
-
     def zernio_save(self, body):
         body = dict(body); body["provider"] = "zernio"
         return self.publishing_save(body)
@@ -3331,23 +3690,56 @@ class Core:
     def publish_clips(self, names, caption_overrides=None, account_ids=None):
         provider = "zernio"
         cfg = self._config_for()
-        if not cfg.get("api_key"): raise ValueError(f"Save and verify a {provider.title()} API key first.")
-        selected_accounts = account_ids if isinstance(account_ids, dict) else cfg.get("accounts", {})
-        if not isinstance(selected_accounts, dict):
-            selected_accounts = {}
-        selected_accounts = {
-            str(platform).strip().lower(): str(account_id).strip()
-            for platform, account_id in selected_accounts.items()
-            if str(platform).strip().lower() in {"twitter", "instagram", "facebook", "linkedin", "tiktok",
-                                                  "youtube", "pinterest", "reddit", "bluesky", "threads",
-                                                  "googlebusiness"} and str(account_id).strip()
-        }
-        if not selected_accounts:
-            for platform in ("instagram", "youtube"):
-                if cfg.get(platform + "_id"):
-                    selected_accounts[platform] = str(cfg[platform + "_id"])
-        if not selected_accounts:
-            raise ValueError("Connect and select at least one Zernio social account in Settings.")
+        if isinstance(cfg.get("connections"), list) and ZERNIO_AVAILABLE:
+            expiry_publisher = self._make_publisher(provider, False)
+            if isinstance(expiry_publisher, ZernioMultiPublisher):
+                expiry_publisher.refresh_expired()
+            cfg = self._config_for()
+        multi_connection = bool(cfg.get("connections")) and bool(ZERNIO_AVAILABLE and ZernioMultiPublisher)
+        if multi_connection:
+            connections = self._configured_zernio_connections(cfg)
+            enabled_refs = {
+                f"{connection.get('id')}:{account.get('id')}"
+                for connection in connections
+                for account in connection.get("accounts", [])
+                if isinstance(account, dict) and account.get("id")
+                and account.get("posting_enabled", account.get("enabled", account.get("is_active", True)))
+                and account.get("is_active", True)
+                and account.get("provider_enabled", True)
+            }
+            if isinstance(account_ids, list):
+                selected_accounts = []
+                for item in account_ids:
+                    if not isinstance(item, dict):
+                        continue
+                    connection_id = str(item.get("connection_id", ""))
+                    account_id = str(item.get("account_id") or item.get("id") or "")
+                    ref = f"{connection_id}:{account_id}"
+                    if connection_id and account_id and ref in enabled_refs:
+                        selected_accounts.append({"connection_id": connection_id, "account_id": account_id})
+            elif account_ids is None:
+                selected_accounts = None
+            else:
+                selected_accounts = []
+            if selected_accounts == [] or (selected_accounts is None and not enabled_refs):
+                raise ValueError("Enable at least one connected Zernio account for posting.")
+        else:
+            if not cfg.get("api_key"):
+                raise ValueError(f"Save and verify a {provider.title()} API key first.")
+            selected_accounts = account_ids if isinstance(account_ids, dict) else cfg.get("accounts", {})
+            if not isinstance(selected_accounts, dict):
+                selected_accounts = {}
+            selected_accounts = {
+                str(platform).strip().lower(): str(account_id).strip()
+                for platform, account_id in selected_accounts.items()
+                if str(platform).strip().lower() in SUPPORTED_ZERNIO_PLATFORMS and str(account_id).strip()
+            }
+            if not selected_accounts:
+                for platform in ("instagram", "youtube", "facebook"):
+                    if cfg.get(platform + "_id"):
+                        selected_accounts[platform] = str(cfg[platform + "_id"])
+            if not selected_accounts:
+                raise ValueError("Connect and select at least one Zernio social account in Settings.")
         valid = [str(n) for n in names if CLIP_RE.fullmatch(str(n)) and find_clip_path(str(n))]
         if not valid: raise ValueError("No valid clips selected.")
         if not self._make_publisher(provider, False): raise ValueError(f"{provider.title()} posting is unavailable.")
@@ -3361,22 +3753,54 @@ class Core:
                 for index, name in enumerate(valid):
                     try:
                         publisher = self._make_publisher(provider, False)
-                        if publisher:
-                            publisher.on_success = lambda path: record_zernio_posted(path.name, list(selected_accounts.keys()))
-                        delay = int(cfg.get("schedule_minutes", 0) or 0) * (index + 1)
+                        if publisher and not isinstance(publisher, ZernioMultiPublisher):
+                            publisher.on_success = lambda path, destinations: record_zernio_posted(path.name, destinations)
+                        interval = max(0, int(cfg.get("schedule_minutes", 0) or 0))
+                        delay = interval * (index + 1)
                         with self.lock: self.posting["current"] = name
                         self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
                         caption_override = (caption_overrides or {}).get(name) if isinstance(caption_overrides, dict) else None
                         clip_path = find_clip_path(name)
                         if not clip_path:
                             raise FileNotFoundError(f"Clip is no longer available: {name}")
-                        publisher.publish_one(clip_path, schedule_minutes=delay,
-                                              accounts=selected_accounts, caption_override=caption_override)
-                        with self.lock:
-                            self.posting["completed"] += 1
-                            self.posting["done"] += 1
-                            self.posting["last_name"] = name
-                        self.push(f"{provider.title()} upload complete: {name}.")
+                        publish_result = publisher.publish_one(
+                            clip_path, schedule_minutes=delay,
+                            accounts=selected_accounts, caption_override=caption_override,
+                        )
+                        if isinstance(publisher, ZernioMultiPublisher) and isinstance(publish_result, dict):
+                            account_failures = publish_result.get("failed", [])
+                            account_successes = publish_result.get("succeeded", [])
+                            if publish_result.get("workspace_rate_limited"):
+                                with self.lock:
+                                    self.posting["errors"] += 1
+                                self.push(
+                                    "Zernio's workspace request limit stopped this publishing batch. "
+                                    "No social account was disabled; wait for the request cooldown before retrying."
+                                )
+                                break
+                            if account_failures:
+                                with self.lock:
+                                    self.posting["errors"] += len(account_failures)
+                                self.push(
+                                    f"{provider.title()}: {len(account_successes)} account(s) accepted "
+                                    f"the post; {len(account_failures)} account(s) failed independently. "
+                                    "See the account details in Publishing."
+                                )
+                            with self.lock:
+                                if account_successes:
+                                    self.posting["completed"] += 1
+                                    self.posting["done"] += 1
+                                    self.posting["last_name"] = name
+                            if account_successes:
+                                self.push(f"{provider.title()} upload complete for {len(account_successes)} account(s): {name}.")
+                            else:
+                                raise RuntimeError("Zernio did not accept this clip on any enabled account.")
+                        else:
+                            with self.lock:
+                                self.posting["completed"] += 1
+                                self.posting["done"] += 1
+                                self.posting["last_name"] = name
+                            self.push(f"{provider.title()} upload complete: {name}.")
                     except Exception as exc:
                         with self.lock: self.posting["errors"] += 1
                         self.push(f"{provider.title()} error for {name}: {exc}")
@@ -3992,7 +4416,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if path == "/api/publishing":
                     return self._send(200, CORE.publishing_save(body))
                 if path == "/api/publishing/accounts":
-                    return self._send(200, {"accounts": CORE.publishing_accounts(str(body.get("provider", "")).lower() or None)})
+                    return self._send(200, {"accounts": CORE.publishing_accounts(
+                        str(body.get("provider", "")).lower() or None,
+                        connection_id=str(body.get("connection_id", "")).strip() or None,
+                    )})
+                if path == "/api/publishing/account":
+                    return self._send(200, CORE.publishing_account_toggle(body))
                 if path == "/api/publishing/publish":
                     names = body.get("names", [])
                     if body.get("all"):
@@ -4000,8 +4429,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         names = [item["name"] for item in _clip_index()
                                  if item["name"] not in posted_names]
                     elif not isinstance(names, list): names = []
-                    return self._send(200, CORE.publish_clips([str(n) for n in names],
-                                                               account_ids=body.get("account_ids")))
+                    return self._send(200, CORE.publish_clips(
+                        [str(n) for n in names],
+                        account_ids=body.get("account_refs", body.get("account_ids")),
+                    ))
                 if path == "/api/publishing/publish-one":
                     name = str(body.get("name", ""))
                     title = str(body.get("title", "")).strip()[:100]
@@ -4009,8 +4440,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if not title:
                         raise ValueError("Add a post title before publishing.")
                     caption = title + (("\n\n" + description) if description else "")
-                    return self._send(200, CORE.publish_clips([name], caption_overrides={name: caption},
-                                                               account_ids=body.get("account_ids")))
+                    return self._send(200, CORE.publish_clips(
+                        [name], caption_overrides={name: caption},
+                        account_ids=body.get("account_refs", body.get("account_ids")),
+                    ))
                 if path == "/api/ai/settings":
                     return self._send(200, save_ai_settings(body))
                 if path == "/api/ai/test":
@@ -4157,6 +4590,14 @@ def open_window(url):
                 pass
     webbrowser.open(url)
 
+
+def should_open_browser_window(bind_host):
+    """Keep browser windows out of native desktop-host launches."""
+    if os.environ.get("STREAMSNIP_NATIVE_HOST", "").strip() == "1":
+        return False
+    return bind_host in ("127.0.0.1", "localhost", "::1")
+
+
 def main():
     _PROCESS_SHUTDOWN.clear()
     QUIT.clear()
@@ -4236,9 +4677,9 @@ def main():
         "Do NOT close this terminal directly. Doing so may interrupt active recording, clip processing, or uploads.",
         flush=True,
     )
-    if bind_host in ("127.0.0.1", "localhost", "::1"):
+    if should_open_browser_window(bind_host):
         dashboard_dist = pathlib.Path(__file__).resolve().parent / "dashboard" / "dist" / "index.html"
-        # Launch the new workspace by default; keep the classic interface at / for legacy controls.
+        # Browser mode remains unchanged; native WinUI hosts own their own window.
         open_window(url.rstrip("/") + "/dashboard/" if dashboard_dist.is_file() else url)
     try:
         while not QUIT.wait(0.5):
@@ -4765,7 +5206,7 @@ header{padding:16px 26px;border-bottom:1px solid var(--line);background:rgba(9,1
  <div class="settings-dialog about-dialog">
   <div class="settings-head"><div><h2>About StreamSnip AI</h2><p>Local-first clipping tools for creators, by ScarZero.</p></div><button class="btn ghost" id="btn-about-close">Close</button></div>
   <div class="about-hero">
-   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="StreamSnip AI"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn Twitch, YouTube, and video files into captioned clips for Shorts, Reels, TikTok, and YouTube.</p></div></div>
+   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="StreamSnip AI"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn Twitch, YouTube, and video files into captioned clips for Shorts, Reels, and YouTube.</p></div></div>
    <p class="about-copy">StreamSnip AI keeps capture, transcription, rendering, settings, and generated clips local by default. Hook words and Ollama work locally; Gemini, Hugging Face, and Zernio are optional hosted integrations.</p>
    <p class="about-copy">Built for flexible framing, animated captions, creator credit, local clip review, and deliberate publishing workflows.</p>
    <p class="about-copy"><strong>Created and maintained by Sifat Jaman / ScarZero.</strong> Development has included assistance from OpenAI, Anthropic, and Google AI tools.</p>
@@ -4925,7 +5366,7 @@ async function loadPublishingAccounts(){
     if(!groups[platform])groups[platform]=[];
     groups[platform].push(account);
   });
-  const labels={twitter:"X / Twitter",instagram:"Instagram",facebook:"Facebook",linkedin:"LinkedIn",tiktok:"TikTok",youtube:"YouTube",pinterest:"Pinterest",reddit:"Reddit",bluesky:"Bluesky",threads:"Threads",googlebusiness:"Google Business"};
+  const labels={instagram:"Instagram",facebook:"Facebook",youtube:"YouTube"};
   const defaults={};
   Object.entries(groups).forEach(([platform,items])=>{
     if(items.length)defaults[platform]=String(items[0].id);
@@ -5357,7 +5798,7 @@ function openSocialPost(c){
     if(Z.instagram_id)savedAccounts.instagram=Z.instagram_id;
     if(Z.youtube_id)savedAccounts.youtube=Z.youtube_id;
   }
-  const platformLabels={twitter:"X / Twitter",instagram:"Instagram",facebook:"Facebook",linkedin:"LinkedIn",tiktok:"TikTok",youtube:"YouTube",pinterest:"Pinterest",reddit:"Reddit",bluesky:"Bluesky",threads:"Threads",googlebusiness:"Google Business"};
+  const platformLabels={instagram:"Instagram",facebook:"Facebook",youtube:"YouTube"};
   const connected=Object.entries(savedAccounts);
   const choices=h("div",{class:"platform-picks"},...connected.map(([id,accountId])=>{
     const input=h("input",{type:"checkbox"});
@@ -5410,7 +5851,7 @@ function clipCard(c){
     h("div",{class:"cm"},h("div",{class:"cc",title:first},first),
       h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB · "+origin),
         h("span",{class:"acts"},
-          h("button",{class:"ib post",title:"Prepare a post for Instagram, TikTok, Facebook, or YouTube",onclick:post},"Post"),
+          h("button",{class:"ib post",title:"Prepare a post for Instagram, Facebook, or YouTube",onclick:post},"Post"),
           h("button",{class:"ib",title:"Copy caption + hashtags",onclick:copy},ico("copy",15)),
           h("a",{class:"ib",title:"Download",href:"/clips/"+encodeURIComponent(c.name),download:c.name},ico("download",15)),
           h("button",{class:"ib",title:"Show in folder",onclick:()=>api("/api/reveal",{name:c.name}).catch(e=>toast(e.message,"bad"))},ico("folder",15)),

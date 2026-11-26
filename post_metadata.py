@@ -56,18 +56,18 @@ def build_copy_prompt(transcript, creator_credit="", correction=""):
         "- The explanation adds concrete context and is grounded in the same transcript.\n"
         "- Remove every claim that requires guessing who owns something or what happened off-screen.\n"
         "- The title is not a vague template and the description is not a transcript dump.\n\n"
-        "HASHTAGS: return exactly one topical hashtag. Use #funny for banter, awkward stories, or laughs; "
-        "use #gaming only when gameplay itself is the focus. Do not return #shorts #fyp #streamer #clips #viral "
-        "because the app adds those automatically.\n"
+        "HASHTAGS: return 3–5 specific, transcript-grounded topical hashtags. Prefer the game, creator niche, or exact event. "
+        "Use #funny for banter or laughs; use #gaming only when gameplay itself is the focus. Avoid generic #trending, #follow, and #viral. "
+        "The app adds its standard platform tags separately.\n"
         "Return ONLY JSON with this exact shape: "
-        "{\"title\":\"...\",\"description\":\"...\",\"hashtags\":[\"#funny\"]}.\n"
+        "{\"title\":\"...\",\"description\":\"...\",\"hashtags\":[\"#topic1\",\"#topic2\",\"#topic3\"]}.\n"
         + creator_note + correction_note +
         "TRANSCRIPT START\n" + transcript + "\nTRANSCRIPT END"
     )
 
 
 def _provider_response(prompt, config, log=lambda _message: None):
-    provider = str(config.get("provider", "hooks")).strip().lower()
+    provider = str(config.get("provider", "gemini")).strip().lower()
 
     if provider == "gemini":
         key = str(config.get("gemini_api_key", "")).strip()
@@ -160,6 +160,63 @@ def _provider_response(prompt, config, log=lambda _message: None):
             return _extract_json(data["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError) as exc:
             raise AIProviderError("Custom API returned no social-copy response.") from exc
+
+    if provider == "openai":
+        base = str(config.get("openai_api_base", "https://api.openai.com/v1")).strip().rstrip("/")
+        model = str(config.get("openai_model", "")).strip()
+        key = str(config.get("openai_api_key", "")).strip()
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise AIProviderError("Enter a valid OpenAI API base URL.")
+        if not model or not key:
+            raise AIProviderError("Enter an OpenAI model and API key.")
+        url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+        data = _json_request(url, {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.35,
+            "max_tokens": 700,
+            "stream": False,
+        }, headers={"Content-Type": "application/json", "Authorization": "Bearer " + key}, timeout=150)
+        try:
+            return _extract_json(data["choices"][0]["message"]["content"])
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AIProviderError("OpenAI returned no social-copy response.") from exc
+
+    if provider == "anthropic":
+        base = str(config.get("anthropic_api_base", "https://api.anthropic.com")).strip().rstrip("/")
+        model = str(config.get("anthropic_model", "")).strip()
+        key = str(config.get("anthropic_api_key", "")).strip()
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise AIProviderError("Enter a valid Anthropic API base URL.")
+        if not model or not key:
+            raise AIProviderError("Enter a Claude model and Anthropic API key.")
+        if base.endswith("/v1/messages"):
+            url = base
+        elif base.endswith("/v1"):
+            url = base + "/messages"
+        else:
+            url = base + "/v1/messages"
+        data = _json_request(url, {
+            "model": model,
+            "max_tokens": 900,
+            "temperature": 0.35,
+            "messages": [{"role": "user", "content": prompt}],
+        }, headers={
+            "Content-Type": "application/json",
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+        }, timeout=150)
+        blocks = data.get("content", [])
+        raw = "\n".join(
+            str(block.get("text", "")).strip()
+            for block in blocks
+            if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+        ).strip() if isinstance(blocks, list) else ""
+        if not raw:
+            raise AIProviderError("Claude returned no social-copy response.")
+        return _extract_json(raw)
 
     if provider == "huggingface":
         token = str(config.get("huggingface_token", "")).strip()
@@ -406,7 +463,7 @@ def _clean_hashtags(value):
             continue
         contextual.append(key)
         seen.add(key)
-        if len(contextual) == 1:
+        if len(contextual) == 5:
             break
     return CORE_HASHTAGS + contextual + TAIL_HASHTAGS
 
@@ -460,7 +517,7 @@ def generate_social_copy(transcript, creator_credit, config, log=lambda _message
     if not transcript:
         raise AIProviderError("No transcript is available for post copy.")
     config = dict(config or {})
-    provider = str(config.get("provider", "hooks")).strip().lower()
+    provider = str(config.get("provider", "gemini")).strip().lower()
     try:
         return _generate_valid_copy(transcript, creator_credit, config, log, provider)
     except AIProviderError as primary_error:

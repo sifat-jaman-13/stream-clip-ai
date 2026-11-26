@@ -124,6 +124,35 @@ class LegacyRequestAdapter:
         pass
 
 
+MAX_REQUEST_BODY_BYTES = 400_000
+
+
+async def read_request_body_limited(request: Request, limit: int = MAX_REQUEST_BODY_BYTES):
+    """Read a request body without buffering more than the configured limit.
+
+    A trustworthy Content-Length lets us reject an oversized request before
+    consuming its body. Chunked or missing-length requests are counted as they
+    arrive and stop as soon as the limit is crossed.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except (TypeError, ValueError):
+            return JSONResponse(status_code=400, content={"error": "invalid content length"})
+        if declared_length < 0:
+            return JSONResponse(status_code=400, content={"error": "invalid content length"})
+        if declared_length > limit:
+            return JSONResponse(status_code=413, content={"error": "request body too large"})
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > limit:
+            return JSONResponse(status_code=413, content={"error": "request body too large"})
+    return bytes(body)
+
+
 def create_app(
     legacy_handler: type,
     *,
@@ -261,9 +290,9 @@ def create_app(
     async def dispatch_legacy(path: str, request: Request):
         body = b""
         if request.method == "POST":
-            body = await request.body()
-            if len(body) > 400_000:
-                return JSONResponse(status_code=413, content={"error": "too large"})
+            body = await read_request_body_limited(request)
+            if isinstance(body, JSONResponse):
+                return body
 
         adapter = LegacyRequestAdapter(request, legacy_handler, body)
         handler_method = legacy_handler.do_GET if request.method == "GET" else legacy_handler.do_POST

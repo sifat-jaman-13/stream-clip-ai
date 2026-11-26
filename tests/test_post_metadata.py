@@ -52,6 +52,53 @@ class PostMetadataTests(unittest.TestCase):
             post_metadata.generate_social_copy(self.transcript, "", config)
         self.assertNotIn("Authorization", request.call_args.kwargs["headers"])
 
+    def test_openai_chatgpt_provider_generates_clip_metadata(self):
+        config = {
+            "provider": "openai",
+            "openai_api_base": "https://api.openai.com/v1",
+            "openai_model": "gpt-test-model",
+            "openai_api_key": "openai-private-key",
+        }
+        response = {"choices": [{"message": {"content": json.dumps(self.valid_response)}}]}
+        with patch.object(post_metadata, "_json_request", return_value=response) as request:
+            result = post_metadata.generate_social_copy(self.transcript, "@creator", config)
+
+        self.assertEqual(result["title"], self.valid_response["title"])
+        self.assertEqual(result["provider"], "openai")
+        self.assertEqual(request.call_args.args[0], "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(request.call_args.args[1]["model"], "gpt-test-model")
+        self.assertEqual(request.call_args.kwargs["headers"]["Authorization"], "Bearer openai-private-key")
+
+    def test_claude_provider_uses_anthropic_messages_api_for_metadata(self):
+        config = {
+            "provider": "anthropic",
+            "anthropic_api_base": "https://api.anthropic.com",
+            "anthropic_model": "claude-test-model",
+            "anthropic_api_key": "anthropic-private-key",
+        }
+        response = {"content": [{"type": "text", "text": json.dumps(self.valid_response)}]}
+        with patch.object(post_metadata, "_json_request", return_value=response) as request:
+            result = post_metadata.generate_social_copy(self.transcript, "@creator", config)
+
+        self.assertEqual(result["title"], self.valid_response["title"])
+        self.assertEqual(result["provider"], "anthropic")
+        self.assertEqual(request.call_args.args[0], "https://api.anthropic.com/v1/messages")
+        self.assertEqual(request.call_args.args[1]["model"], "claude-test-model")
+        self.assertEqual(request.call_args.kwargs["headers"]["x-api-key"], "anthropic-private-key")
+        self.assertEqual(request.call_args.kwargs["headers"]["anthropic-version"], "2023-06-01")
+
+    def test_social_copy_prompt_requests_multiple_specific_tags(self):
+        prompt = post_metadata.build_copy_prompt(self.transcript)
+        self.assertIn("3–5", prompt)
+        self.assertIn("topical hashtags", prompt)
+
+    def test_clean_hashtags_keeps_multiple_distinct_topical_tags(self):
+        tags = post_metadata._clean_hashtags([
+            "#funny", "#gaming", "#clutch", "#twitch", "#reaction", "#extra", "#FunnY"
+        ])
+        topical = [tag for tag in tags if tag not in post_metadata.CORE_HASHTAGS + post_metadata.TAIL_HASHTAGS]
+        self.assertEqual(topical, ["#funny", "#gaming", "#clutch", "#twitch", "#reaction"])
+
     def test_gemini_31_flash_lite_remains_the_default_free_model(self):
         self.assertEqual(ai_highlights.DEFAULT_GEMINI_MODEL, "gemini-3.8-flash")
         self.assertEqual(post_metadata.DEFAULT_GEMINI_COPY_MODEL, "gemini-3.1-flash-lite")
@@ -64,7 +111,8 @@ class PostMetadataTests(unittest.TestCase):
         self.assertIn("copied VERBATIM", prompt)
         self.assertIn("12–20 word", prompt)
         self.assertIn("Known creator credit: @creator", prompt)
-        self.assertIn("#shorts #fyp #streamer #clips #viral", prompt)
+        self.assertIn("3–5 specific, transcript-grounded topical hashtags", prompt)
+        self.assertIn("The app adds its standard platform tags separately", prompt)
         self.assertIn(self.transcript, prompt)
 
     def test_gemini_uses_exact_model_selected_in_settings(self):

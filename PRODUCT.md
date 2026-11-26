@@ -20,7 +20,7 @@ A desktop media workflow that connects stream capture and creator monitoring to 
 
 The React and TypeScript Creator Studio runs in the local browser. The Python application owns capture and media processing and exposes application services through a loopback-only FastAPI transport. The user can run a built dashboard or use Vite during development.
 
-Publishing is handled exclusively through the configured Zernio integration and its connected social accounts. StreamSnip does not provide a separate manual platform-upload or browser-handoff workflow.
+Publishing is handled exclusively through the configured Zernio integration and its connected Facebook, Instagram, and YouTube accounts. StreamSnip does not provide a separate manual platform-upload or browser-handoff workflow. StreamSnip does not impose its own API-key connection count, per-platform account quota, or posting quota; Zernio and the connected social platforms determine availability and limits. API keys belonging to the same Zernio billing workspace share that workspace's request allowance.
 
 ## Capabilities and constraints
 
@@ -38,7 +38,7 @@ Publishing is handled exclusively through the configured Zernio integration and 
 
 - Product name: StreamSnip AI.
 - The default visual system is the Odysseus graphite theme with cyan information accents and coral actions.
-- Available appearance themes: Odysseus, Studio Light, Studio Dark, GitHub Dark, Nord, and Odysseus Paper.
+- Available appearance themes: Odysseus, Studio Light, Studio Dark, GitHub Dark, Nord, Odysseas Paper, Ocean Depths, Forest Night, Solarized Paper, Rose Graphite, Ember Studio, and Slate Studio.
 - JetBrains Mono is the default application font. Google Sans, Inter, Roboto, Open Sans, Montserrat, Poppins, Lato, Nunito Sans, DM Sans, IBM Plex Sans, Space Grotesk, and Fira Code are selectable alternatives.
 - The interface is an original creator workspace informed by familiar creator-studio patterns. It is not a pixel copy of another product.
 

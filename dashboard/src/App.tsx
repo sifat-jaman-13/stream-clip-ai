@@ -10,6 +10,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { apiPost, installWindowLeaseLifecycle } from "./api";
 import { useWorkspace, type AppSettings, type Workspace } from "./workspace";
+import MultiZernioConnections from "./features/publishing/MultiZernioConnections";
 import type { Clip, Creator, LogEntry } from "./types";
 import "./App.css";
 
@@ -981,52 +982,39 @@ function PublishingPage({ workspace, clip, bulkNames, busy, post, openLibrary }:
   busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; openLibrary: () => void;
 }) {
   const pub = workspace.publishing.providers?.zernio || workspace.publishing;
-  const [apiKey, setApiKey] = useState("");
   const [autoPost, setAutoPost] = useState(Boolean(pub.auto_post));
-  const [schedule, setSchedule] = useState(num(pub.schedule_minutes, 0));
+  const [schedule, setSchedule] = useState(String(Math.max(0, num(pub.schedule_minutes, 0))));
   const [visibility, setVisibility] = useState(String(pub.visibility || "public"));
-  const [accountsByPlatform, setAccountsByPlatform] = useState<Record<string, string>>(pub.accounts || {});
   const [title, setTitle] = useState(clip?.title || "");
   const [description, setDescription] = useState(clip?.description || "");
-  const selectedCount = Object.keys(accountsByPlatform).length;
-  const toggleAccount = (account: { id: string; platform: string }) => setAccountsByPlatform((current) => {
-    const next = { ...current };
-    if (next[account.platform] === account.id) delete next[account.platform];
-    else next[account.platform] = account.id;
-    return next;
-  });
-  const loadAccounts = async () => { try { await workspace.fetchAccounts(); } catch { /* The API layer reports failures. */ } };
+  const selectedAccounts = workspace.accounts.filter((account) =>
+    Boolean(account.posting_enabled) && account.is_active !== false
+      && account.provider_enabled !== false,
+  );
+  const selectedCount = selectedAccounts.length;
+  const accountRefs = selectedAccounts.map((account) => ({
+    connection_id: account.connection_id,
+    account_id: account.id,
+  }));
   const saveSettings = async () => {
+    const scheduleMinutes = Math.round(Math.max(0, Number(schedule) || 0));
+    setSchedule(String(scheduleMinutes));
     try {
-      await workspace.savePublishing({ api_key: apiKey, account_ids: accountsByPlatform, auto_post: autoPost, schedule_minutes: schedule, visibility });
-      setApiKey("");
+      await workspace.savePublishing({ auto_post: autoPost, schedule_minutes: scheduleMinutes, visibility });
     } catch { /* The API layer reports failures. */ }
   };
   const publish = async () => {
     if (!selectedCount) return;
-    if (bulkNames.length) await post("publish-batch", "/api/publishing/publish", { names: bulkNames, account_ids: accountsByPlatform });
-    else if (clip) await post("publish-one", "/api/publishing/publish-one", { name: clip.name, title, description, account_ids: accountsByPlatform });
+    if (bulkNames.length) await post("publish-batch", "/api/publishing/publish", { names: bulkNames, account_refs: accountRefs });
+    else if (clip) await post("publish-one", "/api/publishing/publish-one", { name: clip.name, title, description, account_refs: accountRefs });
   };
   return <div className="page-stack">
     <PageHeading title="Publishing" description="Connect social accounts and publish through Zernio." actions={<Button onClick={() => void workspace.refreshPublishing()}><RefreshCw size={15} />Refresh status</Button>} />
     <div className="publishing-layout">
       <div className="publishing-main">
-        <Panel title="Zernio connection" description="Use your Zernio API key to load connected social accounts.">
-          <div className="provider-summary"><span className="provider-logo">Z</span><span><strong>Zernio</strong><small>Social account connection and scheduled publishing.</small></span><StatusPill tone={pub.api_key_set ? "success" : "warning"}>{pub.api_key_set ? "Key saved" : "Not configured"}</StatusPill></div>
-          <Field label="Zernio API key" hint={pub.api_key_set ? "A key is saved locally. Leave this blank to keep using it." : "Stored in local publishing settings and never returned to the interface."}><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={pub.api_key_set ? "Saved key · enter a new key to replace" : "Paste Zernio API key"} /></Field>
-          <div className="form-actions"><Button kind="primary" onClick={() => void saveSettings()} disabled={!!busy}><Check size={15} />Save connection</Button><Button onClick={() => void loadAccounts()} disabled={!!busy || (!pub.api_key_set && !apiKey.trim())}><RefreshCw size={15} />Load accounts</Button></div>
-          <div className="account-list"><div className="account-list-heading"><strong>Connected accounts</strong><span>{count(workspace.accounts.length)} found</span></div>
-            {workspace.accounts.length ? workspace.accounts.map((account) => <label className="account-row" key={account.id}>
-              <input type="checkbox" checked={accountsByPlatform[account.platform] === account.id} onChange={() => toggleAccount(account)} />
-              <span className={"account-platform account-" + account.platform}>{account.platform.slice(0, 1).toUpperCase()}</span>
-              <span className="account-details"><strong>{account.name || account.platform}</strong><small>{account.username ? "@" + account.username : account.platform}</small></span>
-              <span className="account-selection">{accountsByPlatform[account.platform] === account.id ? "Selected" : "Select"}</span>
-            </label>) : <div className="inline-empty">Load connected accounts after saving your API key.</div>}
-          </div>
-          {workspace.accounts.length ? <Button onClick={() => void saveSettings()} disabled={!!busy}><Check size={15} />Save selected accounts</Button> : null}
-        </Panel>
+        <MultiZernioConnections workspace={workspace} />
         <Panel title="Publishing defaults" description="These options apply to Zernio jobs.">
-          <div className="settings-grid"><Field label="YouTube visibility"><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></Field><Field label="Schedule interval (minutes)"><input type="number" min="0" max="1440" value={schedule} onChange={(event) => setSchedule(Number(event.target.value))} /></Field></div>
+          <div className="settings-grid"><Field label="YouTube visibility"><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></Field><Field label="Queue interval (minutes)" hint="Optional delay between scheduled clips. Set 0 to publish immediately; Zernio controls account and workspace limits."><input type="number" min="0" step="1" value={schedule} onChange={(event) => setSchedule(event.target.value)} onBlur={() => setSchedule(String(Math.round(Math.max(0, Number(schedule) || 0))))} /></Field></div>
           <Toggle checked={autoPost} onChange={setAutoPost} label="Automatically submit finished clips" description="When enabled and configured, the local publisher submits completed clips to selected accounts." />
           <div className="form-actions"><Button kind="primary" onClick={() => void saveSettings()} disabled={!!busy}><Check size={15} />Save publishing defaults</Button></div>
         </Panel>

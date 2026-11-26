@@ -79,3 +79,33 @@ tmp-browser-profile/
 streamsnip.db
 streamsnip.db-shm
 streamsnip.db-wal
+
+# Python tooling and test artefacts
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+coverage.xml
+*.tmp
+
+# React / Node tooling
+**/node_modules/
+**/.vite/
+
+# .NET / WinUI build output
+.vs/
+**/bin/
+**/obj/
+**/AppPackages/
+**/TestResults/
+*.user
+*.suo
+*.msix
+*.appx
+
+# Local snapshots and one-off recovery copies
+backups/
+.native-tools/
+
+# Downloaded build-time font asset (the upstream license is tracked)
+desktop/StreamSnip.Desktop/Assets/Fonts/*.ttf

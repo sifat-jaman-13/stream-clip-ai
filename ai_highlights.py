@@ -392,9 +392,10 @@ def _openai_compatible(prompt, config):
     if key:
         headers["Authorization"] = "Bearer " + key
     report = config.get("_ai_log")
+    provider_label = str(config.get("_ai_provider_label", "Custom OpenAI-compatible API"))
     if callable(report):
         start, end = config.get("_ai_window", (0, 0))
-        report(f"Running custom OpenAI-compatible model {model} for transcript window {int(start)}–{int(end)}s.")
+        report(f"Running {provider_label} model {model} for transcript window {int(start)}–{int(end)}s.")
     data = _json_request(url, {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -409,7 +410,75 @@ def _openai_compatible(prompt, config):
     if callable(report):
         start, end = config.get("_ai_window", (0, 0))
         count = len(result.get("moments", [])) if isinstance(result, dict) and isinstance(result.get("moments", []), list) else 0
-        report(f"Custom OpenAI-compatible model {model} analyzed transcript window {int(start)}–{int(end)}s and returned {count} moments.")
+        report(f"{provider_label} model {model} analyzed transcript window {int(start)}–{int(end)}s and returned {count} moments.")
+    return result
+
+
+def _openai(prompt, config):
+    """Use the official OpenAI/ChatGPT API with its own saved credentials."""
+    config = dict(config or {})
+    base = str(config.get("openai_api_base", "https://api.openai.com/v1")).strip().rstrip("/")
+    model = str(config.get("openai_model", "")).strip()
+    key = str(config.get("openai_api_key", "")).strip()
+    parsed = urllib.parse.urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise AIProviderError("Enter a valid OpenAI API base URL.")
+    if not model:
+        raise AIProviderError("Enter the OpenAI model enabled for your API key.")
+    if not key:
+        raise AIProviderError("Add an OpenAI API key before using ChatGPT for highlight analysis.")
+    config["custom_api_base"] = base
+    config["custom_api_model"] = model
+    config["custom_api_key"] = key
+    config["_ai_provider_label"] = "OpenAI / ChatGPT"
+    return _openai_compatible(prompt, config)
+
+
+def _anthropic(prompt, config):
+    """Call Claude through Anthropic's native Messages API."""
+    config = dict(config or {})
+    base = str(config.get("anthropic_api_base", "https://api.anthropic.com")).strip().rstrip("/")
+    model = str(config.get("anthropic_model", "")).strip()
+    key = str(config.get("anthropic_api_key", "")).strip()
+    parsed = urllib.parse.urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise AIProviderError("Enter a valid Anthropic API base URL.")
+    if not model:
+        raise AIProviderError("Enter the Claude model enabled for your API key.")
+    if not key:
+        raise AIProviderError("Add an Anthropic API key before using Claude for highlight analysis.")
+    if base.endswith("/v1/messages"):
+        url = base
+    elif base.endswith("/v1"):
+        url = base + "/messages"
+    else:
+        url = base + "/v1/messages"
+    if callable(config.get("_ai_log")):
+        start, end = config.get("_ai_window", (0, 0))
+        config["_ai_log"](f"Running Claude model {model} for transcript window {int(start)}–{int(end)}s.")
+    data = _json_request(url, {
+        "model": model,
+        "max_tokens": 1200,
+        "temperature": 0.2,
+        "messages": [{"role": "user", "content": prompt}],
+    }, headers={
+        "Content-Type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+    }, timeout=150)
+    blocks = data.get("content", [])
+    raw = "\n".join(
+        str(block.get("text", "")).strip()
+        for block in blocks
+        if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+    ).strip() if isinstance(blocks, list) else ""
+    if not raw:
+        raise AIProviderError("Claude returned no text content for highlight analysis.")
+    result = _extract_json(raw)
+    if callable(config.get("_ai_log")):
+        start, end = config.get("_ai_window", (0, 0))
+        count = len(result.get("moments", [])) if isinstance(result, dict) and isinstance(result.get("moments", []), list) else 0
+        config["_ai_log"](f"Claude model {model} analyzed transcript window {int(start)}–{int(end)}s and returned {count} moments.")
     return result
 
 
@@ -481,6 +550,16 @@ def test_provider(provider, config):
             f"The Gemini key is valid, but generation failed after {attempts} attempts across "
             f"{len(candidates)} model(s); each model was tried {GEMINI_ATTEMPTS_PER_MODEL} times. "
             f"Last error: {last_error}", retryable=True) from last_error
+    if provider == "openai":
+        model = str(config.get("openai_model", "")).strip()
+        result = _openai('Return only JSON: {"moments":[]}.', config)
+        return {"ok": True, "provider": "openai", "model": model,
+                "message": f"OpenAI API connection works with {model}."}
+    if provider == "anthropic":
+        model = str(config.get("anthropic_model", "")).strip()
+        result = _anthropic('Return only JSON: {"moments":[]}.', config)
+        return {"ok": True, "provider": "anthropic", "model": model,
+                "message": f"Claude API connection works with {model}."}
     if provider == "huggingface":
         token = str(config.get("huggingface_token", "")).strip()
         model = str(config.get("huggingface_model", DEFAULT_HUGGINGFACE_MODEL)).strip() or DEFAULT_HUGGINGFACE_MODEL
@@ -573,8 +652,14 @@ def select_moments(provider, words, duration, config, log=lambda _message: None,
     """Analyze the full transcript in user-selected 3–15 minute windows."""
     if provider == "hooks":
         return None
-    backend = {"ollama": _ollama, "gemini": _gemini, "huggingface": _huggingface,
-               "custom": _openai_compatible}.get(provider)
+    backend = {
+        "ollama": _ollama,
+        "gemini": _gemini,
+        "huggingface": _huggingface,
+        "custom": _openai_compatible,
+        "openai": _openai,
+        "anthropic": _anthropic,
+    }.get(provider)
     if backend is None:
         raise AIProviderError("Unknown highlight provider.")
     if provider == "gemini":

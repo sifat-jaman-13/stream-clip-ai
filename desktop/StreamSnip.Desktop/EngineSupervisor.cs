@@ -222,12 +222,13 @@ public sealed class EngineSupervisor : IAsyncDisposable
             Path.Combine(localAppData, "StreamSnip AI", "native-engine.json")
         };
 
-        // Packaged WinUI apps keep their writable settings/config files in LocalState.
-        // The installer writes native-engine.json there after registering the MSIX.
+        // The native installer writes the authoritative engine config to the
+        // shared LocalAppData location above. Keep packaged LocalState as a
+        // fallback for development/package runs, never ahead of the installed config.
         try
         {
             var packageLocalState = Windows.Storage.ApplicationData.Current.LocalFolder.Path;
-            configPaths.Insert(0, Path.Combine(packageLocalState, "native-engine.json"));
+            configPaths.Add(Path.Combine(packageLocalState, "native-engine.json"));
         }
         catch (Exception)
         {

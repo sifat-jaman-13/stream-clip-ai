@@ -40,7 +40,6 @@ Source: "..\assets\*"; DestDir: "{app}\source\assets"; Flags: ignoreversion recu
 Source: "..\models\face_detection_yunet_2023mar.onnx"; DestDir: "{app}\source\models"; Flags: ignoreversion
 Source: "..\dashboard\dist\*"; DestDir: "{app}\source\dashboard\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "setup_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "setup_native_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "python315_support.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "uninstall_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -52,8 +51,41 @@ Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\desktop\{#MyNativeExe}"; W
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup_native_windows.ps1"" -AppDir ""{app}"""; WorkingDir: "{app}"; Description: "Prepare StreamSnip AI engine (one-time setup)"; StatusMsg: "Installing Python dependencies and verifying speech models..."; Flags: waituntilterminated
 Filename: "{app}\desktop\{#MyNativeExe}"; WorkingDir: "{app}\desktop"; Description: "Launch StreamSnip AI"; Flags: postinstall nowait skipifsilent
+
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  PowerShellPath: string;
+  Parameters: string;
+  SetupLog: string;
+  ShowCommand: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+    Parameters := '-NoProfile -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{app}\setup_windows.ps1') +
+      '" -AppDir "' + ExpandConstant('{app}') +
+      '" -SkipLaunch -NoPause -NativeDesktop';
+    SetupLog := ExpandConstant('{localappdata}\StreamSnip AI\setup.log');
+    ShowCommand := SW_SHOW;
+    if WizardSilent then
+    begin
+      Parameters := Parameters + ' -NonInteractive';
+      ShowCommand := SW_HIDE;
+    end;
+
+    if not Exec(PowerShellPath, Parameters, ExpandConstant('{app}'),
+      ShowCommand, ewWaitUntilTerminated, ResultCode) then
+      RaiseException('Could not start StreamSnip AI setup. Check that Windows PowerShell is available.');
+
+    if ResultCode <> 0 then
+      RaiseException('StreamSnip AI setup failed (exit code ' +
+        IntToStr(ResultCode) + '). The app was not launched. Setup log: ' + SetupLog);
+  end;
+end;
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall_windows.ps1"" -AppDir ""{app}"" -NoPause"; WorkingDir: "{app}"; RunOnceId: "StreamSnipAIDependencyCleanup"; Flags: runhidden waituntilterminated

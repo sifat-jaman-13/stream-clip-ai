@@ -39,7 +39,7 @@ if (-not (Test-Path -LiteralPath $nativeExe)) {
 foreach ($required in @(
     (Join-Path $PSScriptRoot "zernio_connections.py"),
     (Join-Path $PSScriptRoot "dashboard\dist\index.html"),
-    (Join-Path $PSScriptRoot "installer\setup_native_windows.ps1")
+    (Join-Path $PSScriptRoot "installer\setup_windows.ps1")
 )) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "A required installer input is missing: $required"

@@ -3,10 +3,29 @@ param(
     [string]$AppDir,
     [switch]$CheckOnly,
     [switch]$SkipLaunch,
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$NativeDesktop,
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = "Stop"
+
+# Prevent two installer/repair attempts from mutating the same runtime, models,
+# settings, or append-only setup transcript at the same time.
+$setupMutex = New-Object System.Threading.Mutex($false, "Local\StreamSnipAI.Setup")
+$setupMutexOwned = $false
+try {
+    $setupMutexOwned = $setupMutex.WaitOne(0)
+} catch [System.Threading.AbandonedMutexException] {
+    # The previous setup process exited unexpectedly; this process now owns the mutex.
+    $setupMutexOwned = $true
+}
+if (-not $setupMutexOwned) {
+    $setupMutex.Dispose()
+    Write-Host "Another StreamSnip AI setup is already running. Let it finish before starting another installation or repair." -ForegroundColor Yellow
+    exit 1
+}
+
 . (Join-Path $PSScriptRoot "python315_support.ps1")
 $RuntimeSchema = "5"
 $transcriptStarted = $false
@@ -373,6 +392,10 @@ function Request-HuggingFaceToken {
     }
 
     if ($setupCompleted) { return }
+    if ($NonInteractive) {
+        Write-Host "Skipping the optional Hugging Face token prompt for this non-interactive setup." -ForegroundColor Yellow
+        return
+    }
 
     Write-Host ""
     Write-Host "Hugging Face authentication (optional, one-time setup)" -ForegroundColor Cyan
@@ -544,6 +567,27 @@ try {
             Write-Host "New Python runtime verified; previous runtime backup removed." -ForegroundColor Green
         }
 
+        if ($NativeDesktop) {
+            # The native host reads this config to find the installed engine and
+            # user library. Write it only after Python, packages and all speech
+            # models have passed setup verification.
+            $dataRoot = Join-Path $logRoot "Library"
+            $nativeConfigPath = Join-Path $logRoot "native-engine.json"
+            $nativeConfigTemp = "$nativeConfigPath.$PID.tmp"
+            New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
+            $nativeConfig = [ordered]@{
+                source_root = $source
+                python_executable = $runtimePython
+                data_root = $dataRoot
+            }
+            $nativeConfigJson = $nativeConfig | ConvertTo-Json -Depth 4
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($nativeConfigTemp, $nativeConfigJson, $utf8NoBom)
+            Move-Item -LiteralPath $nativeConfigTemp -Destination $nativeConfigPath -Force
+            Write-Host "Native desktop engine configuration saved: $nativeConfigPath" -ForegroundColor Green
+            Write-Host "Clip library and application data: $dataRoot" -ForegroundColor Green
+        }
+
         if (-not $SkipLaunch) {
             Write-Host "Launching StreamSnip AI..." -ForegroundColor Cyan
             $quotedMain = '"' + $main.Replace('"', '\"') + '"'
@@ -575,6 +619,10 @@ try {
     if ($transcriptStarted) {
         try { Stop-Transcript | Out-Null } catch {}
     }
+    if ($setupMutexOwned) {
+        try { $setupMutex.ReleaseMutex() } catch {}
+    }
+    if ($setupMutex) { $setupMutex.Dispose() }
 }
 
 exit $exitCode

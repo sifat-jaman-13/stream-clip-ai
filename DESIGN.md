@@ -71,8 +71,23 @@ The user may switch themes without changing layout or behavior:
 - **GitHub Dark** - repository-inspired slate and signal red.
 - **Nord** - blue-gray surfaces, frost text, and soft cyan accent.
 - **Odysseus Paper** - retained navy, chalk, and orange palette.
+- **Ocean Depths** - deep blue and cyan.
+- **Forest Night** - evergreen and mint.
+- **Solarized Paper** - warm parchment and teal.
+- **Rose Graphite** - charcoal and muted rose.
+- **Ember Studio** - umber and amber.
+- **Slate Studio** - cool graphite and steel blue.
 
-Each theme must define the same semantic tokens. Components must use semantic variables rather than hard-coded palette values. Status must remain understandable through text or icon as well as color.
+The full selector contains at least 12 curated palettes. Users may override the accent color with a six-digit hex value from either the topbar appearance menu or Settings > Appearance, and reset it to the active theme default. The custom accent changes primary actions and active selections only; success, warning, error, and informational colors remain semantically distinct.
+
+Each theme must define the same semantic tokens, with matching app background, surface, border, and accent values in React, CSS, and WinUI. Components must use semantic variables rather than hard-coded palette values. Status must remain understandable through text or icon as well as color.
+
+### Contrast and custom color
+
+- Primary text must reach at least 7:1 against the app canvas and standard surface.
+- Body text, muted labels, quiet metadata, and button text must reach at least 4.5:1 against their intended surfaces.
+- Accent button text is selected by comparing WCAG relative luminance for dark and light foregrounds. Do not use a raw brightness cutoff.
+- A custom accent never changes semantic status colors.
 
 ## Typography
 
@@ -125,3 +140,14 @@ Use a single restrained shadow token for menus and elevated surfaces. Panels are
 - Don't duplicate a second source URL field inside caption preview.
 - Don't imply that opening Live Studio starts recording.
 - Don't use color as the only state indicator.
+
+
+## UI craft and review
+
+- Treat StreamSnip as an operational media workstation, not a promotional landing page. Keep the stream, clip preview, session state, and next action visually dominant.
+- Use a neutral foundation and one active accent. Do not use accent color as decoration or replace semantic status colors with the user accent.
+- Give controls readable labels and comfortable hit areas. Keep metadata secondary, but never make essential instructions or control labels tiny.
+- Prefer one clear surface level, whitespace, and dividers over nested decorative panels or heavy shadows.
+- Motion must communicate feedback or state. Keep common actions immediate; animate only transform and opacity where practical, use short ease-out transitions, and respect reduced-motion preferences.
+- Avoid transition: all, layout-shifting animation, scroll reveals, glow effects, and decorative movement.
+- Review the result at desktop, tablet, and phone widths. Run the Impeccable detector on source and the rendered app before accepting a UI change.

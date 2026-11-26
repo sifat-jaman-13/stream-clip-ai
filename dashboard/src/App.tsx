@@ -14,19 +14,25 @@ import type { Clip, Creator, LogEntry } from "./types";
 import "./App.css";
 
 type PageId = "overview" | "live" | "creators" | "clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
-type ThemeId = "odysseus" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseas";
+type ThemeId = "odysseus" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseas" | "ocean" | "forest" | "solarized" | "rose-graphite" | "ember" | "slate";
 type FontId = "google-sans" | "inter" | "roboto" | "open-sans" | "montserrat" | "poppins" | "lato" | "nunito-sans" | "dm-sans" | "ibm-plex-sans" | "space-grotesk" | "fira-code" | "jetbrains-mono";
 type StudioSetupTab = "capture" | "ai" | "speech" | "captions";
 type RecordLike = Record<string, any>;
 type ToastDetail = { tone: "success" | "error" | "info"; title: string; message?: string };
 
 const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
-  { id: "odysseus", name: "Odysseus", description: "Graphite · arctic cyan · coral", colors: ["#282c34", "#111111", "#355a66", "#9cdef2", "#e06c75"] },
-  { id: "studio-light", name: "Studio Light", description: "YouTube Studio · clean neutral surfaces", colors: ["#ffffff", "#f5f5f5", "#0f0f0f", "#cc0000"] },
-  { id: "studio-dark", name: "Studio Dark", description: "YouTube Studio · low-light workspace", colors: ["#0f0f0f", "#212121", "#f1f1f1", "#ff0033"] },
-  { id: "github", name: "GitHub Dark", description: "Midnight · mist · signal red", colors: ["#0d1117", "#161b22", "#30363d", "#f85149"] },
-  { id: "nord", name: "Nord", description: "Arctic blue-gray · soft cyan", colors: ["#2e3440", "#3b4252", "#4c566a", "#88c0d0", "#bf616a"] },
-  { id: "odysseas", name: "Odysseus Paper", description: "Navy · chalk · signal orange", colors: ["#142838", "#edf0ec", "#fffefa", "#ef6a42"] },
+  { id: "odysseus", name: "Odysseus", description: "Graphite · arctic cyan · coral", colors: ["#282c34", "#1b2028", "#355a66", "#e06c75"] },
+  { id: "studio-light", name: "Studio Light", description: "Clean neutral surfaces · signal red", colors: ["#f9f9f9", "#ffffff", "#e5e5e5", "#cc0000"] },
+  { id: "studio-dark", name: "Studio Dark", description: "Low-light workspace · vivid red", colors: ["#0f0f0f", "#181818", "#303030", "#ff0033"] },
+  { id: "github", name: "GitHub Dark", description: "Midnight slate · signal red", colors: ["#0d1117", "#161b22", "#30363d", "#f85149"] },
+  { id: "nord", name: "Nord", description: "Blue-gray · frost · soft cyan", colors: ["#2e3440", "#3b4252", "#4c566a", "#88c0d0"] },
+  { id: "odysseas", name: "Odysseus Paper", description: "Navy · chalk · warm orange", colors: ["#edf0ec", "#fffefa", "#d9dfd9", "#ef6a42"] },
+  { id: "ocean", name: "Ocean Depths", description: "Deep blue · sea glass · cyan", colors: ["#101c27", "#162635", "#2d4656", "#42b9cc"] },
+  { id: "forest", name: "Forest Night", description: "Evergreen · moss · mint", colors: ["#111b17", "#182720", "#2e4737", "#83c99a"] },
+  { id: "solarized", name: "Solarized Paper", description: "Warm parchment · ink · teal", colors: ["#f6f2e8", "#fffdf6", "#d9d2c0", "#277a78"] },
+  { id: "rose-graphite", name: "Rose Graphite", description: "Warm charcoal · muted rose", colors: ["#211c20", "#2c242a", "#49353f", "#dd8ea4"] },
+  { id: "ember", name: "Ember Studio", description: "Dark umber · copper · amber", colors: ["#1d1a16", "#28231d", "#4a3b2a", "#e8a34b"] },
+  { id: "slate", name: "Slate Studio", description: "Cool graphite · steel blue", colors: ["#20262d", "#272f38", "#3c4853", "#8bb9d8"] },
 ];
 
 const fontOptions: Array<{ id: FontId; name: string; family: string; kind: string }> = [
@@ -161,6 +167,13 @@ const initialTheme = (): ThemeId => {
   } catch { /* Local storage may be disabled. */ }
   return "odysseus";
 };
+const initialAccent = (): string => {
+  try {
+    const saved = localStorage.getItem("streamsnip.accent") || "";
+    return /^#[0-9a-f]{6}$/i.test(saved) ? saved : "";
+  } catch { /* Local storage may be disabled. */ }
+  return "";
+};
 const initialFont = (): FontId => {
   try {
     const saved = localStorage.getItem("streamsnip.font") || "";
@@ -178,6 +191,7 @@ export default function App() {
   const workspace = useWorkspace();
   const [page, setPage] = useState<PageId>("overview");
   const [theme, setTheme] = useState<ThemeId>(initialTheme);
+  const [customAccent, setCustomAccent] = useState<string>(initialAccent);
   const [font, setFont] = useState<FontId>(initialFont);
   const [themeOpen, setThemeOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -198,6 +212,27 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem("streamsnip.theme", theme); } catch { /* Local storage may be disabled. */ }
   }, [theme]);
+
+  useEffect(() => {
+    const style = document.documentElement.style;
+    if (!customAccent) {
+      ["--accent", "--accent-hover", "--accent-soft", "--accent-ink"].forEach((token) => style.removeProperty(token));
+      try { localStorage.removeItem("streamsnip.accent"); } catch { /* Local storage may be disabled. */ }
+      return;
+    }
+    const hex = customAccent.slice(1);
+    const channels = [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+    const linear = channels.map((channel) => channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4));
+    const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    const contrastAgainst = (other: number) => (Math.max(luminance, other) + 0.05) / (Math.min(luminance, other) + 0.05);
+    const blackContrast = contrastAgainst(0.005605); // #111111
+    const whiteContrast = contrastAgainst(1);
+    style.setProperty("--accent", customAccent);
+    style.setProperty("--accent-hover", "color-mix(in srgb, " + customAccent + " 86%, var(--ink))");
+    style.setProperty("--accent-soft", "color-mix(in srgb, " + customAccent + " 14%, var(--surface))");
+    style.setProperty("--accent-ink", blackContrast >= whiteContrast ? "#111111" : "#ffffff");
+    try { localStorage.setItem("streamsnip.accent", customAccent); } catch { /* Local storage may be disabled. */ }
+  }, [customAccent]);
 
   useEffect(() => {
     const selected = fontOptions.find((item) => item.id === font) || fontOptions[0];
@@ -325,6 +360,22 @@ export default function App() {
             {themeOpen ? <div className="theme-popover" role="dialog" aria-label="Workspace appearance">
               <div className="theme-popover-title"><strong>Appearance</strong><span>Saved on this device</span></div>
               {themes.map((item) => <ThemeOption key={item.id} item={item} selected={theme === item.id} select={() => { setTheme(item.id); }} />)}
+              <div className="theme-accent-picker">
+                <div className="theme-accent-copy">
+                  <label htmlFor="workspace-accent">Accent color</label>
+                  <small>Customize primary actions and active selections.</small>
+                </div>
+                <input
+                  id="workspace-accent"
+                  type="color"
+                  aria-label="Choose custom accent color"
+                  value={customAccent || selectedTheme.colors[selectedTheme.colors.length - 1]}
+                  onChange={(event) => setCustomAccent(event.target.value)}
+                />
+                <button type="button" className="theme-accent-reset" onClick={() => setCustomAccent("")} disabled={!customAccent}>
+                  Reset to theme
+                </button>
+              </div>
               <div className="theme-font-picker">
                 <label htmlFor="workspace-font">Font family</label>
                 <select id="workspace-font" value={font} onChange={(event) => setFont(event.target.value as FontId)}>
@@ -350,7 +401,7 @@ export default function App() {
         {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
         {page === "words" ? <HypeWordsPage key={workspace.words.text} workspace={workspace} /> : null}
         {page === "activity" ? <ActivityPage workspace={workspace} busy={busy} post={post} /> : null}
-        {page === "settings" ? <SettingsPage workspace={workspace} theme={theme} setTheme={setTheme} busy={busy} post={post} navigate={navigate} /> : null}
+        {page === "settings" ? <SettingsPage workspace={workspace} theme={theme} setTheme={setTheme} customAccent={customAccent} setCustomAccent={setCustomAccent} busy={busy} post={post} navigate={navigate} /> : null}
         {page === "help" ? <HelpPage navigate={navigate} /> : null}
         {page === "about" ? <AboutPage /> : null}
       </main>
@@ -1044,7 +1095,7 @@ function ActivityRow({ log, post, busy }: { log: LogEntry; post: <T,>(key: strin
   return <div className={"activity-row" + (isProblemLog(log) ? " is-problem" : "")}><time>{log.t}</time><i /><div><p>{log.m}</p>{lock ? <div className="file-lock-warning"><AlertCircle size={14} /><span>{lock.message || "A process is holding this file open."}</span><Button size="small" onClick={() => void post("stop-file-holder", "/api/stop_file_holder", { name: lock.file, pid: lock.pid })} disabled={!!busy}>Close locking app</Button></div> : null}</div></div>;
 }
 
-function SettingsPage({ workspace, theme, setTheme, busy, post, navigate }: { workspace: Workspace; theme: ThemeId; setTheme: (theme: ThemeId) => void; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
+function SettingsPage({ workspace, theme, setTheme, customAccent, setCustomAccent, busy, post, navigate }: { workspace: Workspace; theme: ThemeId; setTheme: (theme: ThemeId) => void; customAccent: string; setCustomAccent: (value: string) => void; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
   const [section, setSection] = useState("general");
   const sections: Array<[string, string, LucideIcon]> = [
     ["general", "General", Settings], ["appearance", "Appearance", Palette],
@@ -1053,7 +1104,7 @@ function SettingsPage({ workspace, theme, setTheme, busy, post, navigate }: { wo
     <div className="settings-layout"><nav className="settings-subnav" aria-label="Application settings">{sections.map(([id, label, Icon]) => <button key={id} className={section === id ? "active" : ""} onClick={() => setSection(id)}><Icon size={16} />{label}</button>)}</nav>
       <div className="settings-main-column">
         {section === "general" ? <><GeneralSettings workspace={workspace} busy={busy} post={post} /><Panel title="Session setup lives in Studio" description="Capture behavior, AI provider, transcription, and caption design sit beside the source controls so they can be checked before a session starts."><Button kind="primary" onClick={() => navigate("live")}><Radio size={15} />Open Live Studio setup</Button></Panel></> : null}
-        {section === "appearance" ? <AppearanceSettings theme={theme} setTheme={setTheme} /> : null}
+        {section === "appearance" ? <AppearanceSettings theme={theme} setTheme={setTheme} customAccent={customAccent} setCustomAccent={setCustomAccent} /> : null}
       </div>
     </div>
   </div>;
@@ -1246,11 +1297,33 @@ function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mo
     </Panel>
   </div>;
 }
-function AppearanceSettings({ theme, setTheme }: { theme: ThemeId; setTheme: (theme: ThemeId) => void }) {
-  return <Panel title="Workspace appearance" description="Choose a palette saved on this device. Theme selection does not change capture or publishing behavior.">
+function AppearanceSettings({ theme, setTheme, customAccent, setCustomAccent }: {
+  theme: ThemeId;
+  setTheme: (theme: ThemeId) => void;
+  customAccent: string;
+  setCustomAccent: (value: string) => void;
+}) {
+  const selectedTheme = themes.find((item) => item.id === theme) || themes[0];
+  return <Panel title="Workspace appearance" description="Choose from 12 palettes or set your own accent color. Appearance is saved on this device.">
     <div className="theme-grid">{themes.map((item) => <button key={item.id} className={"theme-card" + (theme === item.id ? " selected" : "")} onClick={() => setTheme(item.id)}>
-      <span className={"theme-preview theme-preview-" + item.id}><i /><i /><i /></span><span className="theme-card-copy"><strong>{item.name}</strong><small>{item.description}</small></span>{theme === item.id ? <CheckCircle2 size={17} /> : null}
+      <span className="theme-preview"><i style={{ background: item.colors[0] }} /><i style={{ background: item.colors[1] }} /><i style={{ background: item.colors[item.colors.length - 1] }} /></span><span className="theme-card-copy"><strong>{item.name}</strong><small>{item.description}</small></span>{theme === item.id ? <CheckCircle2 size={17} /> : null}
     </button>)}</div>
+    <div className="theme-accent-picker">
+      <div className="theme-accent-copy">
+        <label htmlFor="settings-workspace-accent">Custom accent color</label>
+        <small>Primary actions and selected controls use this color. Status colors remain unchanged.</small>
+      </div>
+      <input
+        id="settings-workspace-accent"
+        type="color"
+        aria-label="Choose custom accent color"
+        value={customAccent || selectedTheme.colors[selectedTheme.colors.length - 1]}
+        onChange={(event) => setCustomAccent(event.target.value)}
+      />
+      <button type="button" className="theme-accent-reset" onClick={() => setCustomAccent("")} disabled={!customAccent}>
+        Reset to theme
+      </button>
+    </div>
   </Panel>;
 }
 function HelpPage({ navigate }: { navigate: (page: PageId) => void }) {

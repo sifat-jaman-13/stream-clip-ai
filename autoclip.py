@@ -305,7 +305,7 @@ def update_components():
     FFmpeg is reported by the checker; bundled FFmpeg is replaced only by a new build.
     """
     if getattr(sys, "frozen", False):
-        raise RuntimeError("This app bundles its runtime components. Download and install the latest StreamSnipAI-Setup.exe to update them.")
+        raise RuntimeError("This packaged app bundles its runtime components. Use the native Windows installer from GitHub Releases to update the installed desktop application.")
     requirements = pathlib.Path(__file__).resolve().parent / "requirements.txt"
     commands = [sys.executable, "-m", "pip", "install", "--upgrade", "-r", str(requirements),
                 "streamlink", "numpy"]

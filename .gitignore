@@ -103,9 +103,16 @@ coverage.xml
 *.msix
 *.appx
 
-# Local snapshots and one-off recovery copies
+# Local snapshots, test data, and one-off recovery copies
 backups/
 .native-tools/
+.native-backend-smoke/
+
+# Generated, machine-specific QA reports
+browser_qa_followup.json
+end_to_end_qa.json
+QA_REPORT.md
+UI-HANDOFF.md
 
 # Downloaded build-time font asset (the upstream license is tracked)
 desktop/StreamSnip.Desktop/Assets/Fonts/*.ttf

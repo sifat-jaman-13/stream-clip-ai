@@ -23,7 +23,12 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const { owner, repo } = context.repo;
-            const installerName = "StreamSnipAI-Setup.exe";
+            const installerNames = new Set([
+              "StreamSnipAI-Setup.exe",
+              "StreamSnipAI-Setup.exe.sha256",
+              "StreamSnipAI-Native-Setup.exe",
+              "StreamSnipAI-Native-Setup.exe.sha256",
+            ]);
             let keepReleaseId = context.payload.release?.id;
 
             if (!keepReleaseId) {
@@ -40,7 +45,7 @@ jobs:
               if (release.id === keepReleaseId) continue;
 
               for (const asset of release.assets) {
-                if (asset.name.toLowerCase() !== installerName.toLowerCase()) continue;
+                if (!installerNames.has(asset.name)) continue;
 
                 core.info(`Deleting ${asset.name} from ${release.tag_name}`);
                 await github.rest.repos.deleteReleaseAsset({

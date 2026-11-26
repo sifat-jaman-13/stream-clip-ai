@@ -2,45 +2,56 @@
 
 ## Platform
 
-Desktop-hosted local web application. The primary supported workflow is Windows.
+Native Windows desktop application built with WinUI 3 and backed by a local Python media engine. The primary supported installation is Windows 10/11 x64. A React and TypeScript dashboard is maintained as a separate browser-oriented interface and development path.
 
 ## Users
 
-Primary user: an individual creator or clip editor using a desktop PC to monitor stream sources, capture live content, process recorded VODs, review generated clips, and prepare short-form posts.
+Primary user: an individual creator or clip editor using a desktop PC to monitor stream sources, capture live content, process recorded VODs, review generated clips, and prepare short-form social posts.
 
 ## Product purpose
 
-StreamSnip AI is a local-first creator clipping workspace. It brings source selection, live capture, creator monitoring, transcription, AI-assisted highlight analysis, clip rendering, review, and publishing handoff into one application. Success means moving from a live moment or recorded VOD to a reviewed clip while retaining control over capture and the final publishing action.
+StreamSnip AI is a local-first creator clipping workspace. It connects source selection, live capture, creator monitoring, transcription, AI-assisted highlight analysis, facecam-aware framing, captioned rendering, clip review, metadata, and social publishing. Success means moving from a live moment or recorded VOD to a reviewed short while preserving user control over capture, media, settings, and the final publishing action.
 
 ## Positioning
 
-A desktop media workflow that connects stream capture and creator monitoring to transcription, highlight selection, captioned clip rendering, and publishing preparation. The application runs locally and uses hosted services only when the user selects and configures them.
+A desktop media workstation that connects stream capture and creator monitoring to transcription, highlight selection, clip rendering, review, and publishing preparation. Local media processing remains on the user's computer. Hosted AI and social services are used only when configured and invoked by the user.
 
-## Operating context
+## Operating architecture
 
-The React and TypeScript Creator Studio runs in the local browser. The Python application owns capture and media processing and exposes application services through a loopback-only FastAPI transport. The user can run a built dashboard or use Vite during development.
+- **Native shell:** WinUI 3 owns the installed Windows desktop interface, navigation, native controls, and application lifecycle.
+- **Local engine:** Python owns capture, creator monitoring, transcription orchestration, AI analysis, FFmpeg rendering, file operations, and publishing integration.
+- **Local transport:** FastAPI exposes engine services over loopback only. The native shell starts and supervises the Python process and uses the per-process session token for state-changing requests.
+- **Browser interface:** The React/Vite dashboard remains a separate browser-oriented frontend and developer workflow; it is not the installed WinUI 3 shell.
+- **Storage:** Installed application settings, engine configuration, and the clip library live under the user's local application data. User data must not be included in source-control or installer build artefacts unless explicitly intended.
 
-Publishing is handled exclusively through the configured Zernio integration and its connected Facebook, Instagram, and YouTube accounts. StreamSnip does not provide a separate manual platform-upload or browser-handoff workflow. StreamSnip does not impose its own API-key connection count, per-platform account quota, or posting quota; Zernio and the connected social platforms determine availability and limits. API keys belonging to the same Zernio billing workspace share that workspace's request allowance.
+## Publishing and external services
+
+Publishing is handled exclusively through the configured Zernio integration and its connected **Facebook, Instagram, and YouTube** accounts. TikTok is not supported by this integration.
+
+StreamSnip discovers all supported accounts returned by Zernio and provides an individual posting-enabled control for each account. It does not impose its own API-key connection count, per-platform account slots, or posting quota. Zernio and the connected social platforms determine account availability and posting limits. Different keys can belong to the same Zernio billing workspace and therefore share its request allowance; a distinct key does not prove an independent budget.
+
+Workspace request throttling, account-specific posting caps, and upstream platform errors are handled separately. Publishing results are checked per destination; only confirmed successful destinations are added to the Published registry. A stable idempotency key is reused for retries of the same logical post.
 
 ## Capabilities and constraints
 
-- The application includes Dashboard, Live Studio, Creators, Clip library, Published, Hype words, Publishing, Settings, Activity, Help, and About.
-- Live Studio groups Capture, AI provider, Transcription, and Captions into pre-capture setup tabs.
+- The native application includes Dashboard, Live Studio, Creators, Clip library, Published, Hype words, Publishing, Settings, Activity, Help, and About.
+- Live Studio groups Source, Capture, AI provider, Transcription, and Captions into pre-capture setup.
 - Capture never begins automatically when a page opens; it requires an explicit user action.
 - Creator profiles support independent live monitoring and recorded-VOD folder watching.
-- Hosted AI providers receive transcript text when selected. Local Hook Words scoring and a local Ollama instance are alternatives.
+- Faster-Whisper and YuNet run locally when their dependencies and model assets are installed.
+- Hosted AI providers receive transcript text when selected; local Hook Words and a local Ollama instance are alternatives.
 - Provider availability, connected social accounts, and publishing outcomes depend on external configuration and responses.
-- The local API should remain bound to loopback and must not be exposed to a LAN or the public internet.
-- Preserve application API contracts, user data, credentials, and operational behavior when changing the frontend.
+- The local API must remain bound to loopback and must not be exposed to an untrusted LAN or the public internet.
+- Preserve API contracts, user data, credentials, and operational behavior when changing the frontend or native host.
 - Do not invent engine state, processing progress, clip content, provider success, or posting status.
 
 ## Brand and appearance
 
 - Product name: StreamSnip AI.
-- The default visual system is the Odysseus graphite theme with cyan information accents and coral actions.
-- Available appearance themes: Odysseus, Studio Light, Studio Dark, GitHub Dark, Nord, Odysseas Paper, Ocean Depths, Forest Night, Solarized Paper, Rose Graphite, Ember Studio, and Slate Studio.
-- JetBrains Mono is the default application font. Google Sans, Inter, Roboto, Open Sans, Montserrat, Poppins, Lato, Nunito Sans, DM Sans, IBM Plex Sans, Space Grotesk, and Fira Code are selectable alternatives.
-- The interface is an original creator workspace informed by familiar creator-studio patterns. It is not a pixel copy of another product.
+- Default visual system: Odysseus graphite with cyan information accents and coral actions.
+- The React interface has multiple curated themes and font choices; JetBrains Mono is the default.
+- The native interface mirrors the core semantic palette and typography.
+- The interface is an original creator workspace informed by familiar creator-studio patterns, not a pixel copy of another product.
 
 ## Product principles
 

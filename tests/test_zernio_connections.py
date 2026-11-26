@@ -22,7 +22,8 @@ def test_zernio_connections_module_is_in_all_windows_and_python_packages():
     root = Path(__file__).resolve().parents[1]
     assert '"zernio_connections"' in (root / "pyproject.toml").read_text(encoding="utf-8")
     assert "zernio_connections" in (root / "AutoClip.spec").read_text(encoding="utf-8")
-    assert "zernio_connections.py" in (root / "installer" / "AutoClip.iss").read_text(encoding="utf-8")
+    native_installer = (root / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
+    assert "zernio_connections.py" in native_installer
     assert "zernio_connections.py" in (root / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
 
 

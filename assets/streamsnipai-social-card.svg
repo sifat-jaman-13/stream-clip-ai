@@ -1,12 +1,39 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
-<title id="title">StreamSnip AI — Local-first stream clip studio</title><desc id="desc">Open Graph promotional banner for StreamSnip AI.</desc>
-<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#090b0e"/><stop offset=".65" stop-color="#172021"/><stop offset="1" stop-color="#21183b"/></linearGradient><linearGradient id="lime" x2="1"><stop stop-color="#d4ff62"/><stop offset="1" stop-color="#a6efe0"/></linearGradient></defs>
-<rect width="1200" height="630" fill="url(#bg)"/><circle cx="1080" cy="70" r="260" fill="#b9a4ff" opacity=".1"/>
-<rect x="78" y="85" width="86" height="86" rx="24" fill="url(#lime)"/><path d="M113 105v47l41-24z" fill="#19220b"/>
-<text x="190" y="143" fill="#d4ff62" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="700" letter-spacing="5">LOCAL-FIRST CLIP STUDIO</text>
-<text x="78" y="270" fill="#f5f7f2" font-family="Segoe UI,Arial,sans-serif" font-size="82" font-weight="800">StreamSnip <tspan fill="#d4ff62">AI</tspan></text>
-<text x="82" y="342" fill="#e3e9e0" font-family="Segoe UI,Arial,sans-serif" font-size="34">Find the moment. Make it a clip.</text>
-<text x="82" y="408" fill="#9eaca4" font-family="Segoe UI,Arial,sans-serif" font-size="23">Capture · Transcribe · AI highlights · Automatic post copy</text>
-<g transform="translate(82 470)"><rect width="230" height="56" rx="28" fill="#d4ff62" fill-opacity=".13" stroke="#d4ff62" stroke-opacity=".5"/><text x="115" y="36" fill="#edffd0" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700">LOCAL WHISPER</text><rect x="248" width="230" height="56" rx="28" fill="#b9a4ff" fill-opacity=".13" stroke="#b9a4ff" stroke-opacity=".5"/><text x="363" y="36" fill="#e7dfff" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700">AI HIGHLIGHTS</text><rect x="496" width="230" height="56" rx="28" fill="#7ee7db" fill-opacity=".1" stroke="#7ee7db" stroke-opacity=".5"/><text x="611" y="36" fill="#d5fff4" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700">AUTO CAPTIONS</text></g>
-<g transform="translate(865 100)"><rect width="260" height="390" rx="24" fill="#11191c" stroke="#d9eee0" stroke-opacity=".2"/><rect x="20" y="22" width="220" height="190" rx="15" fill="#233635"/><path d="M20 160l64-70 58 42 39-58 59 61v77H20z" fill="#70815b"/><circle cx="175" cy="68" r="16" fill="#d4ff62"/><rect x="20" y="235" width="220" height="10" rx="5" fill="#31403c"/><rect x="20" y="235" width="164" height="10" rx="5" fill="#d4ff62"/><g fill="#d4ff62"><rect x="20" y="270" width="5" height="34" rx="2"/><rect x="32" y="280" width="5" height="14" rx="2"/><rect x="44" y="263" width="5" height="48" rx="2"/><rect x="56" y="274" width="5" height="26" rx="2"/><rect x="68" y="268" width="5" height="38" rx="2"/><rect x="80" y="281" width="5" height="12" rx="2"/><rect x="92" y="259" width="5" height="54" rx="2"/><rect x="104" y="273" width="5" height="27" rx="2"/><rect x="116" y="265" width="5" height="43" rx="2"/><rect x="128" y="280" width="5" height="13" rx="2"/><rect x="140" y="267" width="5" height="39" rx="2"/><rect x="152" y="258" width="5" height="56" rx="2"/><rect x="164" y="272" width="5" height="28" rx="2"/><rect x="176" y="264" width="5" height="44" rx="2"/><rect x="188" y="279" width="5" height="14" rx="2"/><rect x="200" y="269" width="5" height="38" rx="2"/><rect x="212" y="260" width="5" height="52" rx="2"/></g><text x="130" y="346" fill="#f2f7ee" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">CLIP WORKSPACE</text></g>
+<title id="title">StreamSnip AI — A clip studio for live creators</title>
+<desc id="desc">Graphite StreamSnip AI social card with coral brand mark, a cyan waveform, and the seven-stage clip workflow.</desc>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#151b22"/><stop offset="1" stop-color="#242e38"/></linearGradient><linearGradient id="line" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#e06c75"/><stop offset=".5" stop-color="#9cdef2"/><stop offset="1" stop-color="#e06c75"/></linearGradient></defs>
+<rect width="1200" height="630" fill="url(#bg)"/>
+<circle cx="1050" cy="85" r="250" fill="#9cdef2" opacity=".05"/>
+<rect x="88" y="84" width="74" height="74" rx="19" fill="#e06c75"/>
+<path d="M105 121h10l8-18 13 36 10-25 8 15h-3" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="184" y="130" fill="#9cdef2" font-family="'IBM Plex Mono',Consolas,monospace" font-size="17" font-weight="600" letter-spacing="3">WINDOWS CREATOR STUDIO</text>
+<text x="88" y="276" fill="#f1f5f7" font-family="'IBM Plex Sans',Segoe UI,sans-serif" font-size="82" font-weight="650" letter-spacing="-3">StreamSnip AI</text>
+<text x="92" y="344" fill="#d0dce1" font-family="'IBM Plex Sans',Segoe UI,sans-serif" font-size="32">From live stream to a clip worth sharing.</text>
+<text x="92" y="400" fill="#aebdc6" font-family="'IBM Plex Sans',Segoe UI,sans-serif" font-size="21">Capture · Transcribe · Find moments · Review · Publish</text>
+<g transform="translate(92 472)">
+  <rect width="230" height="50" rx="8" fill="#e06c75" fill-opacity=".13" stroke="#e06c75" stroke-opacity=".65"/>
+  <text x="115" y="31" fill="#ffdfe1" text-anchor="middle" font-family="'IBM Plex Mono',Consolas,monospace" font-size="13" font-weight="600">LOCAL MEDIA PIPELINE</text>
+  <rect x="248" width="230" height="50" rx="8" fill="#9cdef2" fill-opacity=".1" stroke="#9cdef2" stroke-opacity=".6"/>
+  <text x="363" y="31" fill="#d8f3fb" text-anchor="middle" font-family="'IBM Plex Mono',Consolas,monospace" font-size="13" font-weight="600">AI-ASSISTED MOMENTS</text>
+  <rect x="496" width="230" height="50" rx="8" fill="#fff" fill-opacity=".04" stroke="#84949e" stroke-opacity=".6"/>
+  <text x="611" y="31" fill="#d8e2e7" text-anchor="middle" font-family="'IBM Plex Mono',Consolas,monospace" font-size="13" font-weight="600">HUMAN APPROVAL</text>
+</g>
+<g transform="translate(882 180)">
+  <rect width="230" height="250" rx="18" fill="#1b2430" stroke="#52616d"/>
+  <text x="22" y="34" fill="#a9bac4" font-family="'IBM Plex Mono',Consolas,monospace" font-size="10">AUDIO TIMELINE</text>
+  <path d="M20 135H210" stroke="#43515c"/>
+  <g fill="url(#line)">
+    <rect x="23" y="110" width="5" height="50" rx="2"/><rect x="34" y="85" width="5" height="100" rx="2"/>
+    <rect x="45" y="102" width="5" height="66" rx="2"/><rect x="56" y="70" width="5" height="130" rx="2"/>
+    <rect x="67" y="99" width="5" height="72" rx="2"/><rect x="78" y="115" width="5" height="40" rx="2"/>
+    <rect x="89" y="80" width="5" height="110" rx="2"/><rect x="100" y="103" width="5" height="64" rx="2"/>
+    <rect x="111" y="65" width="5" height="140" rx="2"/><rect x="122" y="94" width="5" height="82" rx="2"/>
+    <rect x="133" y="114" width="5" height="42" rx="2"/><rect x="144" y="76" width="5" height="118" rx="2"/>
+    <rect x="155" y="100" width="5" height="70" rx="2"/><rect x="166" y="87" width="5" height="96" rx="2"/>
+    <rect x="177" y="113" width="5" height="44" rx="2"/><rect x="188" y="79" width="5" height="112" rx="2"/>
+  </g>
+  <path d="M136 52V210" stroke="#e06c75" stroke-width="2"/>
+  <circle cx="136" cy="135" r="7" fill="#e06c75" stroke="#ffd9dc" stroke-width="2"/>
+  <text x="22" y="226" fill="#9cdef2" font-family="'IBM Plex Mono',Consolas,monospace" font-size="10">REVIEW BEFORE POST</text>
+</g>
 </svg>

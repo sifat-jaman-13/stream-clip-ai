@@ -1,580 +1,267 @@
 <!doctype html>
-<html lang="en" data-type="software">
+<html lang="en" data-type="software" data-theme="odysseus" data-theme-choice="system">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
   <meta name="page-type" content="software">
   <meta name="site-kind" content="software">
-  <meta name="theme-color" content="#f7f9fa" id="theme-color-meta">
-  <meta name="description" content="StreamSnip AI is native Windows stream clipping software for creators. Capture Twitch and YouTube streams, process VODs, review highlights and publish through Zernio.">
+  <meta name="theme-color" content="#282c34" id="theme-color-meta">
+  <meta name="description" content="StreamSnip AI is a native Windows creator studio for Twitch and YouTube capture, local transcription, AI-assisted highlights, clip review and controlled publishing.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="StreamSnip AI — Stream clipping for creators">
-  <meta property="og:description" content="Capture live streams and VODs, review AI-ranked highlights, and publish selected clips from a native Windows desktop app.">
+  <meta property="og:title" content="StreamSnip AI — Turn live streams into finished clips">
+  <meta property="og:description" content="Capture live streams and VODs, find strong moments, render captioned shorts and review every clip before publishing.">
   <meta property="og:url" content="https://sifat-jaman-13.github.io/stream-clip-ai/">
-  <meta property="og:image" content="https://sifat-jaman-13.github.io/stream-clip-ai/assets/streamsnipai-banner.svg">
+  <meta property="og:image" content="https://sifat-jaman-13.github.io/stream-clip-ai/assets/streamsnipai-social-card.svg">
   <meta name="twitter:card" content="summary_large_image">
-  <title>StreamSnip AI — Stream clipping software for creators</title>
-  <script>document.documentElement.classList.add("m-enter");setTimeout(()=>document.documentElement.classList.add("m-enter-done"),700);</script>
+  <link rel="icon" href="assets/streamsnipai-mark.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.simpleicons.org">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="modulepreload" href="assets/moments/lib.js">
-  <link rel="modulepreload" href="assets/moments/cursor-spotlight/moment.js">
-  <link rel="modulepreload" href="assets/moments/word-highlight/moment.js">
-  <style>
-    :root {
-      color-scheme: light;
-      --bg: #f7f9fa;
-      --surface: #ecf0f2;
-      --surface-2: #e3eaed;
-      --ink: #1f3038;
-      --muted: #354a53;
-      --border: #cbd6da;
-      --accent: #0d7480;
-      --action: #0d7480;
-      --action-hover: #075b65;
-      --action-ink: #ffffff;
-      --deep: #1f3038;
-      --deep-surface: #2c3c44;
-      --deep-ink: #f7f9fa;
-      --deep-muted: #c8d4d8;
-      --white: #ffffff;
-      --font-display: "IBM Plex Sans", system-ui, sans-serif;
-      --font-text: "IBM Plex Sans", system-ui, sans-serif;
-      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-      --display-weight: 500;
-      --display-tracking: -.035em;
-      --t-h2: clamp(38px, 4.1vw, 60px);
-      --wrap: 1280px;
-      --gap: 24px;
-      --nav-h: 76px;
-      --surface-color: var(--surface);
-      --toggle-bg: #ffffff;
-      --toggle-ink: #1f3038;
-    }
-    :root[data-theme="dark"] {
-      color-scheme: dark;
-      --bg: #0b1115; --surface: #121c22; --surface-2: #1a272e;
-      --ink: #e7f0f2; --muted: #b0c0c6; --border: #30414a;
-      --accent: #70d5d1; --action: #168b8d; --action-hover: #21a5a3;
-      --action-ink: #061315; --deep: #070c10; --deep-surface: #101b20;
-      --deep-ink: #edf6f6; --deep-muted: #b2c5ca; --white: #17242b;
-      --toggle-bg: #1b2a31; --toggle-ink: #e7f0f2;
-    }
-    :root[data-theme="dark"] .folder-child { background: rgba(255,255,255,.035); }
-    :root[data-theme="dark"] .hero::before { background: radial-gradient(ellipse at 50% 0%, rgba(65,190,185,.14), transparent 62%); }
-    :root[data-theme="dark"] .closing-bottom { border-top-color: var(--border); }
-    :root[data-theme="dark"] .hero-window { border-color: var(--border); }
-    * { box-sizing: border-box; }
-    html { background: var(--bg); color: var(--ink); scroll-behavior: smooth; }
-    body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.55 var(--font-text); text-rendering: optimizeLegibility; }
-    a { color: inherit; text-decoration: none; }
-    img, svg { display: block; max-width: 100%; }
-    button { font: inherit; }
-    :focus-visible { outline: 3px solid var(--action); outline-offset: 3px; box-shadow: 0 0 0 2px var(--white); }
-    .skip-link { position: fixed; top: 8px; left: 8px; z-index: 1000; padding: 10px 14px; border-radius: 6px; background: var(--ink); color: #fff; transform: translateY(-160%); }
-    .skip-link:focus { transform: translateY(0); }
-    .wrap { width: min(var(--wrap), calc(100% - 160px)); margin-inline: auto; }
-    .mono { font-family: var(--font-mono); }
-    .nav { position: fixed; z-index: 100; inset: 0 0 auto; height: var(--nav-h); background: var(--bg); border-bottom: 1px solid var(--border); }
-    .nav__inner { height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-right: 40px; }
-    .brand { display: inline-flex; align-items: center; gap: 11px; flex: 0 0 auto; font-size: 17px; font-weight: 600; letter-spacing: -.035em; }
-    .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 9px; background: var(--white); color: var(--accent); }
-    .brand-mark svg { width: 21px; height: 21px; }
-    .nav__links { display: flex; align-items: center; justify-content: center; gap: 18px; margin-left: auto; color: var(--muted); font-size: 13px; }
-    .nav__links a { min-height: 44px; display: inline-flex; align-items: center; border-bottom: 2px solid transparent; }
-    .nav__links a:hover { color: var(--ink); border-bottom-color: var(--accent); }
-    .btn { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 0 19px; border: 1px solid transparent; border-radius: 8px; font-size: 14px; font-weight: 600; white-space: nowrap; transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .16s ease; }
-    .btn:hover { transform: translateY(-1px); }
-    .btn--primary { color: var(--action-ink); background: var(--action); }
-    .btn--primary:hover { background: var(--action-hover); }
-    .btn--secondary { color: var(--ink); background: var(--white); border-color: var(--border); }
-    .btn--secondary:hover { background: var(--white); border-color: #9cabb1; }
-    .theme-toggle { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--toggle-bg); color: var(--toggle-ink); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-    .theme-toggle:hover { border-color: var(--accent); }
-    .nav__toggle { display: none; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--white); color: var(--ink); }
-    .mobile-menu { display: none; position: absolute; top: var(--nav-h); left: 0; right: 0; padding: 12px 24px 20px; background: var(--bg); border-bottom: 1px solid var(--border); }
-    .mobile-menu .theme-toggle { width: 100%; margin-top: 12px; }
-    .mobile-menu a { display: block; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 15px; }
-    .mobile-menu.is-open { display: block; }
-    main > section { position: relative; min-height: 100svh; padding: 132px 0 72px; }
-    @media (min-width: 681px) {
-      main > section { height: calc(var(--h, 1) * 100vh); min-height: 0; overflow: hidden; }
-      footer.closing { height: calc(var(--h, 1) * 100vh); min-height: 0; overflow: hidden; }
-      #publishing { padding-top: 84px; }
-    }
-    .hero { height: 100vh; min-height: 0; padding: 112px 0 34px; overflow: hidden; background: var(--bg); text-align: center; }
-    .hero::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 0%, rgba(13,116,128,.11), transparent 62%); }
-    .hero .wrap { height: 100%; display: flex; flex-direction: column; align-items: center; position: relative; }
-    .hero-text { width: 100%; display: flex; flex-direction: column; align-items: center; }
-    .hero h1 { max-width: 900px; margin: 0; color: var(--ink); font-size: clamp(48px, 6vw, 76px); line-height: 1.02; font-weight: 600; letter-spacing: -.055em; }
-    .hero__lede { max-width: 760px; margin: 18px auto 0; color: var(--muted); font-size: clamp(16px, 1.45vw, 19px); line-height: 1.5; }
-    .hero__fact { margin: 12px 0 0; color: var(--action-hover); font: 500 12px/1.4 var(--font-mono); letter-spacing: .02em; }
-    .hero__actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 21px; }
-    .hero-window { width: min(1120px, 100%); height: 340px; margin: 30px auto 0; position: relative; overflow: hidden; border: 1px solid #bdc9ce; border-radius: 12px; background: var(--deep); }
-    .hero-window > img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; object-position: top center; }
-    .hero-window.mo-cs { --surface: #d9e1e4; }
-    .wrap { width: min(var(--wrap), calc(100% - 160px)); margin: 0 auto; }
-    .section-title { max-width: 940px; margin: 0 0 22px; color: inherit; font-size: var(--t-h2); line-height: 1.06; font-weight: 600; letter-spacing: -.045em; }
-    .section-intro { max-width: 790px; margin: 0 0 32px; color: var(--muted); font-size: 16px; }
-    .stage--surface { background: var(--surface); }
-    .stage--deep { background: var(--deep); color: var(--deep-ink); }
-    .stage--deep .section-intro { color: var(--deep-muted); }
-    .feature-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); align-items: start; }
-    .feature-copy { grid-column: 1 / span 5; }
-    .feature-grid:has(> .feature-copy:only-child) .feature-copy { grid-column: 1 / -1; max-width: 760px; }
-    .feature-visual { grid-column: 7 / span 6; min-width: 0; }
-    .feature-copy p { max-width: 500px; margin: 0 0 18px; color: var(--muted); }
-    .stage--deep .feature-copy p { color: var(--deep-muted); }
-    .feature-list { display: grid; gap: 12px; margin: 22px 0 0; padding: 0; list-style: none; }
-    .feature-list li { position: relative; padding-left: 0; color: var(--ink); font-size: 14px; line-height: 1.5; }
-    .feature-list li::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 10px 2px 0; border-radius: 50%; background: var(--accent); }
-    .stage--deep .feature-list li { color: var(--deep-ink); }
-    .visual-frame { margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--white); }
-    .visual-frame img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: contain; background: #17232a; }
-    .visual-caption { display: flex; justify-content: space-between; gap: 14px; margin-top: 10px; color: var(--muted); font: 11px var(--font-mono); }
-    .visual-caption span:last-child { color: var(--action-hover); text-align: right; }
-    .workflow-board { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px; margin-top: 38px; }
-    .workflow-node { min-height: 250px; padding: 23px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--white); position: relative; }
-    .workflow-node:not(:last-child)::after { content: ""; position: absolute; top: 49px; right: -20px; width: 20px; height: 1px; background: var(--accent); }
-    .workflow-number { display: block; margin-bottom: 27px; color: var(--accent); font: 500 11px var(--font-mono); }
-    .workflow-node svg { width: 25px; height: 25px; margin-bottom: 12px; color: var(--accent); }
-    .workflow-node strong { display: block; font-size: 15px; font-weight: 600; }
-    .workflow-node p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
-    .workflow-foot { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 26px; padding-top: 0; color: var(--muted); font-size: 13px; }
-    .workflow-foot strong { color: var(--ink); font-weight: 600; }
-    .folder-board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 54px; align-items: start; padding: 30px 0; }
-    .folder-root { display: grid; gap: 17px; }
-    .folder-root__head { display: flex; align-items: center; gap: 14px; padding-bottom: 14px; }
-    .folder-root__head svg { width: 29px; height: 29px; flex: 0 0 auto; color: var(--accent); }
-    .folder-root__head strong { display: block; font-size: 17px; font-weight: 600; }
-    .folder-root__path { color: var(--muted); font: 11px var(--font-mono); }
-    .folder-children { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-left: 43px; }
-    .folder-child { min-height: 54px; display: flex; align-items: center; gap: 9px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.72); color: var(--ink); font-size: 13px; }
-    .folder-child svg { width: 18px; height: 18px; color: var(--accent); flex: 0 0 auto; }
-    .folder-note { max-width: 780px; margin: 16px 0 0; color: var(--muted); font-size: 14px; }
-    .publish-board { display: grid; grid-template-columns: .85fr 46px .85fr 46px 1.5fr; gap: 12px; align-items: center; margin: 14px 0 12px; }
-    .publish-node { min-height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--white); text-align: center; }
-    .publish-node__mark { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; background: var(--surface); color: var(--accent); font-size: 16px; font-weight: 700; }
-    .publish-node strong { font-size: 14px; font-weight: 600; }
-    .publish-arrow { display: flex; justify-content: center; color: var(--accent); }
-    .publish-arrow svg { width: 30px; height: 24px; }
-    .platforms { min-height: 148px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 25px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--white); }
-    .platform { display: flex; align-items: center; gap: 9px; color: var(--ink); font-size: 14px; font-weight: 600; }
-    .platform img { width: 25px; height: 25px; }
-    .publish-note { display: flex; justify-content: space-between; align-items: flex-start; gap: 26px; margin-top: 10px; color: var(--muted); font-size: 14px; }
-    .publish-note p { max-width: 690px; margin: 0; }
-    .publish-note span { color: var(--action-hover); font: 500 11px var(--font-mono); white-space: nowrap; }
-    .pipeline { display: grid; border: 1px solid var(--border); border-radius: 12px; background: var(--white); overflow: hidden; }
-    .pipeline__row { min-height: 91px; display: grid; grid-template-columns: 46px 1fr; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
-    .pipeline__row:last-child { border-bottom: 0; }
-    .pipeline__icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; color: var(--accent); background: var(--surface); }
-    .pipeline__icon svg { width: 20px; height: 20px; }
-    .pipeline__row strong { display: block; font-size: 14px; font-weight: 600; }
-    .pipeline__row small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
-    .statement { min-height: 100svh; display: flex; flex-direction: column; justify-content: center; }
-    .statement .wrap { display: flex; flex-direction: column; justify-content: center; }
-    .statement h2 { max-width: 1050px; margin: 0 0 28px; color: var(--deep-ink); font-size: clamp(52px, 7vw, 96px); line-height: 1.01; letter-spacing: -.055em; font-weight: 600; }
-    .statement__detail { display: grid; grid-template-columns: 4fr 7fr; gap: 30px; align-items: end; }
-    .statement__detail p { max-width: 460px; margin: 0; color: var(--deep-muted); font-size: 17px; }
-    .timeline { height: 124px; position: relative; border-bottom: 1px solid #6f8188; }
-    .timeline::before, .timeline::after { content: ""; position: absolute; left: 0; right: 0; height: 1px; background: #52666e; }
-    .timeline::before { top: 34px; }
-    .timeline::after { top: 78px; }
-    .timeline__selection { position: absolute; left: 28%; top: 16px; width: 37%; height: 78px; border: 1px solid #75c5c2; border-radius: 7px; background: rgba(13,116,128,.25); }
-    .timeline__selection span { position: absolute; top: 8px; left: 12px; color: #e1f5f3; font: 11px var(--font-mono); }
-    .timeline__head { position: absolute; top: 5px; bottom: 0; left: 48%; width: 1px; background: #f2f8f8; }
-    .closing { min-height: 100svh; padding: 104px 0 28px; background: var(--surface); display: flex; flex-direction: column; }
-    .closing .wrap { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
-    .closing-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center; }
-    .closing-visual { max-width: 540px; justify-self: end; }
-    .closing-main { max-width: 870px; padding: 12px 0 20px; }
-    .closing-mark { width: 54px; height: 54px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 14px; background: var(--white); color: var(--accent); margin-bottom: 28px; }
-    .closing-mark svg { width: 30px; height: 30px; }
-    .closing h2 { max-width: 820px; margin: 0; font-size: clamp(48px, 5.5vw, 76px); line-height: 1.03; font-weight: 600; letter-spacing: -.05em; }
-    .closing-main p { max-width: 640px; margin: 20px 0 25px; color: var(--muted); font-size: 16px; }
-    .closing-bottom { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 22px; border-top: 1px solid #bdc9ce; color: var(--muted); font-size: 12px; }
-    .closing-links { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; }
-    .closing-links a { text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 4px; }
-    .closing-links a:hover { text-decoration-color: currentColor; }
-    .closing-bottom small { font: 11px var(--font-mono); }
-    @media (max-width: 1000px) {
-      .wrap, .wrap { width: calc(100% - 80px); }
-      .nav__links { gap: 15px; }
-      .hero-window { height: 310px; }
-      .workflow-board { gap: 12px; }
-      .workflow-node { padding: 20px 13px; }
-      .publish-board { grid-template-columns: .8fr 28px .8fr 28px 1.5fr; gap: 8px; }
-      .platforms { gap: 14px; }
-    }
-    @media (max-width: 680px) {
-      :root { --nav-h: 64px; --gap: 18px; }
-      .wrap, .wrap { width: calc(100% - 48px); }
-      .nav__links, .nav__desktop-cta { display: none; }
-      .nav__toggle { display: inline-flex; }
-      .hero { height: 100svh; min-height: 0; padding: 92px 0 28px; }
-      .hero h1 { max-width: 360px; font-size: clamp(40px, 10vw, 49px); }
-      .hero__lede { max-width: 350px; margin-top: 13px; font-size: 14px; }
-      .hero__fact { margin-top: 9px; font-size: 10px; }
-      .hero__actions { margin-top: 16px; gap: 9px; }
-      .btn { min-height: 44px; padding-inline: 14px; font-size: 13px; }
-      .hero-window { height: 220px; margin-top: 19px; border-radius: 9px; }
-      main > section { padding: 96px 0 48px; }
-      .section-title { margin-bottom: 17px; font-size: clamp(34px, 9vw, 43px); }
-      .section-intro { margin-bottom: 22px; font-size: 14px; }
-      .feature-grid { grid-template-columns: 1fr; gap: 20px; }
-      .feature-copy, .feature-visual { grid-column: 1 / -1; }
-      .feature-copy p { margin-bottom: 13px; font-size: 14px; }
-      .feature-list { gap: 9px; margin-top: 14px; }
-      .feature-list li { font-size: 13px; }
-      .visual-frame img { aspect-ratio: 3 / 2; }
-      .workflow-board { grid-template-columns: 1fr; gap: 11px; margin-top: 24px; }
-      .workflow-node { min-height: 150px; padding: 15px 13px; }
-      .workflow-node:not(:last-child)::after { display: none; }
-      .workflow-number { margin-bottom: 14px; }
-      .workflow-node svg { width: 22px; height: 22px; margin-bottom: 8px; }
-      .workflow-node strong { font-size: 14px; }
-      .workflow-node p { font-size: 11px; }
-      .workflow-foot { align-items: flex-start; flex-direction: column; gap: 7px; margin-top: 18px; font-size: 12px; }
-      .folder-board { grid-template-columns: 1fr; gap: 24px; padding: 12px 0; }
-      .folder-root { gap: 10px; }
-      .folder-root__head { padding-bottom: 8px; }
-      .folder-root__head strong { font-size: 15px; }
-      .folder-children { gap: 8px; padding-left: 33px; }
-      .folder-child { min-height: 46px; padding: 0 8px; font-size: 11px; }
-      .folder-note { margin-top: 12px; font-size: 12px; }
-      .publish-board { grid-template-columns: 1fr; gap: 10px; margin: 21px 0; }
-      .publish-node { min-height: 63px; flex-direction: row; justify-content: flex-start; padding: 10px 14px; text-align: left; }
-      .publish-node__mark { width: 34px; height: 34px; }
-      .publish-arrow { transform: rotate(90deg); height: 20px; }
-      .publish-arrow svg { width: 22px; height: 20px; }
-      .platforms { min-height: 68px; justify-content: flex-start; gap: 15px; padding: 12px; }
-      .platform { font-size: 12px; }
-      .platform img { width: 20px; height: 20px; }
-      .publish-note { flex-direction: column; gap: 8px; font-size: 12px; }
-      .publish-note span { font-size: 10px; }
-      .pipeline__row { min-height: 68px; padding: 10px 13px; }
-      .pipeline__row strong { font-size: 13px; }
-      .pipeline__row small { font-size: 11px; }
-      .statement { padding: 110px 0 70px; }
-      .statement h2 { margin-bottom: 20px; font-size: clamp(45px, 11vw, 62px); }
-      .statement__detail { grid-template-columns: 1fr; gap: 18px; }
-      .statement__detail p { font-size: 14px; }
-      .timeline { height: 91px; }
-      .timeline__selection { top: 12px; height: 55px; }
-      .closing { padding: 100px 0 28px; }
-      .closing-main { padding-bottom: 24px; }
-      .closing-grid { grid-template-columns: 1fr; gap: 20px; }
-      .closing-visual { display: none; }
-      .closing h2 { font-size: 46px; }
-      .closing-main p { font-size: 14px; }
-      .closing-bottom { align-items: flex-start; flex-direction: column; gap: 15px; }
-      .closing-links { gap: 12px 17px; }
-      .mobile-menu { padding-inline: 24px; }
-    }
-    @media (max-width: 900px) {
-      .nav__links, .nav__desktop-cta { display: none; }
-      .nav__toggle { display: inline-flex; }
-      .nav__inner { padding-right: 0; }
-      .mobile-menu .nav-download-mobile { width: 100%; margin-top: 14px; } .mobile-menu .nav-download-mobile .btn { display: flex; width: 100%; padding: 0 18px; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-    }
-  </style>
-  <link rel="stylesheet" href="assets/motion/motion.css">
+  <script>
+    (() => {
+      let choice = "system";
+      try { choice = localStorage.getItem("streamsnip-theme") || "system"; } catch (_) {}
+      const valid = ["system","odysseus","studio-light","studio-dark","github","nord","odysseas","ocean","forest","solarized","rose-graphite","ember","slate"];
+      if (!valid.includes(choice)) choice = choice === "dark" ? "odysseus" : choice === "light" ? "studio-light" : "system";
+      const systemDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.themeChoice = choice;
+      document.documentElement.dataset.theme = choice === "system" ? (systemDark ? "odysseus" : "studio-light") : choice;
+    })();
+  </script>
+  <title>StreamSnip AI — Native Windows stream clipping studio</title>
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/site.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="nav">
-    <div class="wrap nav__inner">
+  <header class="site-header">
+    <div class="nav-shell">
       <a class="brand" href="#top" aria-label="StreamSnip AI home">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3.5 7.5v9M7.5 10v4M11.5 4.5v15M15.5 8v8M19.5 6v12"/></svg>
+        <span class="brand-symbol" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none"><path d="M5 11v10M10.5 8v16M16 4v24M21.5 9v14M27 12v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
         </span>
-        <span>StreamSnip AI</span>
+        <span class="brand-name">StreamSnip<span>AI</span></span>
       </a>
-      <nav class="nav__links" aria-label="Main navigation">
+
+      <nav class="primary-nav" aria-label="Main navigation">
         <a href="#workflow">Workflow</a>
-        <a href="#capture">Live capture</a>
-        <a href="#creators">Creators</a>
-        <a href="#library">Clip library</a>
+        <a href="#studio">The studio</a>
+        <a href="#local-first">Local-first</a>
         <a href="#publishing">Publishing</a>
       </nav>
-      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span class="theme-icon" aria-hidden="true">&#9790;</span><span class="theme-label">Dark</span></button>
-      <a class="btn btn--primary nav__desktop-cta" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows</a>
-      <button class="nav__toggle" id="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open navigation menu"><span>Menu</span></button>
+
+      <div class="nav-actions">
+        <a class="source-link" href="https://github.com/sifat-jaman-13/stream-clip-ai" target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4.3 1.3-4.3-2.5-6-3m12 6v-3.9c0-1.1.1-1.7-.5-2.3 3.3-.4 6.8-1.6 6.8-7.4a5.8 5.8 0 0 0-1.6-4c.2-.4.7-2-.2-4-1.3-.4-4.2 1.6-4.2 1.6a14.5 14.5 0 0 0-7.6 0S5 0 3.7.4c-.9 2-.4 3.6-.2 4a5.8 5.8 0 0 0-1.6 4c0 5.8 3.5 7 6.8 7.4-.6.5-.6 1.2-.5 2.3V22" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Source</span>
+        </a>
+
+        <details class="appearance" id="appearance">
+          <summary class="appearance-trigger" aria-label="Choose website appearance">
+            <span class="appearance-glyph" aria-hidden="true">◐</span>
+            <span class="appearance-copy"><small>APPEARANCE</small><strong id="active-theme-name">System</strong></span>
+            <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 6 4.5 4 4.5-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </summary>
+          <div class="appearance-panel">
+            <div class="appearance-heading">
+              <div><span class="eyebrow">PERSONALISE</span><h2>Choose a theme</h2></div>
+              <span class="appearance-count">12 PALETTES</span>
+            </div>
+            <p class="appearance-hint">The website uses the same palette names as the desktop app.</p>
+            <div class="theme-list" role="group" aria-label="Website color themes">
+              <button class="theme-option" type="button" data-theme-choice="system" aria-pressed="true">
+                <span class="theme-swatches theme-system"><i></i><i></i><i></i><i></i></span>
+                <span class="theme-option-copy"><strong>System</strong><small>Follow device setting</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="odysseus" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#282c34"></i><i style="--swatch:#1b2028"></i><i style="--swatch:#9cdef2"></i><i style="--swatch:#e06c75"></i></span>
+                <span class="theme-option-copy"><strong>Odysseus</strong><small>Graphite · cyan · coral</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="studio-light" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#f9f9f9"></i><i style="--swatch:#ffffff"></i><i style="--swatch:#303030"></i><i style="--swatch:#cc0000"></i></span>
+                <span class="theme-option-copy"><strong>Studio Light</strong><small>Clean neutral · signal red</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="studio-dark" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#0f0f0f"></i><i style="--swatch:#181818"></i><i style="--swatch:#aaaaaa"></i><i style="--swatch:#ff0033"></i></span>
+                <span class="theme-option-copy"><strong>Studio Dark</strong><small>Low-light · vivid red</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="github" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#0d1117"></i><i style="--swatch:#161b22"></i><i style="--swatch:#8b949e"></i><i style="--swatch:#f85149"></i></span>
+                <span class="theme-option-copy"><strong>GitHub Dark</strong><small>Midnight slate · signal red</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="nord" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#2e3440"></i><i style="--swatch:#3b4252"></i><i style="--swatch:#eceff4"></i><i style="--swatch:#88c0d0"></i></span>
+                <span class="theme-option-copy"><strong>Nord</strong><small>Blue-gray · frost · cyan</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="odysseas" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#edf0ec"></i><i style="--swatch:#fffefa"></i><i style="--swatch:#172631"></i><i style="--swatch:#ef6a42"></i></span>
+                <span class="theme-option-copy"><strong>Odysseus Paper</strong><small>Navy · chalk · warm orange</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="ocean" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#101c27"></i><i style="--swatch:#162635"></i><i style="--swatch:#9ab3c1"></i><i style="--swatch:#42b9cc"></i></span>
+                <span class="theme-option-copy"><strong>Ocean Depths</strong><small>Deep blue · sea glass · cyan</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="forest" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#111b17"></i><i style="--swatch:#182720"></i><i style="--swatch:#9cbaa4"></i><i style="--swatch:#83c99a"></i></span>
+                <span class="theme-option-copy"><strong>Forest Night</strong><small>Evergreen · moss · mint</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="solarized" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#f6f2e8"></i><i style="--swatch:#fffdf6"></i><i style="--swatch:#28383a"></i><i style="--swatch:#277a78"></i></span>
+                <span class="theme-option-copy"><strong>Solarized Paper</strong><small>Warm parchment · teal</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="rose-graphite" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#211c20"></i><i style="--swatch:#2c242a"></i><i style="--swatch:#c39dab"></i><i style="--swatch:#dd8ea4"></i></span>
+                <span class="theme-option-copy"><strong>Rose Graphite</strong><small>Warm charcoal · muted rose</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="ember" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#1d1a16"></i><i style="--swatch:#28231d"></i><i style="--swatch:#bca588"></i><i style="--swatch:#e8a34b"></i></span>
+                <span class="theme-option-copy"><strong>Ember Studio</strong><small>Dark umber · copper · amber</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+              <button class="theme-option" type="button" data-theme-choice="slate" aria-pressed="false">
+                <span class="theme-swatches"><i style="--swatch:#20262d"></i><i style="--swatch:#272f38"></i><i style="--swatch:#aab7c2"></i><i style="--swatch:#8bb9d8"></i></span>
+                <span class="theme-option-copy"><strong>Slate Studio</strong><small>Cool graphite · steel blue</small></span><span class="theme-check" aria-hidden="true">✓</span>
+              </button>
+            </div>
+            <div class="appearance-footer"><span>Theme preference is saved on this device.</span><button type="button" id="reset-theme">Use system</button></div>
+          </div>
+        </details>
+
+        <a class="button button-primary nav-download" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download <span aria-hidden="true">↗</span></a>
+        <button class="menu-toggle" id="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open navigation">
+          <span></span><span></span>
+        </button>
+      </div>
     </div>
     <nav class="mobile-menu" id="mobile-menu" hidden aria-label="Mobile navigation">
-      <a href="#workflow">Workflow</a>
-      <a href="#capture">Live capture</a>
-      <a href="#creators">Creator folders</a>
-      <a href="#library">Clip library</a>
-      <a href="#publishing">Publishing</a>
-      <a href="#local">Local processing</a>
-      <button class="theme-toggle" id="theme-toggle-mobile" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span class="theme-icon" aria-hidden="true">&#9790;</span><span class="theme-label">Dark mode</span></button>
-      <div class="nav-download-mobile"><a class="btn btn--primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows</a></div>
+      <a href="#workflow">Workflow</a><a href="#studio">The studio</a><a href="#local-first">Local-first</a><a href="#publishing">Publishing</a>
+      <a href="https://github.com/sifat-jaman-13/stream-clip-ai" target="_blank" rel="noreferrer">Source code ↗</a>
+      <a class="mobile-download" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows ↗</a>
     </nav>
   </header>
 
   <main id="main">
     <section class="hero" id="top" data-enter>
-      <div class="wrap">
-        <div class="hero-text">
-        <h1>Windows stream clipping for creators</h1>
-        <p class="hero__lede">Capture live streams and recorded VODs, review AI-ranked highlights, and publish selected clips from one native Windows desktop app.</p>
-        <p class="hero__fact">Twitch + YouTube · Windows 10 / 11</p>
-        <div class="hero__actions">
-          <a class="btn btn--primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows</a>
-          <a class="btn btn--secondary" href="https://github.com/sifat-jaman-13/stream-clip-ai">View source</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="stage--surface" id="workflow">
-      <div class="wrap">
-        <h2 class="section-title">StreamSnip AI workflow</h2>
-        <p class="section-intro">One workflow covers live capture, recorded VODs and local video. You decide which clips move from review into publishing.</p>
-        <div class="workflow-board" role="img" aria-label="Five stages: capture, transcribe, rank highlights, review the clip, publish through Zernio">
-          <article class="workflow-node">
-            <span class="workflow-number">01 / SOURCE</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
-            <strong>Capture</strong><p>Live stream, VOD or file</p>
-          </article>
-          <article class="workflow-node">
-            <span class="workflow-number">02 / SPEECH</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10v4"/></svg>
-            <strong>Transcribe</strong><p>Local speech model</p>
-          </article>
-          <article class="workflow-node">
-            <span class="workflow-number">03 / ANALYSIS</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.4 5.3L20 10.5l-5.6 2.2L12 18l-2.4-5.3L4 10.5l5.6-2.2z"/><path d="m19 16 .8 1.7 1.7.8-1.7.8L19 21l-.8-1.7-1.7-.8 1.7-.8z"/></svg>
-            <strong>Rank</strong><p>Score candidate moments</p>
-          </article>
-          <article class="workflow-node">
-            <span class="workflow-number">04 / EDIT</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="m8 12 2.5 2.5L16 9"/></svg>
-            <strong>Review</strong><p>Adjust clip and metadata</p>
-          </article>
-          <article class="workflow-node">
-            <span class="workflow-number">05 / DELIVERY</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4"/><path d="M5 14v5h14v-5"/></svg>
-            <strong>Publish</strong><p>Send through Zernio</p>
-          </article>
-        </div>
-        <div class="workflow-foot"><strong>Review stays in your hands.</strong><span>Candidate scores help prioritize moments. Publishing remains a manual choice.</span></div>
-      </div>
-    </section>
-
-    <section id="capture">
-      <div class="wrap">
-        <h2 class="section-title">Live stream and VOD capture</h2>
-        <div class="feature-grid">
-          <div class="feature-copy">
-            <p>Monitor supported Twitch and YouTube creators, record live sessions, or process recorded VODs and local video files through the same clipping workflow.</p>
-            <ul class="feature-list">
-              <li>Start and stop live capture explicitly.</li>
-              <li>Set capture quality and output preferences.</li>
-              <li>Keep source recordings available for review before extraction.</li>
-            </ul>
+      <div class="hero-shell">
+        <div class="hero-copy">
+          <div class="hero-kicker"><span class="live-dot"></span><span>NATIVE WINDOWS CREATOR STUDIO</span><span class="kicker-rule"></span><span>VERSION 4.0.6</span></div>
+          <h1>Turn live streams into <span>finished clips.</span></h1>
+          <p class="hero-lede">Capture Twitch and YouTube streams, find the moments worth keeping, and shape them into shorts you can review before publishing.</p>
+          <div class="hero-actions">
+            <a class="button button-primary button-large" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows <span aria-hidden="true">↗</span></a>
+            <a class="button button-quiet button-large" href="https://github.com/sifat-jaman-13/stream-clip-ai">Explore the source <span aria-hidden="true">→</span></a>
           </div>
-          <div class="capture-steps" role="list" aria-label="Live capture setup steps">
-            <div role="listitem"><span>01</span><strong>Choose source</strong><small>Twitch or YouTube</small></div>
-            <div role="listitem"><span>02</span><strong>Configure capture</strong><small>Quality and output</small></div>
-            <div role="listitem"><span>03</span><strong>Start when ready</strong><small>Explicit start and stop</small></div>
+          <div class="hero-proof" aria-label="Product details">
+            <span><i class="proof-icon">01</i> Twitch + YouTube</span>
+            <span><i class="proof-icon">02</i> Windows 10 / 11</span>
+            <span><i class="proof-icon">03</i> Local media engine</span>
           </div>
         </div>
+
+        <div class="product-stage">
+          <div class="product-stage-label"><span>01 / NATIVE DESKTOP APP</span><span>STREAMSNIP AI / 4.0.6</span></div>
+          <div class="stage-glow" aria-hidden="true"></div>
+          <figure class="app-window">
+            <img src="assets/product/dashboard.png" width="1936" height="1048" alt="StreamSnip AI native Windows dashboard showing its session rundown, local engine status, clip library and creator monitors." fetchpriority="high">
+          </figure>
+        </div>
+      </div>
+      <div class="hero-bottom-line"><span>FROM LIVE SOURCE</span><span class="line"></span><span>TO REVIEWED SHORT</span></div>
+    </section>
+
+    <section class="workflow-section section-pad" id="workflow">
+      <div class="section-shell">
+        <div class="section-heading">
+          <div><span class="eyebrow">ONE CONNECTED WORKFLOW</span><h2>From stream to short.<br><em>Keep every decision yours.</em></h2></div>
+          <p>StreamSnip connects capture, speech, highlight selection and rendering in one desktop workflow. AI helps identify candidates; you decide what becomes a post.</p>
+        </div>
+        <div class="workflow-track" aria-label="Five stages of the StreamSnip clipping workflow">
+          <article class="workflow-step"><span class="step-number">01</span><div class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></div><h3>Capture</h3><p>Live streams, recorded VODs or local videos.</p><span class="step-tag">SOURCE</span></article>
+          <article class="workflow-step"><span class="step-number">02</span><div class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10v4"/></svg></div><h3>Transcribe</h3><p>Turn speech into timestamped text locally.</p><span class="step-tag">SPEECH</span></article>
+          <article class="workflow-step"><span class="step-number">03</span><div class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.4 5.3L20 10.5l-5.6 2.2L12 18l-2.4-5.3L4 10.5l5.6-2.2z"/><path d="m19 16 .8 1.7 1.7.8-1.7.8L19 21l-.8-1.7-1.7-.8 1.7-.8z"/></svg></div><h3>Find moments</h3><p>Score candidate highlights with your chosen provider.</p><span class="step-tag">ANALYSIS</span></article>
+          <article class="workflow-step"><span class="step-number">04</span><div class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div><h3>Frame &amp; render</h3><p>Shape the crop, captions and aspect ratio.</p><span class="step-tag">EDIT</span></article>
+          <article class="workflow-step"><span class="step-number">05</span><div class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4"/><path d="M5 14v5h14v-5"/></svg></div><h3>Review &amp; publish</h3><p>Check the video and metadata before sending.</p><span class="step-tag">DELIVERY</span></article>
+        </div>
+        <div class="workflow-note"><span class="note-mark">↳</span><strong>Nothing publishes itself.</strong><span>Review the clip, metadata and destination before you post.</span></div>
       </div>
     </section>
 
-    <section class="stage--surface" id="creators" style="--h:2">
-      <div class="wrap">
-        <h2 class="section-title">Creator-specific workspaces</h2>
-        <p class="section-intro">Each saved creator has a separate workspace. Live recordings and recorded-VOD work have separate folders for every creator.</p>
-        <div class="folder-board" role="img" aria-label="Example folder structure with separate creator roots, each containing Live and Recorded VOD folders">
-          <div class="folder-root">
-            <div class="folder-root__head">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5h7l2 2H21v10H3z"/><path d="M3 9h18"/></svg>
-              <div><strong>Creator A</strong><div class="folder-root__path">/Creators/Creator-A/</div></div>
+    <section class="studio-section section-pad" id="studio">
+      <div class="section-shell">
+        <div class="section-heading section-heading-studio">
+          <div><span class="eyebrow">BUILT AROUND THE CREATOR</span><h2>A studio for the<br><em>whole clipping session.</em></h2></div>
+          <p>One native Windows workspace for source capture, creator organisation, clip review and publishing preparation.</p>
+        </div>
+        <div class="capability-grid">
+          <article class="capability capability-wide">
+            <div class="capability-index">01 / CAPTURE</div><div class="capability-visual capture-visual">
+              <div class="source-visual-top"><span>LIVE SOURCE</span><span class="source-status"><i></i> IDLE</span></div>
+              <div class="source-visual-center"><div class="signal-icon"><span></span><span></span><span></span><span></span><span></span></div><strong>Choose a stream.<br>Start on your terms.</strong><p>Capture begins only after you explicitly start it.</p></div>
+              <div class="source-visual-bottom"><span>TWITCH</span><span>YOUTUBE</span><span>LOCAL VIDEO</span></div>
             </div>
-            <div class="folder-children">
-              <div class="folder-child"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 6.5h7l2 2H21v10H3z"/></svg><span>Live</span></div>
-              <div class="folder-child"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 6.5h7l2 2H21v10H3z"/></svg><span>Recorded VOD</span></div>
+            <div class="capability-copy"><h3>Capture without losing control.</h3><p>Monitor supported Twitch and YouTube creators, record live sessions with explicit controls, or send recorded VODs and local video through the same clipping pipeline.</p></div>
+          </article>
+          <article class="capability">
+            <div class="capability-index">02 / ORGANISE</div><div class="capability-visual folder-visual">
+              <div class="folder-root"><span class="folder-icon">▰</span><strong>Creator workspace</strong><small>/Creators/Channel-A/</small></div>
+              <div class="folder-branch"><div><span>▰</span> Live recordings</div><div><span>▰</span> Recorded VOD</div></div>
+              <div class="folder-root folder-root-second"><span class="folder-icon">▰</span><strong>Another creator</strong><small>/Creators/Channel-B/</small></div>
             </div>
-          </div>
-          <div class="folder-root">
-            <div class="folder-root__head">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5h7l2 2H21v10H3z"/><path d="M3 9h18"/></svg>
-              <div><strong>Creator B</strong><div class="folder-root__path">/Creators/Creator-B/</div></div>
+            <div class="capability-copy"><h3>Keep creators separate.</h3><p>Each saved creator has an independent workspace with distinct Live and Recorded VOD folders.</p></div>
+          </article>
+          <article class="capability">
+            <div class="capability-index">03 / REVIEW</div><div class="capability-visual clip-visual">
+              <div class="clip-frame"><div class="clip-frame-bars"><i></i><i></i><i></i></div><div class="clip-play">▶</div><span>CLIP PREVIEW</span></div>
+              <div class="clip-meta"><div><span>ASPECT RATIO</span><strong>9:16 · 16:9 · 1:1 · 4:5</strong></div><div><span>POST DETAILS</span><strong>Title · Description · Tags</strong></div></div>
             </div>
-            <div class="folder-children">
-              <div class="folder-child"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 6.5h7l2 2H21v10H3z"/></svg><span>Live</span></div>
-              <div class="folder-child"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 6.5h7l2 2H21v10H3z"/></svg><span>Recorded VOD</span></div>
-            </div>
-          </div>
-        </div>
-        <p class="folder-note">Creator folders keep monitoring sources and the resulting media organised independently.</p>
-      </div>
-    </section>
-
-    <section id="library">
-      <div class="wrap">
-        <h2 class="section-title">Clip review and framing</h2>
-        <div class="feature-grid">
-          <div class="feature-copy">
-            <p>Generated clips stay with their titles, descriptions, scores and processing status. Review the video and make changes before sending it to a platform.</p>
-            <ul class="feature-list">
-              <li>Keep unpublished work separate from confirmed published clips.</li>
-              <li>Adjust aspect ratio, crop regions and output framing.</li>
-              <li>Delete individual clips or manage selections in bulk.</li>
-            </ul>
-            <p>Facecam detection is available, with manual crop adjustment when you want to refine the result.</p>
-          </div>
-
+            <div class="capability-copy"><h3>Shape it, then check it.</h3><p>Review rendered clips and transcript-grounded post metadata, adjust framing and crop regions, and keep active work separate from confirmed published records.</p></div>
+          </article>
+          <article class="capability capability-wide capability-publish" id="publishing">
+            <div class="capability-index">04 / PUBLISH</div><div class="publish-visual">
+              <div class="publish-flow-node"><span class="publish-node-mark">SS</span><strong>StreamSnip AI</strong><small>Reviewed clip + metadata</small></div>
+              <span class="publish-connector">→</span>
+              <div class="publish-flow-node"><span class="publish-node-mark zernio-mark">Z</span><strong>Zernio</strong><small>Connected destinations</small></div>
+              <span class="publish-connector">→</span>
+              <div class="platform-stack"><span><b class="platform-facebook">f</b> Facebook</span><span><b class="platform-instagram">◎</b> Instagram</span><span><b class="platform-youtube">▶</b> YouTube</span></div>
+            </div><div class="capability-copy"><h3>Prepare the post. Keep the final say.</h3><p>Connect Zernio, choose the accounts available to your connection, and inspect the result for each destination. The current integration supports Facebook, Instagram and YouTube.</p></div>
+          </article>
         </div>
       </div>
     </section>
 
-    <section class="stage--surface" id="publishing">
-      <div class="wrap">
-        <h2 class="section-title">Publishing with Zernio</h2>
-        <p class="section-intro">Connect your Zernio API key, review the generated post details, and send the selected clip to a connected social destination from the StreamSnip workflow.</p>
-        <div class="publish-board" role="img" aria-label="StreamSnip AI sends a selected clip to Zernio, which publishes to Facebook, Instagram or YouTube">
-          <div class="publish-node"><span class="publish-node__mark" aria-hidden="true">SS</span><strong>StreamSnip AI</strong></div>
-          <div class="publish-arrow" aria-hidden="true"><svg viewBox="0 0 40 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h34m-8-8 8 8-8 8"/></svg></div>
-          <div class="publish-node"><span class="publish-node__mark" aria-hidden="true">Z</span><strong>Zernio API</strong></div>
-          <div class="publish-arrow" aria-hidden="true"><svg viewBox="0 0 40 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h34m-8-8 8 8-8 8"/></svg></div>
-          <div class="platforms">
-            <div class="platform"><img src="https://cdn.simpleicons.org/facebook/0866FF" alt="" width="25" height="25" loading="lazy"><span>Facebook</span></div>
-            <div class="platform"><img src="https://cdn.simpleicons.org/instagram/E4405F" alt="" width="25" height="25" loading="lazy"><span>Instagram</span></div>
-            <div class="platform"><img src="https://cdn.simpleicons.org/youtube/FF0033" alt="" width="25" height="25" loading="lazy"><span>YouTube</span></div>
+    <section class="local-section section-pad" id="local-first">
+      <div class="section-shell">
+        <div class="section-heading">
+          <div><span class="eyebrow">YOUR MEDIA, YOUR WORKFLOW</span><h2>Local-first by<br><em>default design.</em></h2></div>
+          <p>Capture, transcription and rendering run on your Windows PC. External services are used only for the tasks you configure and choose.</p>
+        </div>
+        <div class="local-grid">
+          <div class="local-column">
+            <div class="local-column-heading"><span class="local-icon">⌂</span><div><span class="eyebrow">ON YOUR WINDOWS PC</span><h3>Media stays local</h3></div></div>
+            <ul class="local-list"><li><span>✓</span> Stream capture and source recordings</li><li><span>✓</span> Faster-Whisper speech transcription</li><li><span>✓</span> Facecam detection and crop analysis</li><li><span>✓</span> FFmpeg rendering and captions</li><li><span>✓</span> Local clip library and Hook Words</li></ul>
+          </div>
+          <div class="local-column external-column">
+            <div class="local-column-heading"><span class="local-icon">↗</span><div><span class="eyebrow">WHEN YOU CONFIGURE THEM</span><h3>Connected services</h3></div></div>
+            <ul class="external-list"><li><strong>Ollama</strong><span>Runs on the local service you configure.</span></li><li><strong>Hosted AI providers</strong><span>Receive transcript text for the task you select.</span></li><li><strong>Zernio publishing</strong><span>Receives the selected media and post details for delivery.</span></li></ul>
           </div>
         </div>
-        <div class="feature-grid">
-          <div class="feature-copy">
-            <p>Post titles and descriptions remain editable in the review flow. The connected Zernio account controls which destinations are available for each publish action.</p>
-            <ul class="feature-list">
-              <li>Connect one or more Zernio API keys.</li>
-              <li>Choose available social accounts for a post.</li>
-              <li>See publishing results for each destination.</li>
-            </ul>
-          </div>
-
-        </div>
-        <div class="publish-note"><p>Only destinations confirmed as successful are recorded as published. Zernio and the connected platforms control account availability and posting quotas.</p><span>FACEBOOK · INSTAGRAM · YOUTUBE</span></div>
+        <p class="local-footnote"><span class="shield">◇</span> The local engine API is bound to loopback. Do not expose it to an untrusted network or the public internet.</p>
       </div>
     </section>
 
-    <section id="local">
-      <div class="wrap">
-        <h2 class="section-title">Local media processing</h2>
-        <div class="feature-grid">
-          <div class="feature-copy">
-            <p>Speech transcription and video rendering run locally. Choose the analysis provider that fits your setup. Configured hosted analysis receives transcript text.</p>
-            <ul class="feature-list">
-              <li>Run local speech transcription with Faster-Whisper.</li>
-              <li>Choose a supported local or hosted provider for highlight analysis.</li>
-              <li>Render the final clip on your Windows machine.</li>
-            </ul>
-          </div>
-          <div class="feature-visual">
-            <div class="pipeline" role="img" aria-label="Local workflow from media source to transcription, selected AI analysis and local video rendering">
-              <div class="pipeline__row"><span class="pipeline__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></span><div><strong>Media source</strong><small>Live recording, VOD or local video</small></div></div>
-              <div class="pipeline__row"><span class="pipeline__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10v4"/></svg></span><div><strong>Local transcription</strong><small>Faster-Whisper speech model</small></div></div>
-              <div class="pipeline__row"><span class="pipeline__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="8"/></svg></span><div><strong>Selected AI provider</strong><small>Transcript analysis, scoring and metadata</small></div></div>
-              <div class="pipeline__row"><span class="pipeline__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><div><strong>Local video render</strong><small>FFmpeg output on your machine</small></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="stage--deep statement" id="review-control" data-moment="word-highlight">
-      <div class="wrap">
-        <h2 class="mo-wh__text">Clip publishing stays in your hands</h2>
-        <div class="statement__detail">
-          <p>AI can rank candidate moments and prepare metadata. You review the clip, framing and destination before publishing.</p>
-          <div class="timeline" role="img" aria-label="A selected clip range on a video timeline"><div class="timeline__selection"><span>SELECTED CLIP</span></div><div class="timeline__head"></div></div>
-        </div>
+    <section class="closing-section">
+      <div class="closing-shell">
+        <div class="closing-eyebrow"><span class="live-dot"></span> READY WHEN YOU ARE</div>
+        <h2>Make the moment<br><em>worth keeping.</em></h2>
+        <p>Get the native Windows studio, inspect the source, or browse the latest release.</p>
+        <div class="closing-actions"><a class="button button-primary button-large" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows <span aria-hidden="true">↗</span></a><a class="button button-outline button-large" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">View all releases <span aria-hidden="true">→</span></a></div>
       </div>
     </section>
   </main>
 
-  <footer class="closing" id="download">
-    <div class="wrap">
-      <div class="closing-grid">
-      <div class="closing-main">
-        <div class="closing-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3.5 7.5v9M7.5 10v4M11.5 4.5v15M15.5 8v8M19.5 6v12"/></svg></div>
-        <h2>StreamSnip AI for Windows</h2>
-        <p>Download the native Windows installer, verify its checksum, or inspect the source and release notes on GitHub.</p>
-        <a class="btn btn--primary" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe">Download for Windows</a>
-      </div>
-      <div class="closing-bottom">
-        <nav class="closing-links" aria-label="Project links">
-          <a class="m-link" href="https://github.com/sifat-jaman-13/stream-clip-ai">Source code</a>
-          <a class="m-link" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Release notes</a>
-          <a class="m-link" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest/download/StreamSnipAI-Native-Setup.exe.sha256">SHA-256 checksum</a>
-          <a class="m-link" href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/LICENSE">Project license</a>
-          <a class="m-link" href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/licenses/third-party/Taste-Skill-MIT.txt">Taste runtime notice</a>
-        </nav>
-        <small>© 2026 StreamSnip AI</small>
-      </div>
-    </div>
+  <footer class="site-footer">
+    <div class="footer-main"><a class="brand footer-brand" href="#top"><span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M5 11v10M10.5 8v16M16 4v24M21.5 9v14M27 12v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span><span class="brand-name">StreamSnip<span>AI</span></span></a><p>Capture the stream. Keep the moment.</p><div class="footer-links"><a href="https://github.com/sifat-jaman-13/stream-clip-ai">Source code</a><a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest">Releases</a><a href="https://github.com/sifat-jaman-13/stream-clip-ai/issues">Issues</a><a href="https://github.com/sifat-jaman-13/stream-clip-ai/blob/master/LICENSE">Licence</a></div></div>
+    <div class="footer-bottom"><span>© 2026 StreamSnip AI</span><span>Built for creators who want control of the whole clipping workflow.</span></div>
   </footer>
-
-  <script>
-    (() => {
-      const root = document.documentElement;
-      const meta = document.getElementById("theme-color-meta");
-      const buttons = [document.getElementById("theme-toggle"), document.getElementById("theme-toggle-mobile")].filter(Boolean);
-      let saved = null;
-      try { saved = localStorage.getItem("streamsnip-theme"); } catch (_) {}
-      const systemDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-      const apply = theme => {
-        const dark = theme === "dark";
-        root.dataset.theme = dark ? "dark" : "light";
-        if (meta) meta.setAttribute("content", dark ? "#0b1115" : "#f7f9fa");
-        buttons.forEach(button => {
-          button.setAttribute("aria-pressed", String(dark));
-          button.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
-          const icon = button.querySelector(".theme-icon");
-          const label = button.querySelector(".theme-label");
-          if (icon) icon.textContent = dark ? "\u2600" : "\u263e";
-          if (label) label.textContent = dark ? "Light" : (button.id.endsWith("mobile") ? "Dark mode" : "Dark");
-        });
-      };
-      apply(saved === "dark" || saved === "light" ? saved : (systemDark ? "dark" : "light"));
-      buttons.forEach(button => button.addEventListener("click", () => {
-        const next = root.dataset.theme === "dark" ? "light" : "dark";
-        apply(next);
-        try { localStorage.setItem("streamsnip-theme", next); } catch (_) {}
-      }));
-    })();
-  </script>
-  <script>
-    (() => {
-      const toggle = document.querySelector(".nav__toggle");
-      const menu = document.getElementById("mobile-menu");
-      if (!toggle || !menu) return;
-      const close = () => {
-        toggle.setAttribute("aria-expanded", "false");
-        toggle.setAttribute("aria-label", "Open navigation menu");
-        menu.hidden = true;
-        menu.classList.remove("is-open");
-      };
-      toggle.addEventListener("click", () => {
-        const open = toggle.getAttribute("aria-expanded") !== "true";
-        toggle.setAttribute("aria-expanded", String(open));
-        toggle.setAttribute("aria-label", open ? "Close navigation menu" : "Open navigation menu");
-        menu.hidden = !open;
-        menu.classList.toggle("is-open", open);
-      });
-      menu.querySelectorAll("a").forEach(link => link.addEventListener("click", close));
-      document.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
-    })();
-  </script>
-  <script type="module" src="assets/moments/moments.js"></script>
-  <script type="module" src="assets/motion/motion.js"></script>
 </body>
 </html>

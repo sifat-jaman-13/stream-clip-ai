@@ -11,6 +11,12 @@ public sealed partial class MainPage
     private TextBlock? _dashboardPublishedCount;
     private TextBlock? _dashboardCreatorCount;
     private TextBlock? _dashboardElapsed;
+    private TextBlock? _dashboardClipDetail;
+    private TextBlock? _dashboardChunkDetail;
+    private TextBlock? _dashboardProgressStatus;
+    private TextBlock? _dashboardProgressPercent;
+    private StackPanel? _dashboardSessionDetails;
+    private Grid? _dashboardProgressRow;
     private TextBlock? _dashboardCaptureTitle;
     private TextBlock? _dashboardCaptureSubtitle;
     private TextBlock? _dashboardCapturePillText;
@@ -35,6 +41,12 @@ public sealed partial class MainPage
         _dashboardPublishedCount = null;
         _dashboardCreatorCount = null;
         _dashboardElapsed = null;
+        _dashboardClipDetail = null;
+        _dashboardChunkDetail = null;
+        _dashboardProgressStatus = null;
+        _dashboardProgressPercent = null;
+        _dashboardSessionDetails = null;
+        _dashboardProgressRow = null;
         _dashboardCaptureTitle = null;
         _dashboardCaptureSubtitle = null;
         _dashboardCapturePillText = null;
@@ -145,44 +157,47 @@ public sealed partial class MainPage
         PopulateWorkflowStrip(state);
         content.Children.Add(_dashboardWorkflowHost);
 
-        if (state.Running)
+        _dashboardSessionDetails = new StackPanel
         {
-            var detailRow = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 22,
-                Margin = new Thickness(0, 24, 0, 8)
-            };
-            detailRow.Children.Add(ThemeText($"Elapsed  {FormatDuration(state.Session.Elapsed)}", 12.5, false, "BodyTextBrush"));
-            detailRow.Children.Add(ThemeText($"Clips  {state.Session.Clips:N0}", 12.5, false, "BodyTextBrush"));
-            detailRow.Children.Add(ThemeText($"Chunks  {state.Session.Chunks:N0}", 12.5, false, "BodyTextBrush"));
-            content.Children.Add(detailRow);
+            Orientation = Orientation.Horizontal,
+            Spacing = 22,
+            Margin = new Thickness(0, 24, 0, 8),
+            Visibility = state.Running ? Visibility.Visible : Visibility.Collapsed
+        };
+        _dashboardElapsed = ThemeText($"Elapsed  {FormatDuration(state.Session.Elapsed)}", 12.5, false, "BodyTextBrush");
+        _dashboardClipDetail = ThemeText($"Clips  {state.Session.Clips:N0}", 12.5, false, "BodyTextBrush");
+        _dashboardChunkDetail = ThemeText($"Chunks  {state.Session.Chunks:N0}", 12.5, false, "BodyTextBrush");
+        _dashboardSessionDetails.Children.Add(_dashboardElapsed);
+        _dashboardSessionDetails.Children.Add(_dashboardClipDetail);
+        _dashboardSessionDetails.Children.Add(_dashboardChunkDetail);
+        content.Children.Add(_dashboardSessionDetails);
 
-            var progressRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
-            progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            progressRow.Children.Add(ThemeText(state.Status, 12, false, "MutedTextBrush"));
-            var percent = Txt($"{Math.Clamp(state.Progress, 0, 100)}%", 12, true);
-            Grid.SetColumn(percent, 1);
-            progressRow.Children.Add(percent);
-            content.Children.Add(progressRow);
-
-            _dashboardProgress = new ProgressBar
-            {
-                Minimum = 0,
-                Maximum = 100,
-                Value = Math.Clamp(state.Progress, 0, 100),
-                Height = 7,
-                Margin = new Thickness(0, 8, 0, 0),
-                Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
-                Foreground = Application.Current.Resources["AccentBrush"] as Brush
-            };
-            content.Children.Add(_dashboardProgress);
-        }
-        else
+        _dashboardProgressRow = new Grid
         {
-            _dashboardProgress = null;
-        }
+            Margin = new Thickness(0, 4, 0, 0),
+            Visibility = state.Running ? Visibility.Visible : Visibility.Collapsed
+        };
+        _dashboardProgressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _dashboardProgressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _dashboardProgressStatus = ThemeText(state.Status, 12, false, "MutedTextBrush");
+        _dashboardProgressPercent = Txt($"{Math.Clamp(state.Progress, 0, 100)}%", 12, true);
+        _dashboardProgressRow.Children.Add(_dashboardProgressStatus);
+        Grid.SetColumn(_dashboardProgressPercent, 1);
+        _dashboardProgressRow.Children.Add(_dashboardProgressPercent);
+        content.Children.Add(_dashboardProgressRow);
+
+        _dashboardProgress = new ProgressBar
+        {
+            Minimum = 0,
+            Maximum = 100,
+            Value = Math.Clamp(state.Progress, 0, 100),
+            Height = 7,
+            Margin = new Thickness(0, 8, 0, 0),
+            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+            Foreground = Application.Current.Resources["AccentBrush"] as Brush,
+            Visibility = state.Running ? Visibility.Visible : Visibility.Collapsed
+        };
+        content.Children.Add(_dashboardProgress);
 
         return CreatePanel(
             "Session rundown",
@@ -650,7 +665,20 @@ public sealed partial class MainPage
         _dashboardPublishedCount?.SetValue(TextBlock.TextProperty, _state.PostedTotal.ToString("N0"));
         _dashboardCreatorCount?.SetValue(TextBlock.TextProperty,
             _creators.Count(x => x.Running || x.CaptureActive).ToString("N0"));
-        _dashboardElapsed?.SetValue(TextBlock.TextProperty, FormatDuration(_state.Session.Elapsed));
+        if (_dashboardElapsed is not null)
+            _dashboardElapsed.Text = $"Elapsed  {FormatDuration(_state.Session.Elapsed)}";
+        if (_dashboardClipDetail is not null)
+            _dashboardClipDetail.Text = $"Clips  {_state.Session.Clips:N0}";
+        if (_dashboardChunkDetail is not null)
+            _dashboardChunkDetail.Text = $"Chunks  {_state.Session.Chunks:N0}";
+        if (_dashboardSessionDetails is not null)
+            _dashboardSessionDetails.Visibility = _state.Running ? Visibility.Visible : Visibility.Collapsed;
+        if (_dashboardProgressRow is not null)
+            _dashboardProgressRow.Visibility = _state.Running ? Visibility.Visible : Visibility.Collapsed;
+        if (_dashboardProgressStatus is not null)
+            _dashboardProgressStatus.Text = _state.Status;
+        if (_dashboardProgressPercent is not null)
+            _dashboardProgressPercent.Text = $"{Math.Clamp(_state.Progress, 0, 100)}%";
 
         if (_dashboardCaptureTitle is not null)
             _dashboardCaptureTitle.Text = _state.Running ? _state.Status :
@@ -663,16 +691,18 @@ public sealed partial class MainPage
                     ? "Repair the local engine before starting capture and rendering."
                     : "Choose a live stream or local video in Live Studio. Nothing records until you press Start capture.";
         }
+        var currentPhaseBrush = _engine is null ? "DangerBrush" : PhaseBrushKey(_state);
         if (_dashboardCapturePillText is not null)
         {
-            _dashboardCapturePillText.Text = PhaseLabel(_state.Phase);
-            _dashboardCapturePillText.Foreground = Application.Current.Resources[PhaseBrushKey(_state)] as Brush;
+            _dashboardCapturePillText.Text = _engine is null ? "Offline" : PhaseLabel(_state.Phase);
+            _dashboardCapturePillText.Foreground = Application.Current.Resources[currentPhaseBrush] as Brush;
         }
         if (_dashboardCapturePill is not null)
-            _dashboardCapturePill.BorderBrush = Application.Current.Resources[PhaseBrushKey(_state)] as Brush;
+            _dashboardCapturePill.BorderBrush = Application.Current.Resources[currentPhaseBrush] as Brush;
         if (_dashboardProgress is not null)
         {
             _dashboardProgress.Value = Math.Clamp(_state.Progress, 0, 100);
+            _dashboardProgress.Visibility = _state.Running ? Visibility.Visible : Visibility.Collapsed;
         }
 
         PopulateWorkflowStrip(_state);

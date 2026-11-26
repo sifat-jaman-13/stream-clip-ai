@@ -44,13 +44,22 @@ The desktop application is built with **WinUI 3** and works with a supervised lo
 
 ## The app
 
-This is a real screen from the Windows desktop application, not a concept mockup.
+These are real screenshots captured from the **4.0.7 native Windows Release build** while the local engine was connected. They show the actual application, not mockups. Normal empty states are shown where no sources or clips have been added yet.
 
-<p align="center">
-  <img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI Windows dashboard showing the session rundown, latest clips area and creator monitor panel">
-</p>
-
-The dashboard shows the source-to-publish session rundown, current capture state, latest clips and monitored creators. Empty states are shown as they appear in the app.
+<table>
+  <tr>
+    <td width="50%"><strong>Dashboard</strong><br><img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.7 dashboard with Engine connected, session rundown, latest clips and creator monitors"></td>
+    <td width="50%"><strong>Live Studio</strong><br><img src="docs/assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.7 Live Studio with source selection, capture setup, AI provider, transcription and captions tabs"></td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Creator monitoring</strong><br><img src="docs/assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.7 Creators workspace for independent Twitch and YouTube monitors"></td>
+    <td width="50%"><strong>Clip library</strong><br><img src="docs/assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.7 Clip Library with review filters, published tab and native video inspector"></td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Publishing</strong><br><img src="docs/assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.7 Publishing page with Zernio connection and destination settings"></td>
+    <td width="50%"></td>
+  </tr>
+</table>
 
 ## The workflow
 

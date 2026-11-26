@@ -84,6 +84,13 @@ class NativeInstallerSetupTests(unittest.TestCase):
         ):
             self.assertIn(source, installer)
 
+    def test_native_installer_bundles_readme_screenshots(self):
+        installer = (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
+        self.assertIn('Source: "..\\docs\\assets\\product\\*.png"', installer)
+        self.assertIn('DestDir: "{app}\\docs\\assets\\product"', installer)
+        for image in ("dashboard.png", "live-studio.png", "creator-monitoring.png", "clip-library.png", "publishing.png"):
+            self.assertTrue((ROOT / "docs" / "assets" / "product" / image).is_file(), image)
+
     def test_native_installer_persists_the_verified_ffmpeg_executable(self):
         setup = (ROOT / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
         supervisor = (ROOT / "desktop" / "StreamSnip.Desktop" / "EngineSupervisor.cs").read_text(encoding="utf-8")
@@ -97,6 +104,42 @@ class NativeInstallerSetupTests(unittest.TestCase):
         live = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.Live.cs").read_text(encoding="utf-8")
         self.assertIn('CreateButton("Repair runtime"', live)
         self.assertIn("-NativeDesktop -NonInteractive -SkipLaunch -NoPause", live)
+
+    def test_dashboard_session_details_are_present_and_updated_during_polling(self):
+        dashboard = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.Dashboard.cs").read_text(encoding="utf-8")
+        self.assertIn("_dashboardClipDetail", dashboard)
+        self.assertIn("_dashboardChunkDetail", dashboard)
+        self.assertIn("_dashboardProgressStatus", dashboard)
+        self.assertIn("_dashboardProgressPercent", dashboard)
+        self.assertIn("Visibility = state.Running ? Visibility.Visible : Visibility.Collapsed", dashboard)
+        self.assertIn("_dashboardProgressRow.Visibility = _state.Running ? Visibility.Visible : Visibility.Collapsed", dashboard)
+        self.assertIn("_dashboardProgress.Value = Math.Clamp(_state.Progress, 0, 100)", dashboard)
+        self.assertIn("_dashboardClipDetail.Text = $\"Clips", dashboard)
+        self.assertIn("_dashboardChunkDetail.Text = $\"Chunks", dashboard)
+
+    def test_engine_recovery_notice_survives_page_renders(self):
+        page = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.xaml.cs").read_text(encoding="utf-8")
+        render = page[page.index("private void RenderCurrentPage()") : page.index("private async Task CopyDiagnosticTextAsync")]
+        self.assertIn("RestoreEngineNotice();", render)
+        self.assertIn("if (_engineNotice is null)", render)
+        self.assertIn("PageHost.Children.Insert(0, _engineNotice)", render)
+
+    def test_uninstaller_is_retry_safe_and_never_deletes_programs_parent(self):
+        cleanup = (ROOT / "installer" / "uninstall_windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("$localRoot = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA \"StreamSnip AI\" } else { $null }", cleanup)
+        self.assertNotIn("else { Split-Path -Parent $AppDir }", cleanup)
+        self.assertIn("StreamSnipAI-config-$backupKey", cleanup)
+        self.assertIn("if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf))", cleanup)
+        self.assertLess(cleanup.index("Invoke-OwnedDependencyCleanup"), cleanup.index('Remove-PathSafely $localRoot'))
+        self.assertIn("Save-DependencyOwnership", cleanup)
+        self.assertIn("$ownership.python_installed_by_streamsnip = $false", cleanup)
+        self.assertIn("$ownership.ffmpeg_installed_by_streamsnip = $false", cleanup)
+        self.assertIn("Configuration backup retained for retry", cleanup)
+
+    def test_mobile_menu_escape_restores_focus_to_its_toggle(self):
+        script = (ROOT / "docs" / "assets" / "site.js").read_text(encoding="utf-8")
+        self.assertIn('if (event.key === "Escape" && !menu.hidden)', script)
+        self.assertIn("closeMenu();\n        menuToggle.focus();", script)
 
     def test_uninstaller_prompts_keep_config_or_remove_all_data(self):
         installer = (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="StreamSnip_Desktop.MainPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -256,7 +256,7 @@
                     <TextBlock Text="·" Foreground="{StaticResource LineBrush}" />
                     <TextBlock Text="Capture and rendering stay on this PC" FontSize="16" Foreground="{StaticResource MutedTextBrush}" />
                 </StackPanel>
-                <TextBlock Grid.Column="2" Text="StreamSnip AI  ·  4.0.6" FontSize="15" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="StreamSnip AI  ·  4.0.7" FontSize="15" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Grid>
     </Grid>

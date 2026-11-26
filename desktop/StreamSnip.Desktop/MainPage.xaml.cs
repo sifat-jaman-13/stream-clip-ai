@@ -733,6 +733,19 @@ private void UpdateSidebarSelection()
 				_ = CopyDiagnosticTextAsync(ex.ToString())));
 			PageHost.Children.Add(CreatePanel("Page render error", "The native app is still running. This diagnostic captures the failing control so it can be fixed.", details));
 		}
+		RestoreEngineNotice();
+	}
+
+	private void RestoreEngineNotice()
+	{
+		if (_engineNotice is null)
+			return;
+		foreach (UIElement child in PageHost.Children)
+		{
+			if (ReferenceEquals(child, _engineNotice))
+				return;
+		}
+		PageHost.Children.Insert(0, _engineNotice);
 	}
 
 	private async Task CopyDiagnosticTextAsync(string text)

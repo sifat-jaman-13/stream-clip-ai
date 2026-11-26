@@ -78,15 +78,6 @@ public sealed class EngineSupervisor : IAsyncDisposable
         {
             start.Environment["STREAMSNIP_DATA_DIR"] = Path.GetFullPath(developmentConfig.DataRoot);
         }
-        if (!string.IsNullOrWhiteSpace(developmentConfig?.FfmpegExecutable) &&
-            File.Exists(developmentConfig.FfmpegExecutable))
-        {
-            var ffmpegPath = Path.GetFullPath(developmentConfig.FfmpegExecutable);
-            start.Environment["STREAMSNIP_FFMPEG_PATH"] = ffmpegPath;
-            var ffmpegDirectory = Path.GetDirectoryName(ffmpegPath);
-            if (!string.IsNullOrWhiteSpace(ffmpegDirectory))
-                start.Environment["PATH"] = ffmpegDirectory + Path.PathSeparator + start.Environment["PATH"];
-        }
 #if DEBUG
         else
         {
@@ -97,6 +88,15 @@ public sealed class EngineSupervisor : IAsyncDisposable
                 "StreamSnip AI", "native-development");
         }
 #endif
+        if (!string.IsNullOrWhiteSpace(developmentConfig?.FfmpegExecutable) &&
+            File.Exists(developmentConfig.FfmpegExecutable))
+        {
+            var ffmpegPath = Path.GetFullPath(developmentConfig.FfmpegExecutable);
+            start.Environment["STREAMSNIP_FFMPEG_PATH"] = ffmpegPath;
+            var ffmpegDirectory = Path.GetDirectoryName(ffmpegPath);
+            if (!string.IsNullOrWhiteSpace(ffmpegDirectory))
+                start.Environment["PATH"] = ffmpegDirectory + Path.PathSeparator + start.Environment["PATH"];
+        }
 
         var process = new Process { StartInfo = start, EnableRaisingEvents = true };
         var supervisor = new EngineSupervisor(process);

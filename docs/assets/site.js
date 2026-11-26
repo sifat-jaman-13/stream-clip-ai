@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
   const root = document.documentElement;
   const themeButtons = [...document.querySelectorAll("button[data-theme-choice]")];
   const appearance = document.getElementById("appearance");
@@ -84,7 +84,10 @@
     });
     menu.querySelectorAll("a").forEach(link => link.addEventListener("click",closeMenu));
     document.addEventListener("keydown",event => {
-      if (event.key === "Escape") closeMenu();
+      if (event.key === "Escape" && !menu.hidden) {
+        closeMenu();
+        menuToggle.focus();
+      }
     });
     window.addEventListener("resize",() => {
       if (window.innerWidth > 900) closeMenu();

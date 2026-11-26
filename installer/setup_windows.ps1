@@ -66,13 +66,16 @@ function Refresh-ProcessPath {
 
 function Test-SupportedPython([string]$File, [string[]]$Prefix = @()) {
     if (-not $File) { return $null }
+    $previousErrorActionPreference = $ErrorActionPreference
     try {
+        $ErrorActionPreference = "Continue"
         $commandArgs = @($Prefix) + @(
             "-c",
             "import sys; ok=sys.version_info[:2] >= (3,10) and sys.version_info.releaselevel == 'final' and sys.maxsize > 2**32; print(('OK|' if ok else 'NO|') + sys.executable + '|' + '.'.join(map(str, sys.version_info[:3]))); raise SystemExit(0 if ok else 2)"
         )
         $output = & $File @commandArgs 2>$null
-        if ($LASTEXITCODE -ne 0) { return $null }
+        $commandExitCode = $LASTEXITCODE
+        if ($commandExitCode -ne 0) { return $null }
         $line = [string](@($output) | Select-Object -Last 1)
         if (-not $line.StartsWith("OK|")) { return $null }
         $fields = $line.Split("|")
@@ -84,6 +87,8 @@ function Test-SupportedPython([string]$File, [string[]]$Prefix = @()) {
         }
     } catch {
         return $null
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
     }
 }
 
@@ -313,6 +318,53 @@ function Ensure-FFmpeg {
     return $ffmpeg
 }
 
+function Test-CudaWheelFiles([string]$RuntimePython) {
+    $probe = @'
+import importlib.util
+from pathlib import Path
+
+required = {
+    "nvidia.cublas": ("cublas64_12.dll", "cublasLt64_12.dll"),
+    "nvidia.cuda_runtime": ("cudart64_12.dll",),
+    "nvidia.cudnn": ("cudnn64_9.dll", "cudnn_ops64_9.dll"),
+}
+missing = []
+for package, names in required.items():
+    spec = importlib.util.find_spec(package)
+    if not spec or not spec.submodule_search_locations:
+        missing.append(package)
+        continue
+    package_root = Path(next(iter(spec.submodule_search_locations)))
+    for name in names:
+        if not (package_root / "bin" / name).is_file():
+            missing.append(f"{package}/bin/{name}")
+print("CUDA wheel DLL check: " + ("OK" if not missing else "missing " + ", ".join(missing)))
+raise SystemExit(1 if missing else 0)
+'@
+    $probePath = Join-Path $env:TEMP "streamsnip-cuda-wheel-probe-$PID.py"
+    $probeExit = 1
+    try {
+        Set-Content -LiteralPath $probePath -Value $probe -Encoding UTF8
+        $probeOutput = & $RuntimePython $probePath 2>&1
+        $probeExit = $LASTEXITCODE
+        $probeOutput | ForEach-Object { Write-Host $_ }
+    } finally {
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+    }
+    return ($probeExit -eq 0)
+}
+
+function Repair-CudaWheelDependencies([string]$RuntimePython) {
+    Write-Host "Repairing missing CUDA 12/cuDNN 9 wheel DLLs from PyPI..." -ForegroundColor Yellow
+    & $RuntimePython -m pip install --disable-pip-version-check --prefer-binary --force-reinstall nvidia-cublas-cu12 nvidia-cuda-runtime-cu12 "nvidia-cudnn-cu12>=9,<10"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not reinstall the CUDA/cuDNN runtime wheels. Check internet access and the pip output."
+    }
+    if (-not (Test-CudaWheelFiles $RuntimePython)) {
+        throw "CUDA/cuDNN packages were reinstalled, but required DLLs are still missing."
+    }
+}
+
 function Ensure-SpeechModels($RuntimePython, [string]$ModelRoot) {
     $models = @("distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base")
     $bootstrap = @'
@@ -322,19 +374,29 @@ import sys
 from faster_whisper import download_model
 
 root = Path(sys.argv[1])
+
+def is_valid_model(folder: Path) -> bool:
+    model_file = folder / "model.bin"
+    return (
+        model_file.is_file()
+        and model_file.stat().st_size > 1_000_000
+        and (folder / "config.json").is_file()
+        and (folder / "tokenizer.json").is_file()
+    )
+
 for name in sys.argv[2:]:
     destination = root / name
-    model_file = destination / "model.bin"
-    if model_file.is_file():
+    if is_valid_model(destination):
         print(f"Speech model already ready: {name}")
         continue
     if destination.exists():
+        print(f"Repairing incomplete speech model: {name}", flush=True)
         shutil.rmtree(destination, ignore_errors=True)
     destination.mkdir(parents=True, exist_ok=True)
     print(f"Downloading speech model: {name}", flush=True)
     downloaded = Path(download_model(name, output_dir=str(destination), local_files_only=False))
-    if not model_file.is_file() and not (downloaded / "model.bin").is_file():
-        raise RuntimeError(f"{name} downloaded without model.bin")
+    if not is_valid_model(destination) and not is_valid_model(downloaded):
+        raise RuntimeError(f"{name} download is incomplete (model.bin/config/tokenizer missing or invalid)")
     print(f"Speech model ready: {name}", flush=True)
 '@
     $bootstrapPath = Join-Path $env:TEMP "streamsnip-model-bootstrap-$PID.py"
@@ -358,7 +420,11 @@ function Save-HuggingFaceSetupSettings($Settings, [string]$SettingsPath) {
 }
 
 function Request-HuggingFaceToken {
-    $settingsPath = Join-Path $source "ai_settings.json"
+    $settingsPath = if ($NativeDesktop) {
+        Join-Path $logRoot "Library\ai_settings.json"
+    } else {
+        Join-Path $source "ai_settings.json"
+    }
     $settings = $null
     if (Test-Path $settingsPath) {
         try { $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json } catch {}
@@ -480,6 +546,12 @@ try {
 
     $ffmpeg = Ensure-FFmpeg
     Write-Host "FFmpeg: $ffmpeg" -ForegroundColor Green
+    $ffmpegProbe = & $ffmpeg -hide_banner -v error -f lavfi -i "color=c=black:s=128x128:d=0.1" -frames:v 1 -f null NUL 2>&1
+    $ffmpegProbeExit = $LASTEXITCODE
+    if ($ffmpegProbeExit -ne 0) {
+        throw ("FFmpeg was found but failed its decode/encode smoke test: " + (@($ffmpegProbe) -join " "))
+    }
+    Write-Host "FFmpeg decode/encode smoke test passed." -ForegroundColor Green
     if ($CheckOnly) {
         Write-Host "Installer prerequisites are available." -ForegroundColor Green
     } else {
@@ -556,9 +628,224 @@ try {
             Write-Host "StreamSnip AI dependencies are already installed." -ForegroundColor Green
         }
 
-        $speechModelRoot = Join-Path $source "models"
+        $nvidiaPresent = @(
+            Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+                Where-Object { $_.PNPDeviceID -like "*VEN_10DE*" -or $_.Name -match "NVIDIA" }
+        ).Count -gt 0
+        if ($nvidiaPresent -and -not (Test-CudaWheelFiles $runtimePython)) {
+            Repair-CudaWheelDependencies $runtimePython
+            Test-StreamSnipDependencyConsistency $runtimePython $python.Version
+        }
+
+        # Explicitly probe CTranslate2's CUDA runtime on every setup/repair.
+        # The actual model load and inference smoke below is the final GPU gate.
+        $cudaProbe = & $runtimePython -c "import ctranslate2; n=ctranslate2.get_cuda_device_count(); print('CUDA devices detected: ' + str(n)); raise SystemExit(0 if n > 0 else 3)" 2>&1
+        $cudaProbeExit = $LASTEXITCODE
+        $cudaProbe | ForEach-Object { Write-Host $_ }
+        if ($cudaProbeExit -eq 0) {
+            Write-Host "CUDA runtime is ready for Whisper inference." -ForegroundColor Green
+        } else {
+            if ($nvidiaPresent) {
+                throw "An NVIDIA GPU is installed, but CTranslate2 cannot initialize CUDA. Repair the NVIDIA driver/CUDA runtime before using StreamSnip AI."
+            }
+            Write-Host "No NVIDIA CUDA GPU was detected; StreamSnip AI will use CPU inference." -ForegroundColor Yellow
+        }
+
+        # Native engine uses STREAMSNIP_DATA_DIR=<Library>, so its active
+        # Whisper models must live in Library\models, not the packaged source tree.
+        $speechModelRoot = if ($NativeDesktop) {
+            Join-Path $logRoot "Library\models"
+        } else {
+            Join-Path $source "models"
+        }
+        if ($NativeDesktop) {
+            $legacyModelRoot = Join-Path $source "models"
+            New-Item -ItemType Directory -Force -Path $speechModelRoot | Out-Null
+            foreach ($modelName in @("distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base")) {
+                $legacyModelPath = Join-Path $legacyModelRoot $modelName
+                $modelDestination = Join-Path $speechModelRoot $modelName
+                $legacyBin = Join-Path $legacyModelPath "model.bin"
+                if (-not (Test-Path -LiteralPath $modelDestination) -and
+                    (Test-Path -LiteralPath $legacyBin) -and
+                    (Get-Item -LiteralPath $legacyBin).Length -gt 1MB -and
+                    (Test-Path (Join-Path $legacyModelPath "config.json")) -and
+                    (Test-Path (Join-Path $legacyModelPath "tokenizer.json"))) {
+                    Move-Item -LiteralPath $legacyModelPath -Destination $modelDestination
+                    Write-Host "Moved verified installed model into the engine's active model store: $modelName" -ForegroundColor Green
+                }
+            }
+        }
         Write-Host "Downloading and verifying StreamSnip AI speech models. This can take a while and needs an internet connection..." -ForegroundColor Cyan
         Ensure-SpeechModels $runtimePython $speechModelRoot
+
+        # Exercise the exact default Whisper model through CUDA inference before
+        # marking setup complete. This catches CUDA DLL, model, and backend issues
+        # that package imports alone cannot detect.
+        $whisperSmoke = @'
+import os
+import sys
+import tempfile
+import wave
+import subprocess
+import threading
+from functools import partial
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from pathlib import Path
+
+root = Path(sys.argv[1])
+source = Path(sys.argv[2])
+os.environ["STREAMSNIP_DATA_DIR"] = str(root.parent)
+os.environ["STREAMSNIP_FFMPEG_PATH"] = sys.argv[3]
+sys.path.insert(0, str(source))
+import autoclip  # initializes the same CUDA DLL search paths as the running engine
+import numpy as np
+import ctranslate2
+from faster_whisper import WhisperModel
+
+name = "distil-large-v3"
+model_path = root / name
+device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+compute_types = ("float16", "int8_float16") if device == "cuda" else ("int8",)
+last_error = None
+model = None
+for compute_type in compute_types:
+    try:
+        print(f"Loading installed default Whisper model on {device} ({compute_type})...", flush=True)
+        model = WhisperModel(str(model_path), device=device, compute_type=compute_type)
+        break
+    except Exception as exc:
+        last_error = exc
+if model is None:
+    raise RuntimeError(f"Default Whisper model could not load on {device}: {last_error}")
+segments, _ = model.transcribe(np.zeros(32000, dtype=np.float32), language="en", vad_filter=False, beam_size=1)
+list(segments)
+print(f"WHISPER_RUNTIME_SMOKE_PASS model={name} device={device}", flush=True)
+
+# Verify the installed Engine.transcribe path too, including FFmpeg decoding
+# and optional VAD behavior on Python versions without ONNX Runtime.
+autoclip._model = model
+autoclip._model_key = (name, device)
+smoke_wav = Path(tempfile.gettempdir()) / f"streamsnip-engine-transcribe-smoke-{os.getpid()}.wav"
+with wave.open(str(smoke_wav), "wb") as audio_file:
+    audio_file.setnchannels(1)
+    audio_file.setsampwidth(2)
+    audio_file.setframerate(16000)
+    audio_file.writeframes(bytes(32000 * 2))
+engine = autoclip.Engine(autoclip.clean_cfg({"model": name}), lambda *_: None)
+engine.transcribe(str(smoke_wav))
+smoke_wav.unlink(missing_ok=True)
+print("ENGINE_TRANSCRIPTION_SMOKE_PASS", flush=True)
+
+# Exercise actual clip rendering and Streamlink-to-FFmpeg capture using a local
+# generated HLS source. No account, credentials, or public stream are required.
+with tempfile.TemporaryDirectory(prefix="streamsnip-install-smoke-") as temp_dir:
+    smoke_root = Path(temp_dir)
+    smoke_out = smoke_root / "out"
+    smoke_rec = smoke_root / "rec"
+    smoke_hls = smoke_root / "hls"
+    for folder in (smoke_out, smoke_rec, smoke_hls):
+        folder.mkdir(parents=True, exist_ok=True)
+    autoclip.OUT = smoke_out
+    autoclip.REC = smoke_rec
+    ffmpeg = os.environ["STREAMSNIP_FFMPEG_PATH"]
+    source_video = smoke_root / "smoke-source.mp4"
+    source_result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=6",
+         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=6",
+         "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "128k", str(source_video)],
+        capture_output=True, text=True,
+    )
+    if source_result.returncode != 0 or not source_video.is_file():
+        raise RuntimeError(f"Could not create synthetic render/capture source: {source_result.stderr[-800:]}")
+
+    render_engine = autoclip.Engine(
+        autoclip.clean_cfg({"mode": "file", "output_format": "9:16",
+                            "layout": "Blur background", "subtitle_style": "Minimal"}),
+        lambda *_: None,
+    )
+    render_engine.out_dir = smoke_out
+    render_engine.ai_cfg_for_render = {"provider": "hooks"}
+    smoke_words = [(0.25, 0.65, "stream"), (0.65, 1.05, "snip"),
+                   (1.05, 1.55, "runtime"), (1.55, 2.0, "test")]
+    render_engine.render(source_video, 0.0, 5.0, smoke_words, "setup_render_smoke")
+    rendered = smoke_out / "setup_render_smoke.mp4"
+    if not rendered.is_file() or rendered.stat().st_size < 10000:
+        raise RuntimeError("The installed clip renderer did not produce a valid MP4.")
+    decode_result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-v", "error", "-i", str(rendered), "-f", "null", "NUL"],
+        capture_output=True, text=True,
+    )
+    if decode_result.returncode != 0:
+        raise RuntimeError(f"The rendered MP4 failed FFmpeg decode verification: {decode_result.stderr[-800:]}")
+    print("RENDER_RUNTIME_SMOKE_PASS", flush=True)
+
+    hls_result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source_video),
+         "-c", "copy", "-hls_time", "2", "-hls_list_size", "0",
+         "-hls_flags", "independent_segments",
+         "-hls_segment_filename", str(smoke_hls / "capture_%03d.ts"),
+         str(smoke_hls / "live.m3u8")],
+        capture_output=True, text=True,
+    )
+    if hls_result.returncode != 0 or not (smoke_hls / "live.m3u8").is_file():
+        raise RuntimeError(f"Could not create the local HLS capture test stream: {hls_result.stderr[-800:]}")
+
+    class QuietHandler(SimpleHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+    handler = partial(QuietHandler, directory=str(smoke_hls))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    capture_url = f"http://127.0.0.1:{server.server_port}/live.m3u8"
+
+    class CaptureSmokeEngine(autoclip.Engine):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.captured_segments = []
+
+        def process(self, path):
+            segment_path = Path(path)
+            self.captured_segments.append((segment_path, segment_path.stat().st_size))
+
+    capture_engine = CaptureSmokeEngine(
+        autoclip.clean_cfg({"mode": "live", "target": capture_url,
+                            "chunk_min": 3, "clips_per_chunk": 0}),
+        lambda *_: None,
+    )
+    capture_engine.rec_dir = smoke_rec
+    capture_engine.out_dir = smoke_out
+    capture_engine.seg_seconds = 3
+    try:
+        capture_engine.record_session(capture_url)
+    finally:
+        server.shutdown()
+        server.server_close()
+    if not capture_engine.captured_segments or max(size for _, size in capture_engine.captured_segments) < 200000:
+        raise RuntimeError("Streamlink/FFmpeg capture produced no usable recording segment.")
+    captured_path = capture_engine.captured_segments[0][0]
+    captured_decode = subprocess.run(
+        [ffmpeg, "-hide_banner", "-v", "error", "-i", str(captured_path), "-f", "null", "NUL"],
+        capture_output=True, text=True,
+    )
+    if captured_decode.returncode != 0:
+        raise RuntimeError(f"The captured segment failed FFmpeg decode verification: {captured_decode.stderr[-800:]}")
+    print("CAPTURE_RUNTIME_SMOKE_PASS", flush=True)
+'@
+        $whisperSmokePath = Join-Path $env:TEMP "streamsnip-whisper-smoke-$PID.py"
+        try {
+            Set-Content -LiteralPath $whisperSmokePath -Value $whisperSmoke -Encoding UTF8
+            & $runtimePython $whisperSmokePath $speechModelRoot $source $ffmpeg
+            if ($LASTEXITCODE -ne 0) {
+                throw "Installed default Whisper model failed its real inference smoke test. Capture/render setup cannot be marked complete."
+            }
+        } finally {
+            Remove-Item -LiteralPath $whisperSmokePath -Force -ErrorAction SilentlyContinue
+        }
 
         # Commit the runtime migration only after dependencies and speech models are verified.
         if ($script:RuntimeBackupPath -and (Test-Path -LiteralPath $script:RuntimeBackupPath)) {
@@ -579,6 +866,7 @@ try {
                 source_root = $source
                 python_executable = $runtimePython
                 data_root = $dataRoot
+                ffmpeg_executable = $ffmpeg
             }
             $nativeConfigJson = $nativeConfig | ConvertTo-Json -Depth 4
             $utf8NoBom = New-Object System.Text.UTF8Encoding($false)

@@ -2,7 +2,11 @@
 
 ## Platform
 
-Native Windows desktop application built with WinUI 3 and backed by a local Python media engine. The primary supported installation is Windows 10/11 x64. A React and TypeScript dashboard is maintained as a separate browser-oriented interface and development path.
+adaptive
+
+- **Native desktop design language:** Windows Fluent, implemented with WinUI 3 for Windows 10/11 x64.
+- **Browser design language:** The React and TypeScript dashboard is a separate browser-oriented surface with its own responsive web system.
+- **Shared product model:** Both surfaces present the same local-first creator workflow; the installed native Windows shell remains the primary desktop experience and owns the local Python media engine.
 
 ## Users
 
@@ -48,9 +52,9 @@ Workspace request throttling, account-specific posting caps, and upstream platfo
 ## Brand and appearance
 
 - Product name: StreamSnip AI.
-- Default visual system: Odysseus graphite with cyan information accents and coral actions.
+- Default visual system: Odysseus, with graphite work surfaces, arctic-cyan information, coral actions, and semantic green/amber status colors.
 - The React interface has multiple curated themes and font choices; JetBrains Mono is the default.
-- The native interface mirrors the core semantic palette and typography.
+- The native interface uses the same default palette and JetBrains Mono across shell, content, and native controls.
 - The interface is an original creator workspace informed by familiar creator-studio patterns, not a pixel copy of another product.
 
 ## Product principles

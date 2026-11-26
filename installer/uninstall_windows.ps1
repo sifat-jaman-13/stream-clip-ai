@@ -2,91 +2,126 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$AppDir,
     [string]$DependencyStatePath = "",
+    [switch]$KeepConfig,
+    [switch]$RemoveAllData,
     [switch]$SkipGlobalDependencyRemoval
 )
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 $AppDir = [IO.Path]::GetFullPath($AppDir)
-$logRoot = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "StreamSnip AI" } else { $AppDir }
-$uninstallLog = Join-Path $logRoot "uninstall-cleanup.log"
-
-try { New-Item -ItemType Directory -Force -Path $logRoot | Out-Null } catch {}
+$localRoot = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "StreamSnip AI" } else { Split-Path -Parent $AppDir }
+$appDataRoot = Join-Path $localRoot "Library"
+$uninstallLog = Join-Path $env:TEMP "StreamSnipAI-uninstall-$PID.log"
+if (-not $DependencyStatePath) {
+    $DependencyStatePath = Join-Path $localRoot "installer-dependencies.json"
+}
+$ownership = $null
+if (Test-Path -LiteralPath $DependencyStatePath) {
+    try { $ownership = Get-Content -LiteralPath $DependencyStatePath -Raw | ConvertFrom-Json }
+    catch { Write-Host "Could not read dependency ownership; shared global dependencies will be kept." }
+}
 
 function Write-CleanupLog([string]$Message) {
     try { Add-Content -LiteralPath $uninstallLog -Value ("[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message) } catch {}
 }
 
-function Remove-AppDependency([string]$Path, [string]$Label) {
+function Remove-PathSafely([string]$Path, [string]$Label) {
+    if (-not (Test-Path -LiteralPath $Path)) { return }
     try {
-        $resolvedPath = [IO.Path]::GetFullPath($Path)
-        $prefix = $AppDir.TrimEnd('\') + '\'
-        if (-not $resolvedPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-            Write-CleanupLog "Skipped $Label because its path was outside the application folder."
-            return
-        }
-        if (Test-Path -LiteralPath $resolvedPath) {
-            Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction Stop
-            Write-CleanupLog "Removed $Label."
-        } else {
-            Write-CleanupLog "$Label was already absent."
-        }
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+        Write-CleanupLog "Removed $Label."
     } catch {
-        Write-CleanupLog "Could not remove ${Label}: $($_.Exception.Message)"
+        Write-CleanupLog "ERROR removing ${Label}: $($_.Exception.Message)"
+        throw
     }
 }
 
-# These are app-owned generated dependencies. User clips, recordings, and settings are kept.
-Remove-AppDependency (Join-Path $AppDir "runtime") "isolated Python runtime and pip packages"
-Remove-AppDependency (Join-Path $AppDir "python-base") "app-local fallback Python installation"
-Remove-AppDependency (Join-Path $AppDir "source\models") "downloaded Whisper speech models"
-
-if (-not $DependencyStatePath) {
-    $DependencyStatePath = Join-Path $logRoot "installer-dependencies.json"
-}
-
-if (-not $SkipGlobalDependencyRemoval -and (Test-Path -LiteralPath $DependencyStatePath)) {
+# Stop only StreamSnip-owned processes before deleting runtime files.
+$appPrefix = $AppDir.TrimEnd('\') + '\'
+$ownedProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+    ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($appPrefix, [StringComparison]::OrdinalIgnoreCase)) -or
+    ($_.CommandLine -and $_.CommandLine.IndexOf($appPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        ($_.Name -match '^(python|pythonw|StreamSnip\.Desktop)\.exe$'))
+})
+foreach ($processInfo in $ownedProcesses) {
     try {
-        $ownership = Get-Content -LiteralPath $DependencyStatePath -Raw | ConvertFrom-Json
+        Stop-Process -Id $processInfo.ProcessId -Force -ErrorAction Stop
+        Write-CleanupLog "Stopped StreamSnip-owned process $($processInfo.ProcessId) ($($processInfo.Name))."
     } catch {
-        $ownership = $null
-        Write-CleanupLog "Dependency ownership record was unreadable; global Python and FFmpeg will be kept."
+        Write-CleanupLog "Could not stop process $($processInfo.ProcessId): $($_.Exception.Message)"
     }
+}
+Start-Sleep -Milliseconds 700
 
-    if ($ownership) {
-        $winget = Get-Command winget.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $winget -and ($ownership.python_installed_by_streamsnip -or $ownership.ffmpeg_installed_by_streamsnip)) {
-            Write-CleanupLog "WinGet was not found; app-installed global dependencies could not be removed."
-        } else {
-            if ($ownership.python_installed_by_streamsnip) {
-                try {
-                    & $winget.Source uninstall --id Python.Python.3.12 --exact --source winget --disable-interactivity 2>&1 |
-                        ForEach-Object { Write-CleanupLog ([string]$_) }
-                    if ($LASTEXITCODE -eq 0) { Write-CleanupLog "Removed Python 3.12 installed by StreamSnip AI." }
-                    else { Write-CleanupLog "WinGet could not remove Python 3.12 (exit $LASTEXITCODE)." }
-                } catch { Write-CleanupLog "Python uninstall failed: $($_.Exception.Message)" }
-            }
-            if ($ownership.ffmpeg_installed_by_streamsnip) {
-                try {
-                    & $winget.Source uninstall --id Gyan.FFmpeg --exact --source winget --disable-interactivity 2>&1 |
-                        ForEach-Object { Write-CleanupLog ([string]$_) }
-                    if ($LASTEXITCODE -eq 0) { Write-CleanupLog "Removed FFmpeg installed by StreamSnip AI." }
-                    else { Write-CleanupLog "WinGet could not remove FFmpeg (exit $LASTEXITCODE)." }
-                } catch { Write-CleanupLog "FFmpeg uninstall failed: $($_.Exception.Message)" }
-            }
+# Keep only explicit configuration files. Clips, recordings (including streamsnip.db),
+# native-engine.json, cached models, runtime logs and diagnostic traces are never kept.
+if ($KeepConfig) {
+    $configFiles = @(
+        @{ Relative = "desktop-preferences.json"; Target = "desktop-preferences.json" },
+        @{ Relative = "Library\settings.json"; Target = "Library\settings.json" },
+        @{ Relative = "Library\ai_settings.json"; Target = "Library\ai_settings.json" },
+        @{ Relative = "Library\zernio.json"; Target = "Library\zernio.json" },
+        @{ Relative = "Library\publishing.json"; Target = "Library\publishing.json" },
+        @{ Relative = "Library\custom_words.txt"; Target = "Library\custom_words.txt" }
+    )
+    $backupRoot = Join-Path $env:TEMP "StreamSnipAI-config-$PID"
+    New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+    foreach ($entry in $configFiles) {
+        $sourcePath = Join-Path $localRoot $entry.Relative
+        if (Test-Path -LiteralPath $sourcePath -PathType Leaf) {
+            $backupPath = Join-Path $backupRoot $entry.Target
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backupPath) | Out-Null
+            Copy-Item -LiteralPath $sourcePath -Destination $backupPath -Force
+            Write-CleanupLog "Preserved configuration: $($entry.Relative)"
         }
     }
 } else {
-    Write-CleanupLog "No owned global dependencies were recorded; Python and FFmpeg were left untouched."
+    $backupRoot = ""
 }
 
-if (Test-Path -LiteralPath $DependencyStatePath) {
-    try {
-        Remove-Item -LiteralPath $DependencyStatePath -Force -ErrorAction Stop
-        Write-CleanupLog "Removed dependency ownership record."
-    } catch {
-        Write-CleanupLog "Could not remove dependency ownership record: $($_.Exception.Message)"
+Remove-PathSafely $localRoot "StreamSnip AI app data"
+
+if ($KeepConfig -and $backupRoot -and (Test-Path -LiteralPath $backupRoot)) {
+    New-Item -ItemType Directory -Force -Path $localRoot | Out-Null
+    Get-ChildItem -LiteralPath $backupRoot -Force | ForEach-Object {
+        $destination = Join-Path $localRoot $_.Name
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+        Copy-Item -LiteralPath $_.FullName -Destination $destination -Recurse -Force
+    }
+    Remove-PathSafely $backupRoot "temporary configuration backup"
+    Write-CleanupLog "Restored only the explicitly whitelisted configuration files."
+}
+
+if (-not $SkipGlobalDependencyRemoval -and $ownership) {
+    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($winget) {
+        if ($ownership.python_installed_by_streamsnip) {
+            & $winget.Source uninstall --id Python.Python.3.12 --exact --source winget --disable-interactivity 2>&1 | ForEach-Object { Write-CleanupLog ([string]$_) }
+            if ($LASTEXITCODE -ne 0) {
+                Write-CleanupLog "ERROR: app-owned Python package uninstall returned $LASTEXITCODE."
+                throw "Could not uninstall the Python package installed by StreamSnip AI. Install/repair WinGet and retry uninstall."
+            }
+        }
+        if ($ownership.ffmpeg_installed_by_streamsnip) {
+            & $winget.Source uninstall --id Gyan.FFmpeg --exact --source winget --disable-interactivity 2>&1 | ForEach-Object { Write-CleanupLog ([string]$_) }
+            if ($LASTEXITCODE -ne 0) {
+                Write-CleanupLog "ERROR: app-owned FFmpeg package uninstall returned $LASTEXITCODE."
+                throw "Could not uninstall the FFmpeg package installed by StreamSnip AI. Install/repair WinGet and retry uninstall."
+            }
+        }
+    } elseif ($ownership.python_installed_by_streamsnip -or $ownership.ffmpeg_installed_by_streamsnip) {
+        Write-CleanupLog "ERROR: WinGet unavailable; app-owned global dependency uninstall could not be run."
+        throw "WinGet is unavailable, so StreamSnip AI cannot remove its app-owned global dependencies. Repair WinGet and retry uninstall."
     }
 }
 
-Write-CleanupLog "Uninstaller dependency cleanup finished. Clips, recordings, and local settings were not targeted."
+Remove-PathSafely (Join-Path $AppDir "runtime") "isolated Python runtime"
+Remove-PathSafely (Join-Path $AppDir "runtime.previous") "previous Python runtime backup"
+Remove-PathSafely (Join-Path $AppDir "python-base") "app-local Python base"
+Remove-PathSafely (Join-Path $AppDir "source\models") "downloaded speech models"
+Remove-PathSafely (Join-Path $AppDir "source\dashboard") "dashboard runtime payload"
+
+Write-CleanupLog "Uninstall cleanup completed. KeepConfig=$KeepConfig; RemoveAllData=$RemoveAllData."
+Remove-Item -LiteralPath $uninstallLog -Force -ErrorAction SilentlyContinue
+Write-Host "StreamSnip AI cleanup completed. All selected app data and generated runtime files were removed."
 exit 0

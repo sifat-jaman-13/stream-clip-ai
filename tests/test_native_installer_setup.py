@@ -14,7 +14,7 @@ class NativeInstallerSetupTests(unittest.TestCase):
         self.assertIn("-NonInteractive", installer)
         self.assertIn("ResultCode <> 0", installer)
         self.assertNotIn("setup_native_windows.ps1", installer)
-        self.assertEqual(installer.count("Exec(PowerShellPath"), 1)
+        self.assertEqual(installer.count("ShowCommand, ewWaitUntilTerminated, ResultCode"), 1)
 
     def test_silent_engine_setup_skips_optional_hugging_face_prompt(self):
         setup = (ROOT / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
@@ -41,8 +41,88 @@ class NativeInstallerSetupTests(unittest.TestCase):
         self.assertIn("native-engine.json", setup)
         self.assertLess(
             setup.index("Ensure-SpeechModels $runtimePython $speechModelRoot"),
-            setup.index("if ($NativeDesktop)"),
+            setup.index("# The native host reads this config"),
         )
+
+    def test_setup_repairs_missing_dependencies_and_checks_whisper_models(self):
+        setup = (ROOT / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        self.assertIn("Install-StreamSnipDependencies $runtimePython $requirements $python.Version", setup)
+        self.assertIn("Test-StreamSnipDependencyConsistency $runtimePython $python.Version", setup)
+        self.assertIn("Ensure-SpeechModels $runtimePython $speechModelRoot", setup)
+        self.assertIn('$speechModelRoot = if ($NativeDesktop)', setup)
+        self.assertIn('Join-Path $logRoot "Library\\models"', setup)
+        self.assertIn("Move-Item -LiteralPath $legacyModelPath -Destination $modelDestination", setup)
+        self.assertIn("model_file.is_file()", setup)
+        self.assertIn("is_valid_model(destination)", setup)
+        self.assertIn('folder / "tokenizer.json"', setup)
+        self.assertIn("ctranslate2.get_cuda_device_count()", setup)
+        self.assertIn("CUDA runtime is ready for Whisper inference.", setup)
+        self.assertIn("An NVIDIA GPU is installed, but CTranslate2 cannot initialize CUDA.", setup)
+        self.assertIn("nvidia-cublas-cu12", requirements)
+        self.assertIn("nvidia-cuda-runtime-cu12", requirements)
+        self.assertIn("nvidia-cudnn-cu12>=9,<10", requirements)
+        self.assertIn("function Test-CudaWheelFiles", setup)
+        self.assertIn('package_root / "bin" / name).is_file()', setup)
+        self.assertIn("$probeOutput | ForEach-Object { Write-Host $_ }", setup)
+        self.assertIn("function Repair-CudaWheelDependencies", setup)
+        self.assertIn("--force-reinstall", setup)
+        self.assertIn("WHISPER_RUNTIME_SMOKE_PASS", setup)
+        self.assertIn("ENGINE_TRANSCRIPTION_SMOKE_PASS", setup)
+        self.assertIn("CAPTURE_RUNTIME_SMOKE_PASS", setup)
+        self.assertIn("RENDER_RUNTIME_SMOKE_PASS", setup)
+        self.assertIn("FFmpeg decode/encode smoke test passed.", setup)
+
+    def test_native_installer_bundles_engine_files_for_repair(self):
+        installer = (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
+        for source in (
+            'Source: "..\\autoclip.py"',
+            'Source: "..\\requirements.txt"',
+            'Source: "setup_windows.ps1"',
+            'Source: "python315_support.ps1"',
+            'Source: "..\\dashboard\\dist\\*"',
+        ):
+            self.assertIn(source, installer)
+
+    def test_native_installer_persists_the_verified_ffmpeg_executable(self):
+        setup = (ROOT / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
+        supervisor = (ROOT / "desktop" / "StreamSnip.Desktop" / "EngineSupervisor.cs").read_text(encoding="utf-8")
+        engine = (ROOT / "autoclip.py").read_text(encoding="utf-8")
+        self.assertIn("ffmpeg_executable = $ffmpeg", setup)
+        self.assertIn('config?["ffmpeg_executable"]?.GetValue<string>()', supervisor)
+        self.assertIn('start.Environment["STREAMSNIP_FFMPEG_PATH"] = ffmpegPath', supervisor)
+        self.assertIn('os.environ.get("STREAMSNIP_FFMPEG_PATH", "")', engine)
+
+    def test_live_studio_offers_terminal_runtime_repair(self):
+        live = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.Live.cs").read_text(encoding="utf-8")
+        self.assertIn('CreateButton("Repair runtime"', live)
+        self.assertIn("-NativeDesktop -NonInteractive -SkipLaunch -NoPause", live)
+
+    def test_uninstaller_prompts_keep_config_or_remove_all_data(self):
+        installer = (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
+        self.assertIn("function InitializeUninstall(): Boolean;", installer)
+        self.assertIn("Keep only settings and configuration", installer)
+        self.assertIn("Remove all app data, clips, recordings, models, runtime and configuration", installer)
+        self.assertIn("IDYES", installer)
+        self.assertIn("IDNO", installer)
+        self.assertIn("usUninstall", installer)
+        self.assertIn("-KeepConfig", installer)
+        self.assertIn("-RemoveAllData", installer)
+
+    def test_uninstaller_removes_all_app_data_and_only_whitelisted_config_can_survive(self):
+        cleanup = (ROOT / "installer" / "uninstall_windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("[switch]$KeepConfig", cleanup)
+        self.assertIn("[switch]$RemoveAllData", cleanup)
+        self.assertIn("desktop-preferences.json", cleanup)
+        self.assertIn("settings.json", cleanup)
+        self.assertIn("ai_settings.json", cleanup)
+        self.assertIn("custom_words.txt", cleanup)
+        self.assertIn("Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop", cleanup)
+        self.assertIn("Remove-PathSafely $localRoot", cleanup)
+        self.assertIn("native-engine.json", cleanup)
+        self.assertIn("streamsnip.db", cleanup)
+        self.assertIn("Could not uninstall the Python package installed by StreamSnip AI", cleanup)
+        self.assertIn("WinGet is unavailable, so StreamSnip AI cannot remove its app-owned global dependencies", cleanup)
 
 
 if __name__ == "__main__":

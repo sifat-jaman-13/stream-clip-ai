@@ -39,12 +39,7 @@ public sealed partial class MainPage
 
     private void RenderSettingsPage()
     {
-        AddPageHeading("Settings", "Choose the AI model for moment selection and post metadata, then manage storage and appearance.");
-
-        PageHost.Children.Add(CreatePanel(
-            "AI provider",
-            "One selected provider analyzes viral moments and generates titles, descriptions, and topical tags.",
-            BuildAiSettingsTab()));
+        AddPageHeading("Settings", "Choose where recordings and finished clips are stored, then tune the appearance of your workspace.");
 
         var storage = new StackPanel { Spacing = 10 };
         var recordings = Input(SettingString("rec_dir"));

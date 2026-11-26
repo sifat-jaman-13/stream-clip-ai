@@ -11,7 +11,7 @@ public sealed partial class MainPage
         double leftWeight = 1.0,
         double rightWeight = 1.0)
     {
-        var grid = new Grid { ColumnSpacing = 16 };
+        var grid = new Grid { ColumnSpacing = 20 };
         grid.ColumnDefinitions.Add(new ColumnDefinition
         {
             Width = new GridLength(leftWeight, GridUnitType.Star)
@@ -28,9 +28,9 @@ public sealed partial class MainPage
 
         void ApplyBreakpoint(double width)
         {
-            var stacked = width < 820;
-            grid.ColumnSpacing = stacked ? 0 : 16;
-            grid.RowSpacing = stacked ? 16 : 0;
+            var stacked = width < 900;
+            grid.ColumnSpacing = stacked ? 0 : 20;
+            grid.RowSpacing = stacked ? 20 : 0;
 
             Grid.SetColumn(left, 0);
             Grid.SetRow(left, 0);

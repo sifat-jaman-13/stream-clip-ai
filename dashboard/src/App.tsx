@@ -16,7 +16,7 @@ import "./App.css";
 
 type PageId = "overview" | "live" | "creators" | "clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
 type ThemeId = "odysseus" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseas" | "ocean" | "forest" | "solarized" | "rose-graphite" | "ember" | "slate";
-type FontId = "jetbrains-mono" | "inter" | "open-sans" | "ibm-plex-sans" | "roboto" | "source-sans-3" | "segoe-ui" | "consolas";
+type FontId = "manrope" | "dm-sans" | "inter" | "open-sans" | "ibm-plex-sans" | "nunito-sans" | "roboto" | "source-sans-3" | "poppins" | "lato" | "jetbrains-mono" | "fira-code" | "segoe-ui" | "consolas" | "aptos" | "arial" | "tahoma" | "verdana" | "georgia" | "trebuchet-ms" | "times-new-roman";
 type StudioSetupTab = "capture" | "ai" | "speech" | "captions";
 type RecordLike = Record<string, any>;
 type ToastDetail = { tone: "success" | "error" | "info"; title: string; message?: string };
@@ -24,27 +24,47 @@ type ToastDetail = { tone: "success" | "error" | "info"; title: string; message?
 const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
   { id: "studio-dark", name: "Studio Dark", description: "Default · low-light workspace · vivid red", colors: ["#0f0f0f", "#181818", "#303030", "#ff0033"] },
   { id: "odysseus", name: "Odysseus", description: "Graphite · arctic cyan · coral", colors: ["#282c34", "#1b2028", "#355a66", "#e06c75"] },
-  { id: "studio-light", name: "Studio Light", description: "Clean neutral surfaces · signal red", colors: ["#f9f9f9", "#ffffff", "#e5e5e5", "#cc0000"] },
+  { id: "studio-light", name: "Studio Light", description: "Clean porcelain · slate ink · signal red", colors: ["#f3f5f8", "#ffffff", "#cad5e0", "#b42318"] },
   { id: "github", name: "GitHub Dark", description: "Midnight slate · signal red", colors: ["#0d1117", "#161b22", "#30363d", "#f85149"] },
   { id: "nord", name: "Nord", description: "Blue-gray · frost · soft cyan", colors: ["#2e3440", "#3b4252", "#4c566a", "#88c0d0"] },
-  { id: "odysseas", name: "Odysseus Paper", description: "Navy · chalk · warm orange", colors: ["#edf0ec", "#fffefa", "#d9dfd9", "#ef6a42"] },
+  { id: "odysseas", name: "Odysseus Paper", description: "Navy rail · mist green · burnt coral", colors: ["#eef2ef", "#fafcfa", "#cbd8d0", "#a3452d"] },
   { id: "ocean", name: "Ocean Depths", description: "Deep blue · sea glass · cyan", colors: ["#101c27", "#162635", "#2d4656", "#42b9cc"] },
   { id: "forest", name: "Forest Night", description: "Evergreen · moss · mint", colors: ["#111b17", "#182720", "#2e4737", "#83c99a"] },
-  { id: "solarized", name: "Solarized Paper", description: "Warm parchment · ink · teal", colors: ["#f6f2e8", "#fffdf6", "#d9d2c0", "#277a78"] },
+  { id: "solarized", name: "Solarized Paper", description: "Warm parchment · forest ink · deep teal", colors: ["#f2eedf", "#fffcf3", "#cfc4a7", "#17635e"] },
   { id: "rose-graphite", name: "Rose Graphite", description: "Warm charcoal · muted rose", colors: ["#211c20", "#2c242a", "#49353f", "#dd8ea4"] },
   { id: "ember", name: "Ember Studio", description: "Dark umber · copper · amber", colors: ["#1d1a16", "#28231d", "#4a3b2a", "#e8a34b"] },
   { id: "slate", name: "Slate Studio", description: "Cool graphite · steel blue", colors: ["#20262d", "#272f38", "#3c4853", "#8bb9d8"] },
 ];
 
 const fontOptions: Array<{ id: FontId; name: string; family: string; kind: string }> = [
-  { id: "inter", name: "Inter", family: 'Inter, "Segoe UI", sans-serif', kind: "Sans serif ? default" },
-  { id: "jetbrains-mono", name: "JetBrains Mono", family: '"JetBrains Mono", Consolas, monospace', kind: "Monospace" },
+  { id: "jetbrains-mono", name: "JetBrains Mono", family: '"JetBrains Mono", Consolas, monospace', kind: "Monospace · default" },
+  { id: "manrope", name: "Manrope", family: 'Manrope, "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "dm-sans", name: "DM Sans", family: '"DM Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "inter", name: "Inter", family: 'Inter, "Segoe UI", sans-serif', kind: "Sans serif" },
   { id: "open-sans", name: "Open Sans", family: '"Open Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
   { id: "ibm-plex-sans", name: "IBM Plex Sans", family: '"IBM Plex Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "nunito-sans", name: "Nunito Sans", family: '"Nunito Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
   { id: "roboto", name: "Roboto", family: 'Roboto, "Segoe UI", sans-serif', kind: "Sans serif" },
   { id: "source-sans-3", name: "Source Sans 3", family: '"Source Sans 3", "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "poppins", name: "Poppins", family: 'Poppins, "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "lato", name: "Lato", family: 'Lato, "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "fira-code", name: "Fira Code", family: '"Fira Code", Consolas, monospace', kind: "Monospace" },
   { id: "segoe-ui", name: "Segoe UI", family: '"Segoe UI", Arial, sans-serif', kind: "Windows system" },
   { id: "consolas", name: "Consolas", family: 'Consolas, "Courier New", monospace', kind: "Monospace" },
+  { id: "aptos", name: "Aptos", family: 'Aptos, "Segoe UI", sans-serif', kind: "Windows system" },
+  { id: "arial", name: "Arial", family: 'Arial, sans-serif', kind: "Windows system" },
+  { id: "tahoma", name: "Tahoma", family: 'Tahoma, sans-serif', kind: "Windows system" },
+  { id: "verdana", name: "Verdana", family: 'Verdana, sans-serif', kind: "Windows system" },
+  { id: "georgia", name: "Georgia", family: 'Georgia, serif', kind: "Serif" },
+  { id: "trebuchet-ms", name: "Trebuchet MS", family: '"Trebuchet MS", sans-serif', kind: "Windows system" },
+  { id: "times-new-roman", name: "Times New Roman", family: '"Times New Roman", serif', kind: "Serif" },
+];
+
+const fontGroups = [
+  { label: "Sans serif", items: fontOptions.filter((item) => item.kind === "Sans serif") },
+  { label: "Monospace", items: fontOptions.filter((item) => item.kind.startsWith("Monospace")) },
+  { label: "System fonts", items: fontOptions.filter((item) => item.kind === "Windows system") },
+  { label: "Serif", items: fontOptions.filter((item) => item.kind === "Serif") },
 ];
 
 const pageInfo: Record<PageId, { title: string; description: string }> = {
@@ -174,18 +194,51 @@ const initialFont = (): FontId => {
   try {
     const saved = localStorage.getItem("streamsnip.font") || "";
     const preferenceVersion = localStorage.getItem("streamsnip.font-version") || "";
-    if (preferenceVersion !== "1") {
-      // JetBrains Mono was the previous out-of-box choice; move only that legacy default to Inter.
-      const migrated = saved === "jetbrains-mono" ? "inter" : saved;
-      localStorage.setItem("streamsnip.font", migrated || "inter");
-      localStorage.setItem("streamsnip.font-version", "1");
+    if (preferenceVersion !== "8") {
+      // Restore the requested JetBrains Mono default after the temporary Manrope migration.
+      const migrated = !saved || saved === "manrope" || saved === "jetbrains-mono" || (preferenceVersion === "1" && saved === "inter") ? "jetbrains-mono" : saved;
+      localStorage.setItem("streamsnip.font", migrated);
+      localStorage.setItem("streamsnip.font-version", "8");
       if (fontOptions.some((item) => item.id === migrated)) return migrated as FontId;
-      return "inter";
+      return "jetbrains-mono";
     }
     if (fontOptions.some((item) => item.id === saved)) return saved as FontId;
   } catch { /* Local storage may be disabled. */ }
-  return "inter";
+  return "jetbrains-mono";
 };
+function rgbFromHex(value: string): [number, number, number] {
+  const hex = value.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return [0, 0, 0];
+  return [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number];
+}
+function relativeLuminance(value: string): number {
+  const channels = rgbFromHex(value).map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : Math.pow((normalized + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+function contrastRatio(foreground: string, background: string): number {
+  const a = relativeLuminance(foreground);
+  const b = relativeLuminance(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+function blendHex(target: string, foreground: string, amount: number): string {
+  const a = rgbFromHex(target);
+  const b = rgbFromHex(foreground);
+  return "#" + a.map((channel, index) => Math.round(channel * amount + b[index] * (1 - amount)).toString(16).padStart(2, "0")).join("");
+}
+function ensureContrastAcross(foreground: string, backgrounds: string[], minimum: number): string {
+  const worst = (candidate: string) => Math.min(...backgrounds.map((background) => contrastRatio(candidate, background)));
+  if (worst(foreground) >= minimum) return foreground;
+  const target = worst("#FFFFFF") >= worst("#000000") ? "#FFFFFF" : "#000000";
+  for (let step = 1; step <= 100; step += 1) {
+    const candidate = blendHex(target, foreground, step / 100);
+    if (worst(candidate) >= minimum) return candidate;
+  }
+  return target;
+}
+
 const toneFor = (phase: string, running = false): "neutral" | "success" | "warning" | "danger" | "live" => {
   if (phase === "error") return "danger";
   if (["waiting", "stopping", "transcribing", "analyzing", "rendering"].includes(phase)) return "warning";
@@ -219,6 +272,36 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    const inline = root.style;
+    const tokens = ["--ink", "--body", "--muted", "--sidebar-ink", "--sidebar-body", "--sidebar-muted", "--sidebar-line", "--accent-text", "--sidebar-accent-text", "--sidebar-accent-border", "--success-text", "--warning-text", "--danger-text"];
+    tokens.forEach((token) => inline.removeProperty(token));
+    const palette = window.getComputedStyle(root);
+    const color = (token: string) => palette.getPropertyValue(token).trim();
+    const surfaces = ["--app-bg", "--surface", "--surface-soft", "--surface-hover"].map(color);
+    const sidebar = [color("--sidebar-bg"), color("--sidebar-surface")];
+    const effectiveAccent = /^#[0-9a-f]{6}$/i.test(customAccent) ? customAccent : color("--accent");
+    const corrected: Array<[string, string, string[], number]> = [
+      ["--ink", color("--ink"), surfaces, 7],
+      ["--body", color("--body"), surfaces, 4.5],
+      ["--muted", color("--muted"), surfaces, 4.5],
+      ["--sidebar-ink", color("--sidebar-ink"), sidebar, 7],
+      ["--sidebar-body", color("--sidebar-body"), sidebar, 4.5],
+      ["--sidebar-muted", color("--sidebar-muted"), sidebar, 4.5],
+      ["--sidebar-line", color("--sidebar-line"), sidebar, 3],
+      ["--sidebar-accent-text", effectiveAccent, sidebar, 4.5],
+      ["--sidebar-accent-border", effectiveAccent, sidebar, 3],
+      ["--accent-text", effectiveAccent, surfaces, 4.5],
+      ["--success-text", color("--success"), surfaces, 4.5],
+      ["--warning-text", color("--warning"), surfaces, 4.5],
+      ["--danger-text", color("--danger"), surfaces, 4.5],
+    ];
+    corrected.forEach(([token, value, backgrounds, minimum]) => {
+      inline.setProperty(token, ensureContrastAcross(value, backgrounds, minimum));
+    });
+  }, [theme, customAccent]);
+
+  useEffect(() => {
     const style = document.documentElement.style;
     if (!customAccent) {
       ["--accent", "--accent-hover", "--accent-soft", "--accent-ink"].forEach((token) => style.removeProperty(token));
@@ -244,7 +327,7 @@ export default function App() {
     document.documentElement.style.setProperty("--font-family", selected.family);
     try {
       localStorage.setItem("streamsnip.font", font);
-      localStorage.setItem("streamsnip.font-version", "1");
+      localStorage.setItem("streamsnip.font-version", "8");
     } catch { /* Local storage may be disabled. */ }
   }, [font]);
 
@@ -382,9 +465,9 @@ export default function App() {
               <div className="theme-font-picker">
                 <label htmlFor="workspace-font">Font family</label>
                 <select id="workspace-font" value={font} onChange={(event) => setFont(event.target.value as FontId)}>
-                  {fontOptions.map((item) => <option key={item.id} value={item.id}>{item.name}{item.kind === "Monospace" ? " · Monospace" : ""}</option>)}
+                  {fontGroups.map((group) => <optgroup key={group.label} label={group.label}>{group.items.map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "jetbrains-mono" ? " · Default" : ""}</option>)}</optgroup>)}
                 </select>
-                <small>Saved on this device. Inter is the default across every theme; JetBrains Mono remains available as a monospace option.</small>
+                <small>JetBrains Mono is the default. Choose from 10 bundled sans-serif families, other monospace fonts, or system fonts.</small>
                 <span className="theme-font-preview" style={{ fontFamily: (fontOptions.find((item) => item.id === font) || fontOptions[0]).family }}>StreamSnip AI · Creator Studio</span>
               </div>
             </div> : null}
@@ -404,7 +487,7 @@ export default function App() {
         {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
         {page === "words" ? <HypeWordsPage key={workspace.words.text} workspace={workspace} /> : null}
         {page === "activity" ? <ActivityPage workspace={workspace} busy={busy} post={post} /> : null}
-        {page === "settings" ? <SettingsPage workspace={workspace} theme={theme} setTheme={setTheme} customAccent={customAccent} setCustomAccent={setCustomAccent} busy={busy} post={post} navigate={navigate} /> : null}
+        {page === "settings" ? <SettingsPage workspace={workspace} theme={theme} setTheme={setTheme} customAccent={customAccent} setCustomAccent={setCustomAccent} font={font} setFont={setFont} busy={busy} post={post} navigate={navigate} /> : null}
         {page === "help" ? <HelpPage navigate={navigate} /> : null}
         {page === "about" ? <AboutPage /> : null}
       </main>
@@ -1177,7 +1260,7 @@ function ActivityRow({ log, post, busy }: { log: LogEntry; post: <T,>(key: strin
   return <div className={"activity-row" + (isProblemLog(log) ? " is-problem" : "")}><time>{log.t}</time><i /><div><p>{log.m}</p>{lock ? <div className="file-lock-warning"><AlertCircle size={14} /><span>{lock.message || "A process is holding this file open."}</span><Button size="small" onClick={() => void post("stop-file-holder", "/api/stop_file_holder", { name: lock.file, pid: lock.pid })} disabled={!!busy}>Close locking app</Button></div> : null}</div></div>;
 }
 
-function SettingsPage({ workspace, theme, setTheme, customAccent, setCustomAccent, busy, post, navigate }: { workspace: Workspace; theme: ThemeId; setTheme: (theme: ThemeId) => void; customAccent: string; setCustomAccent: (value: string) => void; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
+function SettingsPage({ workspace, theme, setTheme, customAccent, setCustomAccent, font, setFont, busy, post, navigate }: { workspace: Workspace; theme: ThemeId; setTheme: (theme: ThemeId) => void; customAccent: string; setCustomAccent: (value: string) => void; font: FontId; setFont: (font: FontId) => void; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
   const [section, setSection] = useState("general");
   const sections: Array<[string, string, LucideIcon]> = [
     ["general", "General", Settings], ["appearance", "Appearance", Palette],
@@ -1186,7 +1269,7 @@ function SettingsPage({ workspace, theme, setTheme, customAccent, setCustomAccen
     <div className="settings-layout"><nav className="settings-subnav" aria-label="Application settings">{sections.map(([id, label, Icon]) => <button key={id} className={section === id ? "active" : ""} onClick={() => setSection(id)}><Icon size={16} />{label}</button>)}</nav>
       <div className="settings-main-column">
         {section === "general" ? <><GeneralSettings workspace={workspace} busy={busy} post={post} /><Panel title="Session setup lives in Studio" description="Capture behavior, AI provider, transcription, and caption design sit beside the source controls so they can be checked before a session starts."><Button kind="primary" onClick={() => navigate("live")}><Radio size={15} />Open Live Studio setup</Button></Panel></> : null}
-        {section === "appearance" ? <AppearanceSettings theme={theme} setTheme={setTheme} customAccent={customAccent} setCustomAccent={setCustomAccent} /> : null}
+        {section === "appearance" ? <AppearanceSettings theme={theme} setTheme={setTheme} customAccent={customAccent} setCustomAccent={setCustomAccent} font={font} setFont={setFont} /> : null}
       </div>
     </div>
   </div>;
@@ -1290,11 +1373,11 @@ function AISettings({ workspace }: { workspace: Workspace }) {
 function SpeechSettings({ workspace }: { workspace: Workspace }) {
   const settings = workspace.settings || {};
   const update = (patch: Partial<AppSettings>) => workspace.updateSettings(patch);
-  return <Panel title="Transcription" description="Faster-Whisper runs locally by default. A custom command can be supplied when needed.">
-    <Field label="Transcription provider"><select value={String(settings.transcriber_provider || "faster-whisper")} onChange={(event) => update({ transcriber_provider: event.target.value })}><option value="faster-whisper">Faster-Whisper</option><option value="custom-command">Custom command</option></select></Field>
+  return <Panel title="Caption provider" description="This provider is shared by every creator. Each creator keeps its own framing, subtitle appearance, and profanity treatment. Faster-Whisper runs locally by default; a custom command can be supplied when needed.">
+    <Field label="Caption / transcription provider"><select value={String(settings.transcriber_provider || "faster-whisper")} onChange={(event) => update({ transcriber_provider: event.target.value })}><option value="faster-whisper">Faster-Whisper</option><option value="custom-command">Custom command</option></select><small className="field-hint">Shared default across all creators.</small></Field>
     <div className="settings-grid"><Field label="Language"><input value={String(settings.transcriber_language || "auto")} onChange={(event) => update({ transcriber_language: event.target.value })} placeholder="auto" /><small className="field-hint">Use a language code, or auto for detection.</small></Field><Field label="Whisper model"><select value={String(settings.model || "distil-large-v3")} onChange={(event) => update({ model: event.target.value })}>{["distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base"].map((model) => <option key={model}>{model}</option>)}</select></Field></div>
     {settings.transcriber_provider === "custom-command" ? <Field label="Custom transcription command" hint="Executed by the local engine."><textarea rows={4} value={String(settings.transcriber_command || "")} onChange={(event) => update({ transcriber_command: event.target.value })} /></Field> : null}
-    <ToolRow icon={Cpu} title="GPU acceleration" detail="CUDA is selected automatically when a compatible NVIDIA GPU is available." />
+    <ToolRow icon={Cpu} title="GPU-first processing" detail="A supported GPU is used first. CPU processing is used only when no supported GPU is available." />
   </Panel>;
 }
 function RangeSetting({ label, value, min, max, step = 1, onChange }: {
@@ -1319,7 +1402,7 @@ function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mo
   const previewHighlightColor = highlightColors[String(settings.color || "Yellow")] || highlightColors.Yellow;
   const setRange = (key: string, value: number) => update({ [key]: value });
   return <div className="page-stack compact-stack">
-    <Panel title="Video layout" description="Set the output aspect ratio and framing preset used when rendering clips.">
+    <Panel title="Video layout" description="Shared clipping defaults across creators: output aspect ratio and rendering layout. Facecam/game regions, selected crop coordinates, subtitle styling, and profanity treatment stay with each creator.">
       <div className="settings-grid"><Field label="Output format"><select value={String(settings.output_format || "9:16")} onChange={(event) => update({ output_format: event.target.value })}>{["9:16", "16:9", "1:1", "4:5"].map((format) => <option key={format}>{format}</option>)}</select></Field><Field label="Layout preset"><select value={String(settings.layout || "Facecam + game (Twitch)")} onChange={(event) => update({ layout: event.target.value })}>{["Facecam + game (Twitch)", "Blur background", "Fill (crop center)", "Selected crop"].map((layout) => <option key={layout}>{layout}</option>)}</select></Field></div>
     </Panel>
     {layout === "Selected crop" ? <Panel title="Selected crop area" description="Set the crop rectangle as percentages of the source frame.">
@@ -1379,11 +1462,13 @@ function CaptionSettings({ workspace, mode, target }: { workspace: Workspace; mo
     </Panel>
   </div>;
 }
-function AppearanceSettings({ theme, setTheme, customAccent, setCustomAccent }: {
+function AppearanceSettings({ theme, setTheme, customAccent, setCustomAccent, font, setFont }: {
   theme: ThemeId;
   setTheme: (theme: ThemeId) => void;
   customAccent: string;
   setCustomAccent: (value: string) => void;
+  font: FontId;
+  setFont: (font: FontId) => void;
 }) {
   const selectedTheme = themes.find((item) => item.id === theme) || themes[0];
   return <Panel title="Workspace appearance" description="Choose from 12 palettes or set your own accent color. Appearance is saved on this device.">
@@ -1405,6 +1490,14 @@ function AppearanceSettings({ theme, setTheme, customAccent, setCustomAccent }: 
       <button type="button" className="theme-accent-reset" onClick={() => setCustomAccent("")} disabled={!customAccent}>
         Reset to theme
       </button>
+    </div>
+    <div className="theme-font-picker settings-font-picker">
+      <label htmlFor="settings-workspace-font">Application font</label>
+      <select id="settings-workspace-font" value={font} onChange={(event) => setFont(event.target.value as FontId)}>
+        {fontGroups.map((group) => <optgroup key={group.label} label={group.label}>{group.items.map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "jetbrains-mono" ? " · Default" : ""}</option>)}</optgroup>)}
+      </select>
+      <small>JetBrains Mono is the default. Choose a sans-serif typeface such as Manrope, Inter, or DM Sans whenever you prefer a cleaner reading style.</small>
+      <span className="theme-font-preview" style={{ fontFamily: (fontOptions.find((item) => item.id === font) || fontOptions[0]).family }}>The quick brown fox · StreamSnip AI</span>
     </div>
   </Panel>;
 }

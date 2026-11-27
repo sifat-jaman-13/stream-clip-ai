@@ -9,9 +9,16 @@ import autoclip
 
 class CreatorDatabaseTests(unittest.TestCase):
     def test_creator_profiles_and_live_settings_persist_and_cascade_delete(self):
+        persisted = {"min_score": 81}
+        def load_shared_settings():
+            return autoclip.clean_cfg(persisted)
+        def save_shared_settings(values):
+            persisted.clear()
+            persisted.update(values)
         with tempfile.TemporaryDirectory() as folder, patch.multiple(
             autoclip, _data_root=Path(folder),
-            load_settings=MagicMock(return_value=autoclip.clean_cfg({"min_score": 81})),
+            load_settings=MagicMock(side_effect=load_shared_settings),
+            save_settings=MagicMock(side_effect=save_shared_settings),
             apply_storage_paths=MagicMock(), streamlink_available=MagicMock(return_value=True),
         ):
             core = autoclip.Core()
@@ -23,7 +30,7 @@ class CreatorDatabaseTests(unittest.TestCase):
             self.assertEqual(reloaded.creators[first]["name"], "Creator One")
             self.assertEqual(reloaded.get_creator_settings(first)["min_score"], 93)
             self.assertEqual(reloaded.get_creator_settings(first)["color"], "Pink")
-            self.assertEqual(reloaded.get_creator_settings(second)["min_score"], 81)
+            self.assertEqual(reloaded.get_creator_settings(second)["min_score"], 93)
             reloaded.push = MagicMock()
             reloaded.remove_creator(first)
             db = sqlite3.connect(Path(folder) / "streamsnip.db")

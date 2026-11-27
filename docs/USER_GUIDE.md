@@ -1,4 +1,4 @@
-# StreamSnip AI User Guide
+﻿# StreamSnip AI User Guide
 
 This guide covers installation, first capture, creator monitoring, clip review, publishing, settings, storage, and troubleshooting.
 
@@ -12,10 +12,10 @@ The installed desktop app is **WinUI 3**. A supervised local Python engine perfo
 
 ## Screenshots
 
-Screenshots below are from the **4.0.9 native Windows Release build**.
+Screenshots below are from the **4.0.10 native Windows Release build**.
 
 <p align="center">
-  <img src="assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.9 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
+  <img src="assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.10 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
 </p>
 
 <details>
@@ -25,21 +25,21 @@ Screenshots below are from the **4.0.9 native Windows Release build**.
     <tr>
       <td width="50%">
         <p align="center"><strong>Live Studio</strong></p>
-        <img src="assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.9 Live Studio in Studio Dark with source selection and pre-capture configuration">
+        <img src="assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.10 Live Studio in Studio Dark with source selection and pre-capture configuration">
       </td>
       <td width="50%">
         <p align="center"><strong>Creator monitoring</strong></p>
-        <img src="assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.9 Creators page in Studio Dark showing independent live and recorded VOD monitors">
+        <img src="assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.10 Creators page in Studio Dark showing independent live and recorded VOD monitors">
       </td>
     </tr>
     <tr>
       <td width="50%">
         <p align="center"><strong>Clip Library</strong></p>
-        <img src="assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.9 Clip Library in Studio Dark with Ready to review and Scheduled tabs">
+        <img src="assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.10 Clip Library in Studio Dark with Ready to review and Scheduled tabs">
       </td>
       <td width="50%">
         <p align="center"><strong>Publisher</strong></p>
-        <img src="assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.9 Publisher in Studio Dark with five Zernio connection slots">
+        <img src="assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.10 Publisher in Studio Dark with five Zernio connection slots">
       </td>
     </tr>
   </table>
@@ -151,21 +151,23 @@ Open **Transcription** in Live Studio.
 
 Faster-Whisper transcription and media processing run locally. The first run may download model files, so allow time and disk space.
 
-### 6. Configure Captions and framing
+### 6. Configure creator-specific framing and captions
 
-Open **Captions** in Live Studio.
+When **Live stream** is selected, choose a profile from **Saved creators** and press **Use creator** before changing that creator's visual setup. All saved profiles are listed there.
 
-| Setting | Purpose |
-| --- | --- |
-| Video layout | Choose a supported layout such as facecam + gameplay, full video, or selected crop |
-| Output format | Choose 9:16 portrait, 16:9 landscape, 1:1 square, or 4:5 |
-| Subtitle mode | Karaoke or Classic |
-| Subtitle style | GTA Neon, Classic, Hormozi, Neon, MrBeast, Minimal, or Fire |
-| Creator credit | Set a manual handle or leave it blank to infer one from supported Twitch/YouTube URLs |
-| Show creator tag | Toggle the creator tag in the rendered video |
-| Filter detected profanity | Enable or disable the profanity filter |
+Open **Framing** to configure the selected creator:
 
-Facecam framing uses **local multi-frame facecam detection** with OpenCV and YuNet. It can assist with framing but is not guaranteed to identify every face or choose the ideal crop for every scene. Review the final clip.
+1. Set that creator's **Video layout** and **Output format** at the top of the tab. Each creator can use a different layout and ratio: 9:16 portrait, 16:9 landscape, 1:1 square, or 4:5.
+2. Choose a live stream or use **Browse video** to load a local VOD, then press **Load source frame**.
+3. Press **Find facecam automatically** to analyze multiple frames with the local OpenCV/YuNet detector.
+4. If the detector has no confident match, use the manual editor: drag the **pink facecam region** and **cyan gameplay region**, and resize them with their corner handles.
+5. Press **Save framing** or **Save creator setup** when the placement looks right.
+
+Open **Captions** to set that creator's subtitle mode/style, font, colors, position, creator credit, and creator tag.
+
+**Shared defaults are separate from creator profiles:** the AI provider, caption/transcription provider, clipping thresholds (chunk length, before/after seconds, minimum score, bitrate, and clips per chunk), and profanity filter apply across creators and local videos. Changing those shared defaults does not overwrite another creator's framing or caption appearance.
+
+Facecam detection is local and GPU-first when a supported GPU provider is available; CPU is used when no compatible GPU is present. Detection can still miss faces or choose an imperfect crop, so review the result and adjust the manual regions when needed.
 
 ### 7. Start and stop capture
 
@@ -200,7 +202,7 @@ Use **Creators** when you want to keep multiple channels organized independently
 5. Use **Watch VOD folder** to watch that creator's recorded-VOD folder.
 6. Use **Open folders** to find that creator's recordings and rendered clips.
 
-Creator monitoring, VOD folder watching, and Live Studio capture are separate controls. Starting a creator monitor does not start the current Live Studio capture. Removing a creator profile removes the monitor profile only; existing recordings and clips are kept.
+Creator monitoring, VOD folder watching, and Live Studio capture are separate controls. Starting a creator monitor does not start the current Live Studio capture. Removing a creator profile removes the monitor profile only; existing recordings and clips are kept. Live Studio visual framing, layout/aspect ratio, and caption appearance are stored per creator; AI and caption providers plus clipping defaults remain shared.
 
 ## Clip Library and Scheduled
 
@@ -249,7 +251,7 @@ Studio Dark is the default appearance for new installs. You can switch to any of
 
 Use the topbar appearance selector or **Settings > Appearance** to choose a theme. Where available, you can set a custom six-digit hex accent and reset it to the active theme's default. The accent changes primary actions and current selections; semantic success, warning, and error colors remain distinct.
 
-In the native app, **Application font** offers the bundled Inter, Open Sans, IBM Plex Sans, Roboto, and Source Sans 3 families, plus Windows Segoe UI and the JetBrains Mono / Consolas monospace families. Inter is the default across every theme; JetBrains Mono remains available as a monospace option. **Application text size** offers Small (13 DIP body), Medium (14 DIP body, default), and Large (16 DIP body). Headings and supporting text scale proportionally. Both settings are saved locally and affect the desktop UI only; rendered video captions keep their separate typography.
+In the native app, **Application font** offers JetBrains Mono by default, plus the bundled Inter, Open Sans, IBM Plex Sans, Roboto, and Source Sans 3 families, Windows Segoe UI, and Consolas. The selected family applies across the entire desktop interface and can be changed at any time. **Application text size** offers Small (13 DIP body), Medium (14 DIP body, default), and Large (16 DIP body). Headings and supporting text scale proportionally. Both settings are saved locally and affect the desktop UI only; rendered video captions keep their separate typography.
 
 Settings are saved locally. AI credentials are managed separately in Live Studio's AI provider tab and require the explicit **Save AI settings** action.
 

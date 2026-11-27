@@ -1,4 +1,108 @@
+## [4.0.16] - 2026-11-28
+
+### Fixed
+- Replace immutable WinUI theme-dictionary brush entries instead of attempting to mutate their shared SolidColorBrush instances during ApplyTheme.
+- Select the native Light/Dark template once during page construction; runtime palette changes now repaint the persistent shell directly without changing the locked RequestedTheme property.
+- Repaint the sidebar, workspace card, navigation, top bar, search field, engine status, footer, and page-action host together on every theme change.
+- Move palette selection entirely into Settings and remove the top-bar appearance control.
+- Replace native font glyph icons with vector path geometry for search and video placeholders so icons render independently of the selected application font.
+- Reset the main content scroll position when navigating between pages.
+- Preserve all 12 native palettes and their control-state foreground/background mappings while avoiding startup-time UnauthorizedAccessException.
+
+### Verification
+- Native Release build, full Python tests, dashboard lint/build, theme contrast/parity audits, and installed startup verification passed.
+- Manually switched Studio Dark to Studio Light, Light to Solarized Paper, and Solarized Paper back to Studio Dark in the running app; shell surfaces and text updated together in each transition.
+
+## [4.0.15] - 2026-11-28
+
+### Fixed
+- Rebuilt Studio Light, Odysseus Paper, and Solarized Paper with distinct surface levels, deeper readable text, and restrained, semantically distinct action/status colors.
+- Make WinUI Light and Default theme dictionaries follow StreamSnip's selected palette for text inputs, dropdowns, buttons, checkboxes, radio controls, progress bars, and tab headers; high-contrast mode continues to use Windows resources.
+- Correct dropdown selected/hover/disabled colors so a control never combines white text with a light surface or the reverse.
+- Center creator initials within a dedicated square content host and explicitly position avatars in the Dashboard, Live Studio, and Creators grids.
+- Give the Dashboard creator-monitor column sufficient width and row spacing so creator initials and labels no longer crowd each other.
+- Update the browser theme swatches and creator initials to match the selected palette and centered avatar component.
+
+### Verification
+- Added theme-dictionary and avatar-layout regression checks; run the native and full test suites, WCAG contrast and palette-parity audits, dashboard lint/build, and installed-app visual checks.
+
+## [4.0.14] - 2026-11-28
+
+### Fixed
+- Reworked all three light palettes with distinct cool-porcelain, navy-paper, and warm-parchment systems; raised primary, body, muted, accent, and semantic status contrast across every light surface.
+- Applied each palette's Light/Dark WinUI template theme at runtime so native tabs, text inputs, buttons, and dropdowns no longer inherit the Windows system theme accidentally.
+- Removed the global TextBlock foreground override that was masking parent button and tab selected-state colors.
+- Replaced fixed-color TabView header text with native state-aware headers.
+- Fixed creator initial alignment and reused the centered avatar component on Dashboard, Live Studio, and Creators.
+
+### Verification
+- Added WCAG contrast regression checks for all three light palettes and layout regression checks for creator avatars.
+- Full Python suite, dashboard lint/build, native Release build, and installed-app theme smoke tests passed.
+
+## [4.0.13] - 2026-11-28
+
+### Fixed
+- Override WinUI TextBox, PasswordBox, AutoSuggestBox, Button, ComboBox, dropdown-item, and TabView header foreground/background resources for every control state.
+- Keep normal, hover, focused, pressed, and disabled text readable against the selected theme's own control surfaces instead of inheriting contrasting colors from the Windows OS theme.
+- Rebase implicit WinUI control styles on the official default styles so the native templates and visual states remain intact.
+- Give selected TabView headers a palette-matched background and foreground.
+
+### Verification
+- Full Python regression suite, dashboard lint/build, and native Release build passed.
+- Installed-app contrast review explicitly exercised the dark-sidebar Odysseus Paper palette and native input/button/tab states.
+
 # Changelog
+
+## [4.0.12] - 2026-11-28
+
+### Fixed
+- Calculate native sidebar foregrounds against both the outer sidebar and its inset surface, including the dark-sidebar/light-content theme.
+- Keep selected and unselected navigation text at accessible contrast in every native theme; sidebar badges now use the actual inset surface.
+- Separate accent/status fill colors from their text colors and calculate accessible accent, success, warning, and danger foregrounds for each theme.
+- Give the native Quit action explicit theme foreground, surface, and border colors.
+- Apply the same multi-surface contrast checks to dashboard body text, sidebar text, accent labels, and semantic status text.
+- Correct the About and footer version labels to 4.0.12.
+
+### Verification
+- Theme contrast tests cover all 12 palettes and both sidebar surfaces.
+- Python regression suite, dashboard lint/production build, native Release build, and installed-app startup smoke checks passed.
+
+## [4.0.11] - 2026-11-28
+
+### Fixed
+- Aligned the complete 12-theme React color-token registry with the native WinUI palette definitions, including surfaces, borders, sidebar roles, and semantic status colors.
+- Made sidebar navigation, workspace panels, brand mark, and running/healthy indicators use the active theme's shared semantic tokens instead of palette-specific hard-coded colors.
+- Corrected native XAML startup brush placeholders so the first frame matches the documented Studio Dark default.
+- Kept JetBrains Mono as the default typeface and exposed the bundled sans-serif font families in Settings ? Appearance as well as the quick appearance menu.
+- Added consistent contrast correction for primary, body, muted, and sidebar text across all themes.
+
+### Verification
+- Dashboard lint and production build passed.
+- Native XAML, palette parity, font preference, and release metadata tests passed.
+- Windows native Release build and installed-app smoke checks completed.
+
+## [4.0.10] - 2026-11-27
+
+### Added
+- Restored the saved-creator selector in native Live Studio and made the Framing tab available for automatic and manual facecam/game placement.
+- Added independent creator-owned facecam/game regions, video layout, output ratio, and caption appearance; shared AI/caption providers, clipping thresholds, and profanity defaults remain global.
+- Added GPU-first facecam inference through DirectML on supported Windows GPUs, with CPU used only when no compatible GPU is present.
+- Expanded the font picker with Manrope, DM Sans, Poppins, Lato, Nunito Sans, Fira Code, and additional Windows/system and serif choices while retaining JetBrains Mono as the default.
+- Added theme-aware text contrast correction and startup-time XAML brush placeholders for reliable sidebar text rendering.
+
+### Fixed
+- Corrected creator setting ownership so layout and 9:16/16:9 output ratio no longer leak between creators; moved profanity filtering into shared defaults.
+- Preserve creator-specific output/recording directories when applying a saved creator profile.
+- Define sidebar text resources before XAML initialization so the packaged desktop app starts without a missing-resource error.
+- Replaced the raw JSON-only native app update check with an installed-version status and an in-app Install update action.
+- Detect the actual Windows-registered desktop installation version instead of assuming the running Python source version is the installed app version.
+- Download the official GitHub Windows installer, validate its published SHA-256 digest, and refuse to run an unverifiable or modified download.
+- Complete installation through a detached helper after StreamSnip AI and its local engine have shut down, then relaunch the updated desktop app.
+
+### Verification
+- Python regression suite, updater checksum tests, creator-profile ownership tests, and native XAML resource tests pass.
+- Windows native build, DirectML facecam helper, dashboard lint/production build, and self-contained installer build pass.
+- NVIDIA GeForce RTX 3060 Ti facecam inference smoke test reports GPU (DirectML).
 
 ## [4.0.9] - 2026-11-27
 

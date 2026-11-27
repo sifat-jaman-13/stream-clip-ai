@@ -1,5 +1,5 @@
 ﻿#ifndef MyAppVersion
-  #define MyAppVersion "4.0.9"
+  #define MyAppVersion "4.0.16"
 #endif
 #define MyAppName "StreamSnip AI"
 #define MyAppPublisher "ScarZero"
@@ -36,6 +36,7 @@ Source: "..\post_metadata.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\zernio_poster.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\zernio_connections.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\facecam_detect.py"; DestDir: "{app}\source"; Flags: ignoreversion
+Source: "..\dist\FacecamInference\*"; DestDir: "{app}\source\facecam-inference"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\requirements.txt"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\assets\*"; DestDir: "{app}\source\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\models\face_detection_yunet_2023mar.onnx"; DestDir: "{app}\source\models"; Flags: ignoreversion

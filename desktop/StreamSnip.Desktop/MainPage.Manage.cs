@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
@@ -38,6 +38,19 @@ public sealed partial class MainPage
     private ComboBox? _publishingSchedule;
     private ComboBox? _publishingVisibility;
     private StackPanel? _bulkPublishingPanel;
+
+    private void RenderProvidersPage()
+    {
+        AddPageHeading("AI & Providers", "Configure the global AI highlight provider and caption/transcription provider. These choices apply to every creator and local video.");
+        PageHost.Children.Add(CreatePanel(
+            "AI provider",
+            "Select the global model that analyses transcripts, chooses highlights, and creates clip metadata.",
+            BuildAiSettingsTab()));
+        PageHost.Children.Add(CreatePanel(
+            "Caption provider",
+            "Choose the global speech-to-text provider. Each creator keeps its own visual subtitle style separately.",
+            BuildCaptionProviderSettingsPanel()));
+    }
 
     private void RenderSettingsPage()
     {
@@ -154,7 +167,7 @@ public sealed partial class MainPage
             }
         };
         AddLabeled(appearance, "Application font", fontChoice,
-            "Inter is the default. Also choose Open Sans, IBM Plex Sans, Roboto, Source Sans 3, Segoe UI, JetBrains Mono, or Consolas. All app panels and controls use the selected family; captions are unaffected.");
+            "JetBrains Mono is the default UI font. Also choose Manrope, DM Sans, Inter, Open Sans, IBM Plex Sans, Nunito Sans, Roboto, Source Sans 3, Poppins, Lato, Fira Code, Segoe UI, Consolas, Aptos, Arial, Tahoma, Verdana, Georgia, Trebuchet MS, or Times New Roman. All app panels and controls use the selected family; video captions have separate creator-specific font and style settings.");
 
         var fontSizeChoice = new ComboBox { MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Stretch };
         fontSizeChoice.ItemsSource = new[] { "Small", "Medium", "Large" };
@@ -172,30 +185,84 @@ public sealed partial class MainPage
         PageHost.Children.Add(CreatePanel("Workspace appearance", "Choose a palette, font, and text size saved on this device.", appearance));
 
         var maintenance = new StackPanel { Spacing = 10 };
-        var updateResult = Txt("Version and component checks do not change anything until you explicitly start an update.", 10, false, "#9CDEF2");
+        var updateResult = Txt("Check the installed app version against GitHub Releases. Updates are downloaded and verified before installation.", 10, false, "#9CDEF2");
         maintenance.Children.Add(updateResult);
-        maintenance.Children.Add(ActionRow(
-            CreateButton("Check app update", async () =>
+
+        Button? checkUpdateButton = null;
+        Button? installUpdateButton = null;
+        checkUpdateButton = CreateButton("Check app update", async () =>
+        {
+            checkUpdateButton!.IsEnabled = false;
+            if (installUpdateButton is not null) installUpdateButton.IsEnabled = false;
+            updateResult.Text = "Checking the latest StreamSnip AI release…";
+            try
             {
-                try
+                var result = await PostAsync("/api/check_app_update", new JsonObject());
+                var current = result["current"]?.ToString() ?? "unknown";
+                var latest = result["latest"]?.ToString() ?? current;
+                var available = bool.TryParse(result["update"]?.ToString(), out var hasUpdate) && hasUpdate;
+                var canInstall = bool.TryParse(result["can_install"]?.ToString(), out var verifiedInstaller) && verifiedInstaller;
+                if (!available)
+                    updateResult.Text = $"You're up to date (v{current}).";
+                else if (canInstall)
                 {
-                    updateResult.Text = "Checking the latest StreamSnip AI release…";
-                    var result = await PostAsync("/api/check_app_update", new JsonObject());
-                    updateResult.Text = result.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                    updateResult.Text = $"Update available: v{latest} (installed v{current}). Select Install update to download and install it.";
+                    if (installUpdateButton is not null) installUpdateButton.IsEnabled = true;
                 }
-                catch (Exception ex) { updateResult.Text = ex.Message; }
-            }),
-            CreateButton("Check components", async () =>
+                else
+                    updateResult.Text = $"Update v{latest} is available, but GitHub did not provide a verified Windows installer. Open the release page to update manually.";
+            }
+            catch (Exception ex)
             {
-                try
+                updateResult.Text = $"Could not check for updates: {ex.Message}";
+            }
+            finally
+            {
+                checkUpdateButton!.IsEnabled = true;
+            }
+        });
+
+        installUpdateButton = CreateButton("Install update", async () =>
+        {
+            installUpdateButton!.IsEnabled = false;
+            checkUpdateButton!.IsEnabled = false;
+            updateResult.Text = "Downloading and verifying the Windows installer…";
+            try
+            {
+                var result = await PostAsync("/api/install_app_update", new JsonObject
                 {
-                    updateResult.Text = "Checking installed components…";
-                    var result = await PostAsync("/api/check_updates", new JsonObject());
-                    updateResult.Text = result.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-                }
-                catch (Exception ex) { updateResult.Text = ex.Message; }
-            })));
-        PageHost.Children.Add(CreatePanel("Maintenance", "Review installed component versions and release availability.", maintenance));
+                    ["parent_pid"] = Environment.ProcessId
+                });
+                if (!(bool.TryParse(result["ok"]?.ToString(), out var ok) && ok))
+                    throw new InvalidOperationException(result["message"]?.ToString() ?? "The installer could not be prepared.");
+                updateResult.Text = result["message"]?.ToString() ?? "Update verified. StreamSnip AI will close to finish installing.";
+                await Task.Delay(800);
+                await ShutdownApplicationAsync();
+            }
+            catch (Exception ex)
+            {
+                updateResult.Text = $"Could not install the update: {ex.Message}";
+                installUpdateButton!.IsEnabled = true;
+                checkUpdateButton!.IsEnabled = true;
+            }
+        });
+        installUpdateButton.IsEnabled = false;
+
+        Button? checkComponentsButton = null;
+        checkComponentsButton = CreateButton("Check components", async () =>
+        {
+            checkComponentsButton!.IsEnabled = false;
+            updateResult.Text = "Checking installed components…";
+            try
+            {
+                var result = await PostAsync("/api/check_updates", new JsonObject());
+                updateResult.Text = result.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+            catch (Exception ex) { updateResult.Text = ex.Message; }
+            finally { checkComponentsButton!.IsEnabled = true; }
+        });
+        maintenance.Children.Add(ActionRow(checkUpdateButton, installUpdateButton));
+        maintenance.Children.Add(checkComponentsButton);        PageHost.Children.Add(CreatePanel("Maintenance", "Review installed component versions and release availability.", maintenance));
         ApplyFontToVisualTree(this);
     }
 
@@ -981,7 +1048,7 @@ public sealed partial class MainPage
         brand.Children.Add(Txt("StreamSnip AI", 20, true));
         brand.Children.Add(Txt("Creator Studio  ·  Native Windows desktop interface", 10, false, "#9CDEF2"));
         brand.Children.Add(Txt("The WinUI desktop app owns the windows and native controls. The Python engine handles Streamlink capture, FFmpeg media processing, Faster-Whisper transcription, AI highlight analysis, and clip rendering.", 11));
-        brand.Children.Add(Txt("Application version 4.0.9", 10, false, "#9CDEF2"));
+        brand.Children.Add(Txt("Application version 4.0.16", 10, false, "MutedTextBrush"));
         brand.Children.Add(ActionRow(
             CreateButton("GitHub source", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai")),
             CreateButton("Latest releases", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"))));

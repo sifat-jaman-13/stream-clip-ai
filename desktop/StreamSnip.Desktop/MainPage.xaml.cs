@@ -17,6 +17,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Shapes;
+using Windows.Foundation;
 using WinRT.Interop;
 using Windows.Media.Core;
 using Windows.Storage;
@@ -70,7 +71,24 @@ public sealed partial class MainPage : Page
 
 
 
-	private sealed record ThemePalette(string Id, string Name, string App, string Surface, string Soft, string Hover, string Sidebar, string Ink, string Body, string Muted, string Line, string Accent, string Success, string Warning, string Danger);
+	private sealed record ThemePalette(string Id, string Name, string App, string Surface, string Soft, string Hover, string Sidebar, string Ink, string Body, string Muted, string Line, string Accent, string Success, string Warning, string Danger)
+	{
+        public string PrimaryText => EnsureTextContrastAcross(Ink, 7.0, App, Surface, Soft, Hover);
+        public string BodyText => EnsureTextContrastAcross(Body, 4.5, App, Surface, Soft, Hover);
+        public string MutedText => EnsureTextContrastAcross(Muted, 4.5, App, Surface, Soft, Hover);
+        public bool IsLight => Id is "studio-light" or "odysseas" or "solarized";
+        public string SidebarSurface => Id == "odysseas" ? "#3A5868" : Soft;
+        public string SidebarInk => EnsureTextContrastAcross(Id == "odysseas" ? "#F7F9F8" : Ink, 7.0, Sidebar, SidebarSurface);
+        public string SidebarBody => EnsureTextContrastAcross(Id == "odysseas" ? "#E0E8E5" : Body, 4.5, Sidebar, SidebarSurface);
+        public string SidebarMuted => EnsureTextContrastAcross(Id == "odysseas" ? "#C9D6D1" : Muted, 4.5, Sidebar, SidebarSurface);
+        public string SidebarLine => EnsureTextContrastAcross(Id == "odysseas" ? "#7F9BA6" : Line, 3.0, Sidebar, SidebarSurface);
+        public string SidebarAccentBorder => EnsureTextContrastAcross(Accent, 3.0, Sidebar, SidebarSurface);
+        public string SidebarAccentText => EnsureTextContrastAcross(Accent, 4.5, Sidebar, SidebarSurface);
+        public string AccentText => EnsureTextContrastAcross(Accent, 4.5, App, Surface, Soft, Hover);
+        public string SuccessText => EnsureTextContrastAcross(Success, 4.5, App, Surface, Soft, Hover);
+        public string WarningText => EnsureTextContrastAcross(Warning, 4.5, App, Surface, Soft, Hover);
+        public string DangerText => EnsureTextContrastAcross(Danger, 4.5, App, Surface, Soft, Hover);
+    }
 
 	private enum EngineIndicator
 	{
@@ -88,6 +106,8 @@ public sealed partial class MainPage : Page
 	private UIElement? _engineNotice;
 
 	private EngineSettings? _settings;
+
+	private JsonObject? _globalSettings;
 
 	private EngineState? _state;
 
@@ -114,9 +134,9 @@ public sealed partial class MainPage : Page
 
 	private bool _quitting;
 
-	private const string InterFontUri = "ms-appx:///Assets/Fonts/Inter-Variable.ttf#Inter";
+	private const string DefaultFontUri = "ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono";
 
-	private static readonly FontFamily DefaultFontFamily = new FontFamily(InterFontUri);
+	private static readonly FontFamily DefaultFontFamily = new FontFamily(DefaultFontUri);
 
 	private static FontFamily ActiveFontFamily = DefaultFontFamily;
 
@@ -125,7 +145,7 @@ public sealed partial class MainPage : Page
 	private string _theme = "studio-dark";
 	private string _customAccent = "";
 
-	private string _fontName = "Inter";
+	private string _fontName = "JetBrains Mono";
 	private string _fontSize = "medium";
 	private static double _applicationFontScale = 1.0;
 
@@ -148,22 +168,24 @@ public sealed partial class MainPage : Page
 	private static readonly ThemePalette[] Themes = new ThemePalette[12]
 	{
 		new ThemePalette("studio-dark", "Studio Dark", "#0F0F0F", "#181818", "#212121", "#2B2B2B", "#0F0F0F", "#F1F1F1", "#D6D6D6", "#AAAAAA", "#303030", "#FF0033", "#81C995", "#F6C26B", "#F28B82"),
-		new ThemePalette("odysseus", "Odysseus", "#282C34", "#1B2028", "#232B35", "#2D3743", "#171C23", "#E8F0F4", "#C8D5DC", "#9CDEF2", "#355A66", "#E06C75", "#80C99A", "#E6B96F", "#E06C75"),
-		new ThemePalette("studio-light", "Studio Light", "#F9F9F9", "#FFFFFF", "#F5F5F5", "#EFEFEF", "#FFFFFF", "#0F0F0F", "#303030", "#606060", "#E5E5E5", "#CC0000", "#137333", "#A15C00", "#B3261E"),
-		new ThemePalette("github", "GitHub Dark", "#0D1117", "#161B22", "#21262D", "#292F38", "#010409", "#E6EDF3", "#C9D1D9", "#8B949E", "#30363D", "#F85149", "#3FB950", "#D29922", "#F85149"),
+		new ThemePalette("odysseus", "Odysseus", "#282C34", "#1B2028", "#232B35", "#2D3743", "#171C23", "#E8F0F4", "#C8D5DC", "#9CDEF2", "#355A66", "#E06C75", "#80C99A", "#E6B96F", "#F28B82"),
+		new ThemePalette("studio-light", "Studio Light", "#F3F5F8", "#FFFFFF", "#E8EDF3", "#DDE5EE", "#E9EEF4", "#172A3B", "#40576C", "#4E657A", "#CAD5E0", "#B42318", "#176747", "#794D00", "#A52B24"),
+		new ThemePalette("github", "GitHub Dark", "#0D1117", "#161B22", "#21262D", "#292F38", "#010409", "#E6EDF3", "#C9D1D9", "#8B949E", "#30363D", "#F85149", "#3FB950", "#D29922", "#FF7B72"),
 		new ThemePalette("nord", "Nord", "#2E3440", "#3B4252", "#434C5E", "#4C566A", "#2E3440", "#ECEFF4", "#D8DEE9", "#88C0D0", "#4C566A", "#88C0D0", "#A3BE8C", "#EBCB8B", "#BF616A"),
-		new ThemePalette("odysseas", "Odysseus Paper", "#EDF0EC", "#FFFEFA", "#F5F6F2", "#E9EDE8", "#142838", "#172631", "#42515A", "#637277", "#D9DFD9", "#EF6A42", "#327B62", "#A9752D", "#C74E47"),
+		new ThemePalette("odysseas", "Odysseus Paper", "#EEF2EF", "#FAFCFA", "#E3EBE6", "#D7E2DB", "#243B49", "#1C3038", "#40555C", "#485F61", "#CBD8D0", "#A3452D", "#28664E", "#79500C", "#9D4038"),
 		new ThemePalette("ocean", "Ocean Depths", "#101C27", "#162635", "#1E3242", "#294153", "#0C1721", "#EDF5FA", "#C5D4DE", "#9AB3C1", "#2D4656", "#42B9CC", "#83C99A", "#E4BF72", "#E9877F"),
-		new ThemePalette("forest", "Forest Night", "#111B17", "#182720", "#22352B", "#30483A", "#0C1511", "#EAF4ED", "#C5D8CA", "#9CBAA4", "#2E4737", "#83C99A", "#83C99A", "#E4BD69", "#E9857B"),
-		new ThemePalette("solarized", "Solarized Paper", "#F6F2E8", "#FFFDF6", "#F0EADC", "#E8E0CD", "#EEE8D8", "#28383A", "#44585B", "#687F7C", "#D9D2C0", "#277A78", "#42856D", "#A9682A", "#BD5947"),
+		new ThemePalette("forest", "Forest Night", "#111B17", "#182720", "#22352B", "#30483A", "#0C1511", "#EAF4ED", "#C5D8CA", "#9CBAA4", "#2E4737", "#83C99A", "#6DAF83", "#E4BD69", "#E9857B"),
+		new ThemePalette("solarized", "Solarized Paper", "#F2EEDF", "#FFFCF3", "#EAE4D2", "#DCD3BC", "#E6DEC9", "#273B3A", "#445852", "#4A5F58", "#CFC4A7", "#17635E", "#286346", "#7B510C", "#9D392F"),
 		new ThemePalette("rose-graphite", "Rose Graphite", "#211C20", "#2C242A", "#362B33", "#463640", "#1A1519", "#F4EDF0", "#DBCBD3", "#C39DAB", "#49353F", "#DD8EA4", "#8ABF9A", "#E2B36E", "#EF8790"),
-		new ThemePalette("ember", "Ember Studio", "#1D1A16", "#28231D", "#332C23", "#41362A", "#17130F", "#F2EDE5", "#D7C9B7", "#BCA588", "#4A3B2A", "#E8A34B", "#99C68C", "#E8A34B", "#E57D68"),
+		new ThemePalette("ember", "Ember Studio", "#1D1A16", "#28231D", "#332C23", "#41362A", "#17130F", "#F2EDE5", "#D7C9B7", "#BCA588", "#4A3B2A", "#E8A34B", "#99C68C", "#F0C674", "#E57D68"),
 		new ThemePalette("slate", "Slate Studio", "#20262D", "#272F38", "#313B45", "#3D4853", "#181E24", "#EEF2F5", "#CAD2D9", "#AAB7C2", "#3C4853", "#8BB9D8", "#8EC7A1", "#E0BC77", "#E28B85")
 	};
 
 	private static readonly string[] FontChoices =
 	[
-		"Inter", "Open Sans", "IBM Plex Sans", "Roboto", "Source Sans 3", "Segoe UI", "JetBrains Mono", "Consolas"
+		"JetBrains Mono", "Manrope", "DM Sans", "Inter", "Open Sans", "IBM Plex Sans", "Nunito Sans",
+		"Roboto", "Source Sans 3", "Poppins", "Lato", "Fira Code", "Segoe UI", "Consolas",
+		"Aptos", "Arial", "Tahoma", "Verdana", "Georgia", "Trebuchet MS", "Times New Roman"
 	];
 
 	private FontFamily CurrentFont => ActiveFontFamily;
@@ -209,14 +231,76 @@ public sealed partial class MainPage : Page
 	public MainPage()
 	{
 		InitializeComponent();
+        SearchQueryIcon.Data = CreateSearchIconGeometry();
 		Loaded += Page_Loaded;
 		Unloaded += Page_Unloaded;
 		LoadPreferences();
+        // RequestedTheme is a construction-time WinUI setting. Select it once
+        // before the page enters the visual tree; runtime palette changes only
+        // replace the live theme brushes in both theme dictionaries.
+        var initialPalette = Themes.FirstOrDefault(item => item.Id == _theme) ?? Themes[0];
+        RequestedTheme = initialPalette.IsLight ? ElementTheme.Light : ElementTheme.Dark;
 		ApplyTheme(_theme);
 		ApplyFont(_fontName);
 		InitializeNavigationBadges();
 		RegisterSearchShortcuts();
 	}
+
+	private static PathGeometry CreateSearchIconGeometry()
+    {
+        var geometry = new PathGeometry { FillRule = FillRule.EvenOdd };
+        var outer = new PathFigure { StartPoint = new Point(9.5, 2.5), IsClosed = true };
+        foreach (var point in new[]
+        {
+            new Point(12.2, 3.04), new Point(14.45, 4.55), new Point(15.96, 6.8),
+            new Point(16.5, 9.5), new Point(15.96, 12.2), new Point(14.45, 14.45),
+            new Point(12.2, 15.96), new Point(9.5, 16.5), new Point(6.8, 15.96),
+            new Point(4.55, 14.45), new Point(3.04, 12.2), new Point(2.5, 9.5),
+            new Point(3.04, 6.8), new Point(4.55, 4.55), new Point(6.8, 3.04)
+        })
+            outer.Segments.Add(new LineSegment { Point = point });
+        geometry.Figures.Add(outer);
+
+        var inner = new PathFigure { StartPoint = new Point(9.5, 4.7), IsClosed = true };
+        foreach (var point in new[]
+        {
+            new Point(11.9, 5.35), new Point(13.65, 7.1), new Point(14.3, 9.5),
+            new Point(13.65, 11.9), new Point(11.9, 13.65), new Point(9.5, 14.3),
+            new Point(7.1, 13.65), new Point(5.35, 11.9), new Point(4.7, 9.5),
+            new Point(5.35, 7.1), new Point(7.1, 5.35)
+        })
+            inner.Segments.Add(new LineSegment { Point = point });
+        geometry.Figures.Add(inner);
+
+        var handle = new PathFigure { StartPoint = new Point(14, 13), IsClosed = true };
+        foreach (var point in new[]
+        {
+            new Point(15.6, 14.4), new Point(21.3, 20.1), new Point(20.1, 21.3),
+            new Point(14.4, 15.6), new Point(13, 14)
+        })
+            handle.Segments.Add(new LineSegment { Point = point });
+        geometry.Figures.Add(handle);
+        return geometry;
+    }
+
+    private static PathGeometry CreateVideoIconGeometry()
+    {
+        var geometry = new PathGeometry();
+        var body = new PathFigure { StartPoint = new Point(4, 5), IsClosed = true };
+        foreach (var point in new[]
+        {
+            new Point(14, 5), new Point(16, 7), new Point(16, 17),
+            new Point(14, 19), new Point(4, 19), new Point(2, 17), new Point(2, 7)
+        })
+            body.Segments.Add(new LineSegment { Point = point });
+        geometry.Figures.Add(body);
+
+        var lens = new PathFigure { StartPoint = new Point(16, 9), IsClosed = true };
+        foreach (var point in new[] { new Point(22, 6), new Point(22, 18), new Point(16, 15) })
+            lens.Segments.Add(new LineSegment { Point = point });
+        geometry.Figures.Add(lens);
+        return geometry;
+    }
 
 	private async void Page_Loaded(object sender, RoutedEventArgs e)
 	{
@@ -362,6 +446,7 @@ public sealed partial class MainPage : Page
 			throw new InvalidOperationException("The engine client is unavailable.");
 		}
 		_settings = EngineSettings.FromResponse(await _engine.GetJsonAsync("/api/config", _shutdown.Token));
+		_globalSettings = _settings.Values.DeepClone() as JsonObject ?? new JsonObject();
 		await RefreshStateAsync();
 		await RefreshCreatorsAsync();
 		SetEngineIndicator("Connected", EngineIndicator.Success);
@@ -475,6 +560,8 @@ public sealed partial class MainPage : Page
 			UpdateSidebarBadges();
 			if (changed && _currentPage == "creators")
 				RenderCurrentPage();
+			else if (changed && _currentPage == "live")
+				UpdateLiveCreatorRows();
 		}
 		catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
 		{
@@ -604,9 +691,9 @@ public sealed partial class MainPage : Page
 			return;
 		border.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
 		text.Text = count > 99 ? "99+" : count.ToString(CultureInfo.InvariantCulture);
-		border.Background = new SolidColorBrush(ParseColor(theme.Soft));
-		border.BorderBrush = new SolidColorBrush(ParseColor(live ? theme.Accent : theme.Line));
-		text.Foreground = new SolidColorBrush(ParseColor(live ? theme.Accent : theme.Muted));
+		border.Background = new SolidColorBrush(ParseColor(theme.SidebarSurface));
+		border.BorderBrush = new SolidColorBrush(ParseColor(live ? theme.SidebarAccentBorder : theme.SidebarLine));
+		text.Foreground = new SolidColorBrush(ParseColor(live ? theme.SidebarAccentText : theme.SidebarMuted));
 	}
 
 	private void RegisterSearchShortcuts()
@@ -643,7 +730,7 @@ private void UpdateSidebarSelection()
         var items = new[]
         {
             NavOverviewButton, NavLiveButton, NavCreatorsButton, NavClipsButton,
-            NavPublishedButton, NavWordsButton, NavPublishingButton, NavSettingsButton,
+            NavPublishedButton, NavWordsButton, NavPublishingButton, NavProvidersButton, NavSettingsButton,
             NavActivityButton, NavHelpButton, NavAboutButton
         };
         var theme = Themes.FirstOrDefault(x => x.Id == _theme) ?? Themes[0];
@@ -653,12 +740,12 @@ private void UpdateSidebarSelection()
         {
             var selected = string.Equals(button.Tag as string, _currentPage, StringComparison.Ordinal);
             button.Background = selected
-                ? new SolidColorBrush(ParseColor(theme.Soft))
+                ? new SolidColorBrush(ParseColor(theme.SidebarSurface))
                 : transparent;
-            button.Foreground = Application.Current.Resources[
-                selected ? "PrimaryTextBrush" : "BodyTextBrush"] as Brush;
+            button.Foreground = new SolidColorBrush(ParseColor(
+                selected ? theme.SidebarInk : theme.SidebarBody));
             button.BorderBrush = selected
-                ? new SolidColorBrush(ParseColor(theme.Accent))
+                ? new SolidColorBrush(ParseColor(theme.SidebarAccentBorder))
                 : transparent;
             button.BorderThickness = new Thickness(1);
         }
@@ -668,6 +755,7 @@ private void UpdateSidebarSelection()
     private void NavigateTo(string page)
     {
         _currentPage = page;
+        ContentScrollViewer.ChangeView(null, 0, null);
         PageTitleText.Text = GetPageTitle(page);
         UpdateSidebarSelection();
         if (page == "clips") _clipTab = "clips";
@@ -691,6 +779,7 @@ private void UpdateSidebarSelection()
 			"words" => "Hype words",
 			"activity" => "Activity",
 			"settings" => "Settings",
+			"providers" => "AI & Providers",
 			"help" => "Help",
 			"about" => "About StreamSnip AI",
 			_ => "StreamSnip AI",
@@ -802,6 +891,9 @@ private void UpdateSidebarSelection()
 		case "activity":
 			RenderActivityPage();
 			break;
+		case "providers":
+			RenderProvidersPage();
+			break;
 		case "settings":
 			RenderSettingsPage();
 			break;
@@ -833,131 +925,6 @@ private void UpdateSidebarSelection()
 		}
 	}
 
-	private void AppearanceButton_Click(object sender, RoutedEventArgs e)
-	{
-		var panel = new StackPanel { Width = 292, Spacing = 5, Padding = new Thickness(12) };
-		panel.Children.Add(Txt("Appearance", 13, true));
-		panel.Children.Add(Txt("Choose your workspace palette.", 10, false, "#9CDEF2"));
-
-		var flyout = new Flyout
-		{
-			Content = new Border
-			{
-				Background = Application.Current.Resources["SurfaceBrush"] as Brush,
-				BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
-				BorderThickness = new Thickness(1),
-				CornerRadius = new CornerRadius(12),
-				Child = panel
-			}
-		};
-
-		foreach (var theme in Themes)
-		{
-			var row = new Grid { ColumnSpacing = 10, Padding = new Thickness(7, 7, 7, 7) };
-			row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-			row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-			row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-			var swatches = new StackPanel
-			{
-				Orientation = Orientation.Horizontal,
-				Spacing = 3,
-				VerticalAlignment = VerticalAlignment.Center
-			};
-			foreach (var color in new[] { theme.App, theme.Surface, theme.Sidebar, theme.Accent })
-			{
-				swatches.Children.Add(new Border
-				{
-					Width = 12,
-					Height = 22,
-					CornerRadius = new CornerRadius(4),
-					Background = new SolidColorBrush(ParseColor(color)),
-					BorderBrush = new SolidColorBrush(ParseColor(theme.Line)),
-					BorderThickness = new Thickness(1)
-				});
-			}
-			row.Children.Add(swatches);
-
-			var copy = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-			copy.Children.Add(Txt(theme.Name, 11, true));
-			copy.Children.Add(Txt(theme.Id switch
-			{
-				"odysseus" => "Graphite · arctic cyan · coral",
-				"github" => "Midnight slate · signal red",
-				"studio-light" => "Clean neutral · signal red",
-				"studio-dark" => "Default · low-light charcoal · vivid red",
-				"nord" => "Blue-gray · frost · soft cyan",
-				"odysseas" => "Navy · chalk · warm orange",
-				"ocean" => "Deep blue · sea glass · cyan",
-				"forest" => "Evergreen · moss · mint",
-				"solarized" => "Warm parchment · ink · teal",
-				"rose-graphite" => "Warm charcoal · muted rose",
-				"ember" => "Dark umber · copper · amber",
-				"slate" => "Cool graphite · steel blue",
-				_ => "Graphite workspace"
-			}, 9, false, "#9CDEF2"));
-			Grid.SetColumn(copy, 1);
-			row.Children.Add(copy);
-
-			if (theme.Id == _theme)
-			{
-				var check = Txt("✓", 14, true, theme.Accent);
-				check.VerticalAlignment = VerticalAlignment.Center;
-				Grid.SetColumn(check, 2);
-				row.Children.Add(check);
-			}
-
-			var option = new Button
-			{
-				Content = row,
-				HorizontalAlignment = HorizontalAlignment.Stretch,
-				HorizontalContentAlignment = HorizontalAlignment.Stretch,
-				Background = new SolidColorBrush(ParseColor(theme.Id == _theme ? theme.Soft : "#00000000")),
-				BorderBrush = new SolidColorBrush(ParseColor("#00000000")),
-				BorderThickness = new Thickness(0),
-				Padding = new Thickness(0),
-				MinHeight = 46
-			};
-			option.Click += (_, _) =>
-			{
-				ApplyTheme(theme.Id);
-				UpdateSidebarSelection();
-				RenderCurrentPage();
-				flyout.Hide();
-			};
-			panel.Children.Add(option);
-		}
-
-		panel.Children.Add(Txt("Custom accent color", 11, true));
-		var accentInput = Input(IsValidAccent(_customAccent) ? _customAccent : Themes.First(t => t.Id == _theme).Accent, "#RRGGBB");
-		panel.Children.Add(accentInput);
-		panel.Children.Add(ActionRow(
-			CreateButton("Apply accent", () =>
-			{
-				var value = accentInput.Text.Trim();
-				if (!value.StartsWith("#", StringComparison.Ordinal)) value = "#" + value;
-				if (!IsValidAccent(value))
-				{
-					_ = ShowErrorAsync("Invalid accent color", "Enter a six-digit hex value, such as #42B9CC.");
-					return;
-				}
-				_customAccent = value;
-				ApplyTheme(_theme);
-				UpdateSidebarSelection();
-				RenderCurrentPage();
-				flyout.Hide();
-			}, primary: true),
-			CreateButton("Reset", () =>
-			{
-				_customAccent = "";
-				ApplyTheme(_theme);
-				UpdateSidebarSelection();
-				RenderCurrentPage();
-				flyout.Hide();
-			})));
-		flyout.ShowAt(AppearanceButton);
-	}
-
 	private void HelpButton_Click(object sender, RoutedEventArgs e)
 	{
 		NavigateTo("help");
@@ -971,9 +938,8 @@ private void UpdateSidebarSelection()
 	private async Task QuitApplicationAsync()
 	{
 		if (_quitting)
-		{
 			return;
-		}
+
 		ContentDialog dialog = new ContentDialog
 		{
 			XamlRoot = XamlRoot,
@@ -984,9 +950,16 @@ private void UpdateSidebarSelection()
 			DefaultButton = ContentDialogButton.Primary
 		};
 		if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-		{
 			return;
-		}
+
+		await ShutdownApplicationAsync();
+	}
+
+	private async Task ShutdownApplicationAsync()
+	{
+		if (_quitting)
+			return;
+
 		_quitting = true;
 		QuitButton.IsEnabled = false;
 		QuitButton.Content = "Shutting down…";
@@ -1006,7 +979,6 @@ private void UpdateSidebarSelection()
 		}
 		Application.Current.Exit();
 	}
-
 	private async Task<JsonObject> GetAsync(string route)
 	{
 		if (_engine == null)
@@ -1126,8 +1098,13 @@ private void UpdateSidebarSelection()
 				if (!IsValidAccent(_customAccent)) _customAccent = "";
 				var fontPreferenceVersion = jsonObject?["fontPreferenceVersion"]?.GetValue<int>() ?? 0;
 				var savedFont = jsonObject?["font"]?.GetValue<string>();
-				if (fontPreferenceVersion < 1 && string.Equals(savedFont, "JetBrains Mono", StringComparison.Ordinal))
-					savedFont = "Inter";
+				// Restore JetBrains Mono after the temporary Manrope default migration.
+				// Preserve explicitly selected fonts other than that migrated default.
+				if (fontPreferenceVersion < 8 &&
+					(string.IsNullOrWhiteSpace(savedFont) ||
+					 string.Equals(savedFont, "Manrope", StringComparison.Ordinal) ||
+					 (fontPreferenceVersion < 2 && string.Equals(savedFont, "Inter", StringComparison.Ordinal))))
+					savedFont = "JetBrains Mono";
 				_fontName = NormalizeFontName(savedFont ?? _fontName);
 				_fontSize = NormalizeFontSize(jsonObject?["fontSize"]?.GetValue<string>() ?? _fontSize);
 				_applicationFontScale = FontSizeScaleFor(_fontSize);
@@ -1151,7 +1128,7 @@ private void UpdateSidebarSelection()
 				["accent"] = _customAccent,
 				["font"] = _fontName,
 				["fontSize"] = _fontSize,
-				["fontPreferenceVersion"] = 1
+				["fontPreferenceVersion"] = 8
 			};
 			File.WriteAllText(_preferencesPath, jsonObject.ToJsonString(new JsonSerializerOptions
 			{
@@ -1172,18 +1149,203 @@ private void UpdateSidebarSelection()
 		SetResourceBrush("SurfaceSoftBrush", themePalette.Soft);
 		SetResourceBrush("SurfaceHoverBrush", themePalette.Hover);
 		SetResourceBrush("SidebarBrush", themePalette.Sidebar);
-		SetResourceBrush("PrimaryTextBrush", themePalette.Ink);
-		SetResourceBrush("BodyTextBrush", themePalette.Body);
-		SetResourceBrush("MutedTextBrush", themePalette.Muted);
+		SetResourceBrush("SidebarSurfaceBrush", themePalette.SidebarSurface);
+		SetResourceBrush("SidebarLineBrush", themePalette.SidebarLine);
+		SetResourceBrush("SidebarTextBrush", themePalette.SidebarInk);
+		SetResourceBrush("SidebarBodyTextBrush", themePalette.SidebarBody);
+		SetResourceBrush("SidebarMutedTextBrush", themePalette.SidebarMuted);
+		SetResourceBrush("PrimaryTextBrush", themePalette.PrimaryText);
+		SetResourceBrush("BodyTextBrush", themePalette.BodyText);
+		SetResourceBrush("MutedTextBrush", themePalette.MutedText);
 		SetResourceBrush("LineBrush", themePalette.Line);
 		string accent = IsValidAccent(_customAccent) ? _customAccent : themePalette.Accent;
 		SetResourceBrush("AccentBrush", accent);
 		SetResourceBrush("AccentSoftBrush", BlendHex(accent, themePalette.Surface, 0.16));
 		SetResourceBrush("AccentInkBrush", AccentTextHex(accent));
+		SetResourceBrush("AccentTextBrush", themePalette.AccentText);
 		SetResourceBrush("SuccessBrush", themePalette.Success);
 		SetResourceBrush("WarningBrush", themePalette.Warning);
 		SetResourceBrush("DangerBrush", themePalette.Danger);
+		SetResourceBrush("SuccessTextBrush", themePalette.SuccessText);
+		SetResourceBrush("WarningTextBrush", themePalette.WarningText);
+		SetResourceBrush("DangerTextBrush", themePalette.DangerText);
+
+		// TextBox, PasswordBox and AutoSuggestBox content presenters use TextControl*
+		// theme resources internally. Foreground on the outer control is not sufficient
+		// for every visual state, so keep the template resources in sync with this palette.
+		SetResourceBrush("TextControlForeground", themePalette.PrimaryText);
+		SetResourceBrush("TextControlForegroundPointerOver", themePalette.PrimaryText);
+		SetResourceBrush("TextControlForegroundFocused", themePalette.PrimaryText);
+		SetResourceBrush("TextControlForegroundDisabled", themePalette.BodyText);
+		SetResourceBrush("TextControlPlaceholderForeground", themePalette.MutedText);
+		SetResourceBrush("TextControlPlaceholderForegroundPointerOver", themePalette.MutedText);
+		SetResourceBrush("TextControlPlaceholderForegroundFocused", themePalette.MutedText);
+		SetResourceBrush("TextControlPlaceholderForegroundDisabled", themePalette.BodyText);
+		SetResourceBrush("TextControlBackground", themePalette.Soft);
+		SetResourceBrush("TextControlBackgroundPointerOver", themePalette.Hover);
+		SetResourceBrush("TextControlBackgroundFocused", themePalette.Surface);
+		SetResourceBrush("TextControlBackgroundDisabled", themePalette.Soft);
+		SetResourceBrush("TextControlBorderBrush", themePalette.Line);
+		SetResourceBrush("TextControlBorderBrushPointerOver", themePalette.Line);
+		SetResourceBrush("TextControlBorderBrushFocused", themePalette.AccentText);
+		SetResourceBrush("TextControlBorderBrushDisabled", themePalette.Line);
+
+		// Buttons must remain legible when WinUI moves between normal/hover/pressed/disabled.
+		SetResourceBrush("ButtonForeground", themePalette.BodyText);
+		SetResourceBrush("ButtonForegroundPointerOver", themePalette.PrimaryText);
+		SetResourceBrush("ButtonForegroundPressed", themePalette.PrimaryText);
+		SetResourceBrush("ButtonForegroundDisabled", themePalette.BodyText);
+		SetResourceBrush("ButtonBackground", themePalette.Surface);
+		SetResourceBrush("ButtonBackgroundPointerOver", themePalette.Hover);
+		SetResourceBrush("ButtonBackgroundPressed", themePalette.Soft);
+		SetResourceBrush("ButtonBackgroundDisabled", themePalette.Soft);
+		SetResourceBrush("ButtonBorderBrush", themePalette.Line);
+		SetResourceBrush("ButtonBorderBrushPointerOver", themePalette.Line);
+		SetResourceBrush("ButtonBorderBrushPressed", themePalette.Line);
+		SetResourceBrush("ButtonBorderBrushDisabled", themePalette.Line);
+
+		// ComboBox selection, dropdown and disabled states are independent WinUI resources.
+		SetResourceBrush("ComboBoxForeground", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxForegroundPointerOver", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxForegroundPressed", themePalette.BodyText);
+		SetResourceBrush("ComboBoxForegroundDisabled", themePalette.BodyText);
+		SetResourceBrush("ComboBoxForegroundFocused", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxForegroundFocusedPressed", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxHeaderForeground", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxHeaderForegroundDisabled", themePalette.BodyText);
+		SetResourceBrush("ComboBoxPlaceHolderForeground", themePalette.MutedText);
+        SetResourceBrush("ComboBoxPlaceHolderForegroundPointerOver", themePalette.MutedText);
+        SetResourceBrush("ComboBoxPlaceHolderForegroundPressed", themePalette.MutedText);
+        SetResourceBrush("ComboBoxPlaceHolderForegroundDisabled", themePalette.BodyText);
+        SetResourceBrush("ComboBoxPlaceHolderForegroundFocused", themePalette.MutedText);
+		SetResourceBrush("ComboBoxDropDownForeground", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxItemForeground", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxItemForegroundPressed", themePalette.BodyText);
+		SetResourceBrush("ComboBoxItemForegroundPointerOver", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxItemForegroundDisabled", themePalette.BodyText);
+		SetResourceBrush("ComboBoxItemForegroundSelected", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxItemForegroundSelectedUnfocused", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxItemForegroundSelectedPressed", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxItemForegroundSelectedPointerOver", themePalette.PrimaryText);
+		SetResourceBrush("ComboBoxItemForegroundSelectedDisabled", themePalette.BodyText);
+        SetResourceBrush("ComboBoxBackground", themePalette.Soft);
+        SetResourceBrush("ComboBoxBackgroundPointerOver", themePalette.Hover);
+        SetResourceBrush("ComboBoxBackgroundPressed", themePalette.Hover);
+        SetResourceBrush("ComboBoxBackgroundDisabled", themePalette.Soft);
+        SetResourceBrush("ComboBoxBackgroundFocused", themePalette.Surface);
+        SetResourceBrush("ComboBoxBackgroundUnfocused", themePalette.Soft);
+        SetResourceBrush("ComboBoxBackgroundBorderBrushFocused", themePalette.AccentText);
+        SetResourceBrush("ComboBoxBackgroundBorderBrushUnfocused", themePalette.Line);
+        SetResourceBrush("ComboBoxBorderBrush", themePalette.Line);
+        SetResourceBrush("ComboBoxBorderBrushPointerOver", themePalette.Line);
+        SetResourceBrush("ComboBoxBorderBrushPressed", themePalette.Line);
+        SetResourceBrush("ComboBoxBorderBrushDisabled", themePalette.Line);
+        SetResourceBrush("ComboBoxDropDownBackground", themePalette.Surface);
+        SetResourceBrush("ComboBoxDropDownBackgroundPointerOver", themePalette.Hover);
+        SetResourceBrush("ComboBoxDropDownBackgroundPointerPressed", themePalette.Soft);
+        SetResourceBrush("ComboBoxDropDownBorderBrush", themePalette.Line);
+        SetResourceBrush("ComboBoxDropDownGlyphForeground", themePalette.MutedText);
+        SetResourceBrush("ComboBoxDropDownGlyphForegroundDisabled", themePalette.BodyText);
+        SetResourceBrush("ComboBoxDropDownGlyphForegroundFocused", themePalette.PrimaryText);
+        SetResourceBrush("ComboBoxDropDownGlyphForegroundFocusedPressed", themePalette.PrimaryText);
+        SetResourceBrush("ComboBoxItemBackground", themePalette.Surface);
+        SetResourceBrush("ComboBoxItemBackgroundPointerOver", themePalette.Hover);
+        SetResourceBrush("ComboBoxItemBackgroundPressed", themePalette.Soft);
+        SetResourceBrush("ComboBoxItemBackgroundDisabled", themePalette.Soft);
+        SetResourceBrush("ComboBoxItemBackgroundSelected", BlendHex(themePalette.Accent, themePalette.Surface, 0.14));
+        SetResourceBrush("ComboBoxItemBackgroundSelectedUnfocused", BlendHex(themePalette.Accent, themePalette.Surface, 0.14));
+        SetResourceBrush("ComboBoxItemBackgroundSelectedPointerOver", BlendHex(themePalette.Accent, themePalette.Surface, 0.18));
+        SetResourceBrush("ComboBoxItemBackgroundSelectedPressed", BlendHex(themePalette.Accent, themePalette.Surface, 0.2));
+        SetResourceBrush("ComboBoxItemBackgroundSelectedDisabled", themePalette.Soft);
+        SetResourceBrush("ComboBoxItemBorderBrush", themePalette.Line);
+        SetResourceBrush("ComboBoxItemBorderBrushPointerOver", themePalette.Line);
+        SetResourceBrush("ComboBoxItemBorderBrushPressed", themePalette.Line);
+        SetResourceBrush("ComboBoxItemBorderBrushDisabled", themePalette.Line);
+        SetResourceBrush("ComboBoxItemBorderBrushSelected", themePalette.AccentText);
+        SetResourceBrush("ComboBoxItemBorderBrushSelectedUnfocused", themePalette.Line);
+        SetResourceBrush("ComboBoxItemBorderBrushSelectedPointerOver", themePalette.AccentText);
+        SetResourceBrush("ComboBoxItemBorderBrushSelectedPressed", themePalette.AccentText);
+        SetResourceBrush("ComboBoxItemBorderBrushSelectedDisabled", themePalette.Line);
+
+        // CheckBox and radio states are also template-owned and must not fall back to OS colors.
+        foreach (var key in new[] { "Unchecked", "Checked", "Indeterminate" })
+        {
+            var foreground = key == "Unchecked" ? themePalette.BodyText : themePalette.PrimaryText;
+            foreach (var state in new[] { "", "PointerOver", "Pressed" })
+                SetResourceBrush($"CheckBoxForeground{key}{state}", state.Length == 0 ? foreground : themePalette.PrimaryText);
+            SetResourceBrush($"CheckBoxForeground{key}Disabled", themePalette.BodyText);
+        }
+        foreach (var state in new[] { "", "PointerOver", "Pressed" })
+        {
+            SetResourceBrush("CheckBoxBackgroundUnchecked" + state, state.Length == 0 ? themePalette.Surface : themePalette.Hover);
+            SetResourceBrush("CheckBoxBackgroundChecked" + state, themePalette.Accent);
+            SetResourceBrush("CheckBoxBackgroundIndeterminate" + state, themePalette.Accent);
+            SetResourceBrush("CheckBoxBorderBrushUnchecked" + state, state.Length == 0 ? themePalette.Line : themePalette.BodyText);
+            SetResourceBrush("CheckBoxBorderBrushChecked" + state, themePalette.Accent);
+            SetResourceBrush("CheckBoxCheckGlyphForegroundChecked" + state, AccentTextHex(accent));
+            SetResourceBrush("CheckBoxCheckGlyphForegroundIndeterminate" + state, AccentTextHex(accent));
+        }
+        SetResourceBrush("CheckBoxBackgroundUncheckedDisabled", themePalette.Soft);
+        SetResourceBrush("CheckBoxBackgroundCheckedDisabled", themePalette.Soft);
+        SetResourceBrush("CheckBoxBackgroundIndeterminateDisabled", themePalette.Soft);
+        SetResourceBrush("CheckBoxBorderBrushUncheckedDisabled", themePalette.Line);
+        SetResourceBrush("CheckBoxBorderBrushCheckedDisabled", themePalette.Line);
+        SetResourceBrush("CheckBoxCheckGlyphForegroundCheckedDisabled", themePalette.BodyText);
+        SetResourceBrush("CheckBoxCheckGlyphForegroundIndeterminateDisabled", themePalette.BodyText);
+        SetResourceBrush("RadioButtonForeground", themePalette.BodyText);
+        SetResourceBrush("RadioButtonForegroundPointerOver", themePalette.PrimaryText);
+        SetResourceBrush("RadioButtonForegroundPressed", themePalette.PrimaryText);
+        SetResourceBrush("RadioButtonForegroundDisabled", themePalette.BodyText);
+        SetResourceBrush("RadioButtonBackground", themePalette.Surface);
+        SetResourceBrush("RadioButtonBackgroundPointerOver", themePalette.Hover);
+        SetResourceBrush("RadioButtonBackgroundPressed", themePalette.Soft);
+        SetResourceBrush("RadioButtonBackgroundDisabled", themePalette.Soft);
+        SetResourceBrush("RadioButtonBorderBrush", themePalette.Line);
+        SetResourceBrush("RadioButtonBorderBrushPointerOver", themePalette.BodyText);
+        SetResourceBrush("RadioButtonBorderBrushPressed", themePalette.BodyText);
+        SetResourceBrush("RadioButtonBorderBrushDisabled", themePalette.Line);
+        SetResourceBrush("RadioButtonOuterEllipseCheckedFill", themePalette.Accent);
+        SetResourceBrush("RadioButtonOuterEllipseCheckedStroke", themePalette.Accent);
+        SetResourceBrush("RadioButtonOuterEllipseFill", themePalette.Surface);
+        SetResourceBrush("RadioButtonOuterEllipseStroke", themePalette.Line);
+        SetResourceBrush("RadioButtonCheckGlyphFill", AccentTextHex(accent));
+        SetResourceBrush("ProgressBarBackground", themePalette.Soft);
+        SetResourceBrush("ProgressBarForeground", themePalette.Accent);
+        SetResourceBrush("ToggleSwitchContentForeground", themePalette.BodyText);
+        SetResourceBrush("ToggleSwitchContentForegroundDisabled", themePalette.BodyText);
+        SetResourceBrush("ToggleSwitchFillOn", themePalette.Accent);
+        SetResourceBrush("ToggleSwitchFillOff", themePalette.Line);
+        SetResourceBrush("ToggleSwitchFillOnDisabled", themePalette.Soft);
+        SetResourceBrush("ToggleSwitchFillOffDisabled", themePalette.Soft);
+        SetResourceBrush("ToggleSwitchKnobFillOn", AccentTextHex(accent));
+        SetResourceBrush("ToggleSwitchKnobFillOff", themePalette.Surface);
+        SetResourceBrush("ToggleSwitchKnobFillOnDisabled", themePalette.BodyText);
+        SetResourceBrush("ToggleSwitchKnobFillOffDisabled", themePalette.BodyText);
+
+        // TabView's selected header has its own foreground/background resources.
+		SetResourceBrush("TabViewItemHeaderForeground", themePalette.BodyText);
+        SetResourceBrush("TabViewItemHeaderForegroundPressed", themePalette.PrimaryText);
+		SetResourceBrush("TabViewItemHeaderForegroundPointerOver", themePalette.PrimaryText);
+		SetResourceBrush("TabViewItemHeaderForegroundSelected", themePalette.PrimaryText);
+		SetResourceBrush("TabViewItemHeaderForegroundDisabled", themePalette.BodyText);
+		SetResourceBrush("TabViewItemHeaderBackground", themePalette.Surface);
+        SetResourceBrush("TabViewItemHeaderBackgroundPressed", themePalette.Soft);
+		SetResourceBrush("TabViewItemHeaderBackgroundPointerOver", themePalette.Hover);
+		SetResourceBrush("TabViewItemHeaderBackgroundSelected", themePalette.Hover);
+		SetResourceBrush("TabViewItemHeaderBackgroundDisabled", themePalette.Soft);
+		SetResourceBrush("TabViewItemIconForeground", themePalette.BodyText);
+        SetResourceBrush("TabViewItemIconForegroundPressed", themePalette.PrimaryText);
+		SetResourceBrush("TabViewItemIconForegroundPointerOver", themePalette.PrimaryText);
+		SetResourceBrush("TabViewItemIconForegroundSelected", themePalette.AccentText);
+		SetResourceBrush("TabViewItemIconForegroundDisabled", themePalette.BodyText);
+
+        // Palette changes are applied through the live app/page/theme dictionaries.
+        // Do not mutate RequestedTheme here: WinUI locks it after the page is loaded.
 		RootBackgroundUpdate();
+        ApplyShellPalette(themePalette);
+        UpdateSidebarSelection();
+        if (_loaded)
+            UpdateEngineIndicator();
 		UpdateWindowTitleBar(themePalette, accent);
 		SavePreferences();
 	}
@@ -1199,9 +1361,9 @@ private void UpdateSidebarSelection()
 			var app = ParseColor(palette.App);
 			var sidebar = ParseColor(palette.Sidebar);
 			var hover = ParseColor(palette.Hover);
-			var primaryText = ParseColor(palette.Ink);
-			var bodyText = ParseColor(palette.Body);
-			var mutedText = ParseColor(palette.Muted);
+			var primaryText = ParseColor(palette.PrimaryText);
+			var bodyText = ParseColor(palette.BodyText);
+			var mutedText = ParseColor(palette.MutedText);
 			var accentColor = ParseColor(accent);
 			var accentText = ParseColor(AccentTextHex(accent));
 
@@ -1224,23 +1386,89 @@ private void UpdateSidebarSelection()
 		}
 	}
 
-	private static void SetResourceBrush(string key, string hex)
+    private void ApplyShellPalette(ThemePalette palette)
+    {
+        SolidColorBrush BrushFor(string color) => new SolidColorBrush(ParseColor(color));
+        var transparent = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
+
+        RootLayoutGrid.Background = BrushFor(palette.App);
+        SidebarRoot.Background = BrushFor(palette.Sidebar);
+        SidebarBrandBorder.Background = BrushFor(palette.Sidebar);
+        SidebarWorkspaceBorder.Background = BrushFor(palette.SidebarSurface);
+        SidebarWorkspaceBorder.BorderBrush = BrushFor(palette.SidebarLine);
+        SidebarEngineBorder.Background = BrushFor(palette.SidebarSurface);
+        SidebarEngineBorder.BorderBrush = BrushFor(palette.SidebarLine);
+
+        SidebarBrandTitleText.Foreground = BrushFor(palette.SidebarInk);
+        SidebarBrandSubtitleText.Foreground = BrushFor(palette.SidebarMuted);
+        SidebarWorkspaceTitleText.Foreground = BrushFor(palette.SidebarInk);
+        SidebarWorkspaceDeviceText.Foreground = BrushFor(palette.SidebarMuted);
+        SidebarStudioLabel.Foreground = BrushFor(palette.SidebarMuted);
+        SidebarLibraryLabel.Foreground = BrushFor(palette.SidebarMuted);
+        SidebarManageLabel.Foreground = BrushFor(palette.SidebarMuted);
+        SidebarEngineText.Foreground = BrushFor(palette.SidebarInk);
+        SidebarLocalProcessingText.Foreground = BrushFor(palette.SidebarMuted);
+
+        TopBarRoot.Background = BrushFor(palette.Surface);
+        TopBarRoot.BorderBrush = BrushFor(palette.Line);
+        TopBarBrandText.Foreground = BrushFor(palette.MutedText);
+        TopBarDivider.Background = BrushFor(palette.Line);
+        PageTitleText.Foreground = BrushFor(palette.PrimaryText);
+
+        GlobalSearchBox.Background = BrushFor(palette.Soft);
+        GlobalSearchBox.Foreground = BrushFor(palette.PrimaryText);
+        GlobalSearchBox.BorderBrush = BrushFor(palette.Line);
+        SearchQueryIcon.Foreground = BrushFor(palette.MutedText);
+
+        EngineStatusBorder.Background = BrushFor(palette.Soft);
+        EngineStatusBorder.BorderBrush = BrushFor(palette.Line);
+        EngineStatusText.Foreground = BrushFor(palette.BodyText);
+
+        HelpButton.Background = transparent;
+        HelpButton.Foreground = BrushFor(palette.BodyText);
+        HelpButton.BorderBrush = BrushFor(palette.Line);
+        HelpButtonText.Foreground = BrushFor(palette.MutedText);
+        QuitButton.Background = BrushFor(palette.Surface);
+        QuitButton.Foreground = BrushFor(palette.BodyText);
+        QuitButton.BorderBrush = BrushFor(palette.Line);
+
+        PageActionHost.Background = BrushFor(palette.Surface);
+        PageActionHost.BorderBrush = BrushFor(palette.Line);
+        FooterRoot.Background = BrushFor(palette.Surface);
+        FooterRoot.BorderBrush = BrushFor(palette.Line);
+        FooterEngineText.Foreground = BrushFor(palette.MutedText);
+        FooterSeparatorText.Foreground = BrushFor(palette.Line);
+        FooterLocalMessageText.Foreground = BrushFor(palette.MutedText);
+        FooterVersionText.Foreground = BrushFor(palette.MutedText);
+    }
+
+	private void SetResourceBrush(string key, string hex)
 	{
 		Color color = ParseColor(hex);
-		if (Application.Current.Resources.TryGetValue(key, out var value) && value is SolidColorBrush solidColorBrush)
-		{
-			solidColorBrush.Color = color;
-		}
-		else
-		{
-			Application.Current.Resources[key] = new SolidColorBrush(color);
-		}
+        // Static references are avoided for palette colors, but also replace app/page entries
+        // so any existing direct code references pick up the current theme brush.
+        Application.Current.Resources[key] = new SolidColorBrush(color);
+        Resources[key] = new SolidColorBrush(color);
+
+        // WinUI theme dictionary brushes are shared/frozen. Replace each matching entry.
+        foreach (var themeKey in new object[] { "Default", "Light" })
+        {
+            if (Application.Current.Resources.ThemeDictionaries.TryGetValue(themeKey, out var dictionaryValue) &&
+                dictionaryValue is ResourceDictionary themeDictionary &&
+                themeDictionary.ContainsKey(key))
+            {
+                themeDictionary[key] = new SolidColorBrush(color);
+            }
+        }
 	}
 
 	private void RootBackgroundUpdate()
 	{
-		Background = new SolidColorBrush(ParseColor(Themes.First((ThemePalette t) => t.Id == _theme).App));
-		SidebarRoot.Background = new SolidColorBrush(ParseColor(Themes.First((ThemePalette t) => t.Id == _theme).Sidebar));
+        var palette = Themes.First((ThemePalette t) => t.Id == _theme);
+		Background = new SolidColorBrush(ParseColor(palette.App));
+		SidebarRoot.Background = new SolidColorBrush(ParseColor(palette.Sidebar));
+        if (App.MainWindowInstance?.Content is Grid windowRoot)
+            windowRoot.Background = new SolidColorBrush(ParseColor(palette.App));
 	}
 
 	private void ApplyFont(string fontName)
@@ -1253,11 +1481,17 @@ private void UpdateSidebarSelection()
 			ApplyFontToVisualTree(this);
 	}
 
-	private static string NormalizeFontName(string? fontName) => FontChoices.Contains(fontName ?? "", StringComparer.Ordinal) ? fontName! : "Inter";
+	private static string NormalizeFontName(string? fontName) => FontChoices.Contains(fontName ?? "", StringComparer.Ordinal) ? fontName! : "JetBrains Mono";
 
 	private static FontFamily ResolveFontFamily(string fontName) => fontName switch
 	{
 		"JetBrains Mono" => new FontFamily("ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono"),
+		"DM Sans" => new FontFamily("ms-appx:///Assets/Fonts/DMSans-Variable.ttf#DM Sans"),
+		"Poppins" => new FontFamily("ms-appx:///Assets/Fonts/Poppins-Regular.ttf#Poppins"),
+		"Lato" => new FontFamily("ms-appx:///Assets/Fonts/Lato-Regular.ttf#Lato"),
+		"Manrope" => new FontFamily("ms-appx:///Assets/Fonts/Manrope-Variable.ttf#Manrope"),
+		"Nunito Sans" => new FontFamily("ms-appx:///Assets/Fonts/NunitoSans-Variable.ttf#Nunito Sans"),
+		"Fira Code" => new FontFamily("ms-appx:///Assets/Fonts/FiraCode-Variable.ttf#Fira Code"),
 		"Inter" => new FontFamily("ms-appx:///Assets/Fonts/Inter-Variable.ttf#Inter"),
 		"Open Sans" => new FontFamily("ms-appx:///Assets/Fonts/OpenSans-Variable.ttf#Open Sans"),
 		"IBM Plex Sans" => new FontFamily("ms-appx:///Assets/Fonts/IBMPlexSans-Variable.ttf#IBM Plex Sans"),
@@ -1265,6 +1499,13 @@ private void UpdateSidebarSelection()
 		"Source Sans 3" => new FontFamily("ms-appx:///Assets/Fonts/SourceSans3-Variable.ttf#Source Sans 3"),
 		"Segoe UI" => new FontFamily("Segoe UI"),
 		"Consolas" => new FontFamily("Consolas"),
+		"Aptos" => new FontFamily("Aptos"),
+		"Arial" => new FontFamily("Arial"),
+		"Tahoma" => new FontFamily("Tahoma"),
+		"Verdana" => new FontFamily("Verdana"),
+		"Georgia" => new FontFamily("Georgia"),
+		"Trebuchet MS" => new FontFamily("Trebuchet MS"),
+		"Times New Roman" => new FontFamily("Times New Roman"),
 		_ => DefaultFontFamily
 	};
 
@@ -1346,6 +1587,58 @@ private void UpdateSidebarSelection()
 		return !string.IsNullOrWhiteSpace(value) && System.Text.RegularExpressions.Regex.IsMatch(value, "^#[0-9A-Fa-f]{6}$");
 	}
 
+	private static string EnsureTextContrastAcross(string foreground, double minimumRatio, params string[] backgrounds)
+	{
+		var validBackgrounds = backgrounds
+			.Where(background => IsValidAccent(background))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+		if (validBackgrounds.Length == 0)
+			return foreground;
+		double WorstRatio(string candidate) => validBackgrounds.Min(background => ColorContrastRatio(candidate, background));
+		if (WorstRatio(foreground) >= minimumRatio)
+			return foreground;
+
+		var target = WorstRatio("#FFFFFF") >= WorstRatio("#000000") ? "#FFFFFF" : "#000000";
+		for (var step = 1; step <= 100; step++)
+		{
+			var candidate = BlendHex(target, foreground, step / 100.0);
+			if (WorstRatio(candidate) >= minimumRatio)
+				return candidate;
+		}
+		return target;
+	}
+private static string EnsureTextContrast(string foreground, string background, double minimumRatio)
+	{
+		if (ColorContrastRatio(foreground, background) >= minimumRatio)
+			return foreground;
+
+		var target = ColorContrastRatio("#FFFFFF", background) >= ColorContrastRatio("#000000", background)
+			? "#FFFFFF" : "#000000";
+		for (var step = 1; step <= 100; step++)
+		{
+			var candidate = BlendHex(target, foreground, step / 100.0);
+			if (ColorContrastRatio(candidate, background) >= minimumRatio)
+				return candidate;
+		}
+		return target;
+	}
+
+	private static double ColorContrastRatio(string foreground, string background)
+	{
+		static double Channel(byte channel)
+		{
+			var value = channel / 255.0;
+			return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+		}
+		static double Luminance(Color color) =>
+			0.2126 * Channel(color.R) + 0.7152 * Channel(color.G) + 0.0722 * Channel(color.B);
+
+		var first = Luminance(ParseColor(foreground));
+		var second = Luminance(ParseColor(background));
+		return (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
+	}
+
 	private static string BlendHex(string foreground, string background, double amount)
 	{
 		Color front = ParseColor(foreground);
@@ -1414,11 +1707,111 @@ private void UpdateSidebarSelection()
 	private async Task SaveCaptureSettingsAsync()
 	{
 		if (_settings == null)
-		{
 			throw new InvalidOperationException("Settings have not loaded yet.");
+
+		var values = _settings.Values.DeepClone() as JsonObject ?? new JsonObject();
+		var mode = _liveModeInput?.SelectedIndex == 1 ? "file" : SettingString("mode", "live");
+		var creatorId = mode == "live" ? _liveSelectedCreatorId : null;
+		var target = _liveTargetInput?.Text.Trim() ?? values["target"]?.ToString() ?? "";
+
+		if (mode == "live" && string.IsNullOrWhiteSpace(creatorId))
+			throw new InvalidOperationException("Select a saved creator before saving live settings. Each live creator has an independent settings profile.");
+
+		if (!string.IsNullOrWhiteSpace(creatorId))
+		{
+			var creator = _creators.FirstOrDefault(item => item.Id == creatorId);
+			if (creator is null)
+				throw new InvalidOperationException("The selected creator no longer exists. Refresh the creator list and select it again.");
+			if (!string.Equals(target, creator.Target, StringComparison.OrdinalIgnoreCase))
+				throw new InvalidOperationException("The stream URL changed. Select its matching saved creator before saving creator-specific settings.");
+
+			values["mode"] = "live";
+			values["target"] = creator.Target;
+			values["creator_id"] = creator.Id;
+			await SaveCreatorSettingsAsync(creator.Id, values);
+			return;
 		}
-		await PostAsync("/api/settings", (_settings.Values.DeepClone() as JsonObject) ?? new JsonObject());
+
+		values["mode"] = mode;
+		values["target"] = target;
+		values.Remove("creator_id");
+		await PostAsync("/api/settings", values);
+		_globalSettings = values.DeepClone() as JsonObject ?? new JsonObject();
 	}
+
+	private async Task SaveCreatorSettingsAsync(string creatorId, JsonObject values)
+	{
+		if (_engine is null)
+			throw new InvalidOperationException("The local media engine is not connected.");
+		await PostAsync("/api/creators/settings/save", new JsonObject
+		{
+			["id"] = creatorId,
+			["settings"] = values.DeepClone()
+		});
+
+		// The backend persists provider, layout/aspect and clipping keys globally.
+		// Mirror only that same shared subset locally: never copy creator framing,
+		// subtitle styling, or profanity treatment into the local-video snapshot.
+		_globalSettings ??= new JsonObject();
+		foreach (var key in new[]
+		{
+			"transcriber_provider", "transcriber_command", "transcriber_language", "model",
+			"compute_device", "cpu_threads", "language", "clips_per_chunk", "chunk_min",
+			"pre", "post", "min_score", "capture_bitrate_kbps", "delete_rec",
+			"layout", "output_format"
+		})
+		{
+			if (values.TryGetPropertyValue(key, out var sharedValue))
+				_globalSettings[key] = sharedValue?.DeepClone();
+		}
+	}
+
+
+    private Border CreateCreatorAvatar(string creatorName, double size = 34, bool active = false)
+    {
+        var trimmed = (creatorName ?? string.Empty).Trim();
+        var initial = trimmed.Length > 0
+            ? System.Globalization.StringInfo.GetNextTextElement(trimmed).ToUpperInvariant()
+            : "C";
+
+        var label = Txt(initial, Math.Max(12, size * 0.38), true);
+        label.TextAlignment = TextAlignment.Center;
+        label.HorizontalAlignment = HorizontalAlignment.Stretch;
+        label.VerticalAlignment = VerticalAlignment.Center;
+        label.TextWrapping = TextWrapping.NoWrap;
+        label.Margin = new Thickness(0);
+        label.Padding = new Thickness(0);
+        label.Foreground = Application.Current.Resources["PrimaryTextBrush"] as Brush;
+
+        var content = new Grid
+        {
+            Width = size - 2,
+            Height = size - 2,
+            MinWidth = size - 2,
+            MinHeight = size - 2,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        content.Children.Add(label);
+        Grid.SetRow(label, 0);
+        Grid.SetColumn(label, 0);
+
+        return new Border
+        {
+            Width = size,
+            Height = size,
+            MinWidth = size,
+            MinHeight = size,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(size <= 32 ? 8 : 10),
+            Background = Application.Current.Resources[active ? "AccentSoftBrush" : "SurfaceSoftBrush"] as Brush,
+            BorderBrush = Application.Current.Resources[active ? "AccentTextBrush" : "LineBrush"] as Brush,
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = content
+        };
+    }
 
 	private static TextBlock Txt(string text, double size = 12.0, bool strong = false, string? color = null)
 	{
@@ -1433,7 +1826,15 @@ private void UpdateSidebarSelection()
 		ApplyFontSizeToElement(textBlock, textBlock.FontSize, size => textBlock.FontSize = size);
 		if (!string.IsNullOrWhiteSpace(color))
 		{
-			if (Application.Current.Resources.TryGetValue(color, out var resource) && resource is Brush resourceBrush)
+			var textRoleKey = color switch
+			{
+				"AccentBrush" => "AccentTextBrush",
+				"SuccessBrush" => "SuccessTextBrush",
+				"WarningBrush" => "WarningTextBrush",
+				"DangerBrush" => "DangerTextBrush",
+				_ => color
+			};
+			if (Application.Current.Resources.TryGetValue(textRoleKey, out var resource) && resource is Brush resourceBrush)
 			{
 				textBlock.Foreground = resourceBrush;
 			}
@@ -1444,15 +1845,37 @@ private void UpdateSidebarSelection()
 					"#9CDEF2" => "MutedTextBrush",
 					"#C8D5DC" => "BodyTextBrush",
 					"#E8F0F4" => "PrimaryTextBrush",
-					"#80C99A" => "SuccessBrush",
-					"#E6B96F" => "WarningBrush",
-					"#E06C75" => "DangerBrush",
+					"#80C99A" => "SuccessTextBrush",
+					"#E6B96F" => "WarningTextBrush",
+					"#E06C75" => "DangerTextBrush",
 					_ => null
 				};
-				textBlock.Foreground = legacyKey is not null &&
-					Application.Current.Resources[legacyKey] is Brush legacyBrush
-					? legacyBrush
-					: new SolidColorBrush(ParseColor(color));
+				if (legacyKey is not null && Application.Current.Resources[legacyKey] is Brush legacyBrush)
+					textBlock.Foreground = legacyBrush;
+				else if (IsValidAccent(color))
+				{
+					var accentBrush = Application.Current.Resources["AccentBrush"] as SolidColorBrush;
+					var successBrush = Application.Current.Resources["SuccessBrush"] as SolidColorBrush;
+					var warningBrush = Application.Current.Resources["WarningBrush"] as SolidColorBrush;
+					var dangerBrush = Application.Current.Resources["DangerBrush"] as SolidColorBrush;
+					var role = accentBrush?.Color == ParseColor(color) ? "AccentTextBrush"
+						: successBrush?.Color == ParseColor(color) ? "SuccessTextBrush"
+						: warningBrush?.Color == ParseColor(color) ? "WarningTextBrush"
+						: dangerBrush?.Color == ParseColor(color) ? "DangerTextBrush" : null;
+					if (role is not null && Application.Current.Resources[role] is Brush roleBrush)
+						textBlock.Foreground = roleBrush;
+					else
+					{
+						var accessible = EnsureTextContrastAcross(color, 4.5,
+							ResourceBrushHex("AppBackgroundBrush", "#0F0F0F"),
+							ResourceBrushHex("SurfaceBrush", "#181818"),
+							ResourceBrushHex("SurfaceSoftBrush", "#212121"),
+							ResourceBrushHex("SurfaceHoverBrush", "#2B2B2B"));
+						textBlock.Foreground = new SolidColorBrush(ParseColor(accessible));
+					}
+				}
+				else
+					textBlock.Foreground = Application.Current.Resources["BodyTextBrush"] as Brush;
 			}
 		}
 		else
@@ -1460,6 +1883,16 @@ private void UpdateSidebarSelection()
 			textBlock.Foreground = Application.Current.Resources["BodyTextBrush"] as Brush;
 		}
 		return textBlock;
+	}
+
+	private static string ResourceBrushHex(string key, string fallback)
+	{
+		if (Application.Current.Resources.TryGetValue(key, out var resource) && resource is SolidColorBrush brush)
+		{
+			var color = brush.Color;
+			return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+		}
+		return fallback;
 	}
 
 	private Button CreateButton(string label, Action action, bool primary = false, bool danger = false)
@@ -1484,7 +1917,7 @@ private void UpdateSidebarSelection()
 			key = (danger ? "SurfaceSoftBrush" : "SurfaceBrush");
 		}
 		button2.Background = resources[key] as Brush;
-		button.Foreground = (primary ? (Application.Current.Resources["AccentInkBrush"] as Brush) : (Application.Current.Resources[danger ? "DangerBrush" : "BodyTextBrush"] as Brush));
+		button.Foreground = (primary ? (Application.Current.Resources["AccentInkBrush"] as Brush) : (Application.Current.Resources[danger ? "DangerTextBrush" : "BodyTextBrush"] as Brush));
 		button.BorderBrush = Application.Current.Resources[danger ? "DangerBrush" : "LineBrush"] as Brush;
 		button.BorderThickness = new Thickness(1.0);
 		button.HorizontalAlignment = HorizontalAlignment.Left;

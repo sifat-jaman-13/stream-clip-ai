@@ -1,4 +1,4 @@
-r"""StreamSnip AI  -  a local-first Twitch, YouTube, and VOD clipper.
+﻿r"""StreamSnip AI  -  a local-first Twitch, YouTube, and VOD clipper.
 
 The default workflow uses Streamlink, FFmpeg, faster-whisper, and hook-word
 scoring locally without requiring a cloud AI key. Ollama provides optional
@@ -20,7 +20,7 @@ Each finished clip is written as an MP4 plus a matching TXT caption/hashtag
 file. Runtime paths, providers, captions, layouts, and custom hook words are
 configurable from the local UI.
 """
-import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64, uuid, shlex, tempfile
+import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subprocess, pathlib, platform, base64, uuid, shlex, tempfile, hashlib
 import math
 import sqlite3
 from contextlib import contextmanager
@@ -34,7 +34,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            ollama_models, select_moments, test_provider)
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
-APP_VERSION = "4.0.9"
+APP_VERSION = "4.0.16"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -167,8 +167,81 @@ def cuda_device_count():
     except Exception:
         return 0
 
+_nvidia_gpu_cache = None
+_cuda_hwaccel_cache = None
+
+
+def nvidia_gpu_present():
+    """Detect a physical NVIDIA adapter independently of CUDA runtime availability."""
+    global _nvidia_gpu_cache
+    if _nvidia_gpu_cache is not None:
+        return _nvidia_gpu_cache
+
+    executable = shutil.which("nvidia-smi")
+    if executable:
+        try:
+            probe = subprocess.run(
+                [executable, "-L"], capture_output=True, text=True, timeout=6,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            _nvidia_gpu_cache = probe.returncode == 0 and bool(
+                re.search(r"(?im)^GPU\s+\d+\s*:", probe.stdout or "")
+            )
+            if _nvidia_gpu_cache:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    if os.name == "nt":
+        powershell = shutil.which("powershell.exe") or str(
+            pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows")) /
+            "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        )
+        try:
+            probe = subprocess.run(
+                [powershell, "-NoProfile", "-NonInteractive", "-Command",
+                 "(Get-CimInstance Win32_VideoController | Where-Object { $_.PNPDeviceID -match 'VEN_10DE' -and $_.PNPDeviceID -notmatch '^ROOT' }).Count"],
+                capture_output=True, text=True, timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            _nvidia_gpu_cache = probe.returncode == 0 and int((probe.stdout or "0").strip() or "0") > 0
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            _nvidia_gpu_cache = False
+    else:
+        _nvidia_gpu_cache = False
+    return _nvidia_gpu_cache
+
+
 def preferred_speech_device():
-    return "cuda" if cuda_device_count() > 0 else "cpu"
+    """Prefer CUDA; never use CPU when an NVIDIA GPU exists but CUDA is broken."""
+    devices = cuda_device_count()
+    if devices > 0:
+        return "cuda"
+    if nvidia_gpu_present():
+        raise RuntimeError(
+            "An NVIDIA GPU is installed, but CTranslate2 cannot initialize CUDA. "
+            "CPU fallback is disabled while a GPU is available. Repair the NVIDIA CUDA runtime/driver first."
+        )
+    return "cpu"
+
+
+def ffmpeg_cuda_decode_args():
+    """Enable NVIDIA hardware decode; do not silently software-decode on an NVIDIA PC."""
+    global _cuda_hwaccel_cache
+    if not nvidia_gpu_present():
+        return []
+    if _cuda_hwaccel_cache is None:
+        probe = run([ffmpeg_exe(), "-hide_banner", "-hwaccels"], capture_output=True, text=True, timeout=15)
+        _cuda_hwaccel_cache = (
+            probe.returncode == 0 and
+            any(line.strip().lower() == "cuda" for line in (probe.stdout or "").splitlines())
+        )
+    if not _cuda_hwaccel_cache:
+        raise RuntimeError(
+            "An NVIDIA GPU is installed, but the bundled FFmpeg does not expose CUDA hardware decoding. "
+            "CPU video decoding is disabled while a GPU is available."
+        )
+    return ["-hwaccel", "cuda"]
 
 def whisper_model_cache_dir(name):
     """Return this model's Hugging Face cache directory, never the whole cache root."""
@@ -289,27 +362,242 @@ def check_updates():
         "Selected model is " + ("available locally." if cached else "downloaded on first use."))
     return {"checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "items": result}
 
+def _installed_app_info():
+    """Return the registered native install version and launch path, or a source-build fallback."""
+    root = pathlib.Path(os.environ.get("LOCALAPPDATA") or (pathlib.Path.home() / "AppData" / "Local"))
+    fallback_dir = root / "Programs" / "StreamSnip AI Native"
+    fallback = {
+        "version": APP_VERSION,
+        "installed": False,
+        "install_dir": str(fallback_dir),
+        "app_executable": str(fallback_dir / "desktop" / "StreamSnip.Desktop.exe"),
+    }
+    if os.name != "nt":
+        return fallback
+    try:
+        import winreg
+        roots = (
+            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        )
+        for hive, key_path in roots:
+            try:
+                with winreg.OpenKey(hive, key_path) as parent:
+                    for index in range(2048):
+                        try:
+                            name = winreg.EnumKey(parent, index)
+                        except OSError:
+                            break
+                        try:
+                            with winreg.OpenKey(parent, name) as key:
+                                def value(key_name, default=""):
+                                    try:
+                                        return winreg.QueryValueEx(key, key_name)[0]
+                                    except OSError:
+                                        return default
+                                display = str(value("DisplayName", ""))
+                                if not display.casefold().startswith("streamsnip ai"):
+                                    continue
+                                version = str(value("DisplayVersion", "") or APP_VERSION)
+                                location = str(value("InstallLocation", "") or "")
+                                icon = re.sub(r",\s*\d+\s*$", "", str(value("DisplayIcon", "") or "")).strip().strip('"')
+                                install_dir = pathlib.Path(location) if location else None
+                                if install_dir is None and icon:
+                                    icon_path = pathlib.Path(os.path.expandvars(icon))
+                                    install_dir = icon_path.parent.parent if icon_path.parent.name.casefold() == "desktop" else icon_path.parent
+                                install_dir = install_dir or fallback_dir
+                                executable = pathlib.Path(os.path.expandvars(icon)) if icon.lower().endswith(".exe") else install_dir / "desktop" / "StreamSnip.Desktop.exe"
+                                return {
+                                    "version": version,
+                                    "installed": True,
+                                    "install_dir": str(install_dir),
+                                    "app_executable": str(executable),
+                                }
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    except (ImportError, OSError, ValueError):
+        pass
+    return fallback
+
+
 def check_app_update():
-    """Check the published StreamSnip AI release without changing the local install."""
-    req = urllib.request.Request(
+    """Check the installed native app against the latest GitHub Release."""
+    request = urllib.request.Request(
         "https://api.github.com/repos/sifat-jaman-13/stream-clip-ai/releases/latest",
-        headers={"User-Agent": "StreamSnip AI version checker"},
+        headers={"User-Agent": "StreamSnip AI version checker", "Accept": "application/vnd.github+json"},
     )
-    with urllib.request.urlopen(req, timeout=8) as response:
-        data = json.loads(response.read())
-    latest = str(data.get("tag_name", "")).lstrip("v") or APP_VERSION
-    current_key = tuple(int(part) for part in re.findall(r"\d+", APP_VERSION))
-    latest_key = tuple(int(part) for part in re.findall(r"\d+", latest))
-    assets = data.get("assets") if isinstance(data.get("assets"), list) else []
-    installer = next((asset for asset in assets
-                     if str(asset.get("name", "")).lower().endswith(".exe")
-                     and "setup" in str(asset.get("name", "")).lower()
-                     and asset.get("browser_download_url")), None)
-    return {"current": APP_VERSION, "latest": latest, "update": latest_key > current_key,
-            "url": data.get("html_url") or APP_RELEASES_URL,
-            "installer_url": installer.get("browser_download_url") if installer else "",
-            "installer_name": installer.get("name", "") if installer else "",
-            "name": data.get("name") or ("StreamSnip AI v" + latest)}
+    with urllib.request.urlopen(request, timeout=12) as response:
+        release = json.loads(response.read())
+    installed = _installed_app_info()
+    current = str(installed.get("version") or APP_VERSION)
+    latest = str(release.get("tag_name", "")).lstrip("v") or APP_VERSION
+    version_key = lambda value: tuple(int(part) for part in re.findall(r"\d+", str(value)))
+    update_available = bool(version_key(latest) and version_key(latest) > version_key(current))
+    assets = release.get("assets") if isinstance(release.get("assets"), list) else []
+    installer = next((
+        asset for asset in assets
+        if str(asset.get("name", "")).lower().endswith(".exe")
+        and "setup" in str(asset.get("name", "")).lower()
+        and asset.get("browser_download_url")
+    ), None)
+    installer_name = str(installer.get("name", "")) if installer else ""
+    installer_url = str(installer.get("browser_download_url", "")) if installer else ""
+    digest = str(installer.get("digest", "")) if installer else ""
+    digest = digest.removeprefix("sha256:").lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        digest = ""
+    checksum = next((
+        asset for asset in assets
+        if str(asset.get("name", "")).lower() == (installer_name + ".sha256").lower()
+        and asset.get("browser_download_url")
+    ), None)
+    checksum_url = str(checksum.get("browser_download_url", "")) if checksum else ""
+    return {
+        "current": current,
+        "latest": latest,
+        "update": update_available,
+        "can_install": bool(update_available and installer_url and (digest or checksum_url)),
+        "url": release.get("html_url") or APP_RELEASES_URL,
+        "installer_url": installer_url,
+        "installer_name": installer_name,
+        "installer_sha256": digest,
+        "installer_size": int(installer.get("size", 0) or 0) if installer else 0,
+        "checksum_url": checksum_url,
+        "name": release.get("name") or ("StreamSnip AI v" + latest),
+    }
+
+
+_UPDATE_INSTALLER_HANDOFF = r"""param([int]$ParentPid,[string]$InstallerPath,[string]$AppExecutable,[string]$WorkingDirectory,[string]$LogPath)
+$ErrorActionPreference = "Stop"
+$scriptPath = $MyInvocation.MyCommand.Path
+function Log([string]$Message) {
+    try { Add-Content -LiteralPath $LogPath -Value ("[{0}] {1}" -f (Get-Date),$Message) } catch {}
+}
+try {
+    Log "Waiting for StreamSnip AI process $ParentPid to exit."
+    $deadline = (Get-Date).AddMinutes(3)
+    while ((Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 350
+    }
+    if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
+        throw "StreamSnip AI did not shut down. Close it and retry."
+    }
+    Start-Sleep -Seconds 1
+    $setup = Start-Process -FilePath $InstallerPath -ArgumentList @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART") -PassThru -Wait
+    if ($setup.ExitCode -ne 0) { throw "Installer exited with code $($setup.ExitCode)." }
+    if (-not (Test-Path -LiteralPath $AppExecutable -PathType Leaf)) {
+        throw "Updated app was not found at $AppExecutable."
+    }
+    Log "Update installed. Launching the updated app."
+    Start-Process -FilePath $AppExecutable -WorkingDirectory $WorkingDirectory
+} catch {
+    Log ("ERROR: " + $_.Exception.Message)
+    try {
+        Add-Type -AssemblyName PresentationFramework
+        $message = "StreamSnip AI could not finish installing the update." + [Environment]::NewLine +
+            $_.Exception.Message + [Environment]::NewLine + "Details: " + $LogPath
+        [System.Windows.MessageBox]::Show($message,"StreamSnip AI update","OK","Error") | Out-Null
+    } catch {}
+} finally {
+    Start-Sleep -Seconds 2
+    Remove-Item -LiteralPath $InstallerPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
+}
+"""
+
+
+def install_app_update(parent_pid=None):
+    """Download and verify the latest setup, then install it after the native app exits."""
+    if os.name != "nt":
+        raise RuntimeError("Native in-app updates are available on Windows only.")
+    release = check_app_update()
+    if not release.get("update"):
+        raise RuntimeError("This installation is already up to date (v" + str(release.get("current") or APP_VERSION) + ").")
+    if not release.get("can_install") or not release.get("installer_url"):
+        raise RuntimeError("The latest release does not contain a verifiable Windows installer.")
+    expected_parent = os.getppid()
+    parent_pid = expected_parent if parent_pid is None else int(parent_pid)
+    if parent_pid <= 1 or parent_pid != expected_parent:
+        raise ValueError("Update must be requested by the active StreamSnip AI desktop process.")
+    installer_name = pathlib.Path(str(release.get("installer_name") or "")).name
+    if installer_name != release.get("installer_name") or not installer_name.lower().endswith(".exe"):
+        raise RuntimeError("The published installer filename is invalid.")
+    expected_hash = str(release.get("installer_sha256") or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        checksum_url = str(release.get("checksum_url") or "")
+        if not checksum_url:
+            raise RuntimeError("GitHub did not publish an installer SHA-256 checksum.")
+        with urllib.request.urlopen(
+            urllib.request.Request(checksum_url, headers={"User-Agent": "StreamSnip AI updater"}),
+            timeout=20,
+        ) as response:
+            checksum_text = response.read().decode("utf-8", errors="replace")
+        match = re.search(r"\b([0-9a-fA-F]{64})\b", checksum_text)
+        if not match:
+            raise RuntimeError("The published installer checksum file is invalid.")
+        expected_hash = match.group(1).lower()
+
+    installed = _installed_app_info()
+    if not installed.get("installed"):
+        raise RuntimeError("No existing native Windows installation was found.")
+    app_exe = pathlib.Path(str(installed.get("app_executable") or ""))
+    if not app_exe.name:
+        raise RuntimeError("The installed app executable path could not be determined.")
+    work_dir = app_exe.parent
+    update_dir = pathlib.Path(tempfile.mkdtemp(prefix="streamsnip-update-"))
+    installer_path = update_dir / installer_name
+    helper_path = update_dir / "install-update.ps1"
+    log_path = pathlib.Path(tempfile.gettempdir()) / "StreamSnipAI-update.log"
+    try:
+        request = urllib.request.Request(
+            str(release["installer_url"]),
+            headers={"User-Agent": "StreamSnip AI updater"},
+        )
+        with urllib.request.urlopen(request, timeout=180) as response:
+            payload = response.read()
+        if not payload:
+            raise RuntimeError("The GitHub installer download was empty.")
+        expected_size = int(release.get("installer_size") or 0)
+        if expected_size and len(payload) != expected_size:
+            raise RuntimeError("Downloaded installer size does not match GitHub release metadata.")
+        if hashlib.sha256(payload).hexdigest().lower() != expected_hash:
+            raise RuntimeError("Installer SHA-256 verification failed. The downloaded file was not run.")
+        installer_path.write_bytes(payload)
+        helper_path.write_text(_UPDATE_INSTALLER_HANDOFF, encoding="utf-8-sig")
+        powershell = pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        if not powershell.is_file():
+            found = shutil.which("powershell.exe")
+            if not found:
+                raise RuntimeError("Windows PowerShell was not found.")
+            powershell = pathlib.Path(found)
+        flags = getattr(subprocess, "DETACHED_PROCESS", 8) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 512)
+        helper_args = [
+            str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-WindowStyle", "Hidden", "-File", str(helper_path),
+            "-ParentPid", str(parent_pid), "-InstallerPath", str(installer_path),
+            "-AppExecutable", str(app_exe), "-WorkingDirectory", str(work_dir),
+            "-LogPath", str(log_path),
+        ]
+        subprocess.Popen(
+            helper_args, cwd=str(update_dir), stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            close_fds=True, creationflags=flags,
+        )
+    except Exception:
+        shutil.rmtree(update_dir, ignore_errors=True)
+        raise
+    return {
+        "ok": True,
+        "pending_restart": True,
+        "current": release.get("current", ""),
+        "latest": release.get("latest", ""),
+        "log_path": str(log_path),
+        "message": "The v" + str(release.get("latest")) + " installer is downloaded and SHA-256 verified. StreamSnip AI will close and install it automatically.",
+    }
+
 
 def update_components():
     """Update Python runtime components and download the selected speech model.
@@ -625,6 +913,39 @@ def clean_cfg(raw):
     if creator_id:
         c["creator_id"] = creator_id
     return c
+
+# Creator-owned settings are only the source framing and visual caption treatment.
+# Speech/caption provider and clipping behavior stay in the shared application defaults.
+CREATOR_PROFILE_SETTING_KEYS = (
+    # Per-creator visual treatment only: source geometry, subtitles, and profanity.
+    "cam_x", "cam_y", "cam_w", "cam_h", "game_x",
+    "game_area_x", "game_area_y", "game_area_w", "game_area_h",
+    "crop_x", "crop_y", "crop_w", "crop_h",
+    "color", "position", "caption_size", "words_per_line", "font",
+    "subtitle_custom", "subtitle_mode", "subtitle_style", "subtitle_animation",
+    "subtitle_font_size", "subtitle_text_color", "subtitle_stroke_color",
+    "subtitle_position", "subtitle_alignment", "subtitle_nudge",
+    "streamer_tag", "show_tag_video",
+    "profanity_filter_enabled", "profanity_filter_words", "profanity_audio_mode",
+)
+
+CREATOR_SHARED_SETTING_KEYS = (
+    # AI provider lives in /api/ai/settings. These are shared caption-provider and
+    # clipping/rendering defaults, including the output layout and aspect ratio.
+    "transcriber_provider", "transcriber_command", "transcriber_language", "model",
+    "compute_device", "cpu_threads", "language",
+    "clips_per_chunk", "chunk_min", "pre", "post", "min_score",
+    "capture_bitrate_kbps", "delete_rec", "layout", "output_format",
+)
+
+
+def creator_profile_values(raw):
+    """Return only validated creator-specific framing and caption appearance fields."""
+    if not isinstance(raw, dict):
+        return {}
+    validated = clean_cfg(raw)
+    return {key: validated[key] for key in CREATOR_PROFILE_SETTING_KEYS if key in raw}
+
 
 def apply_storage_paths(cfg):
     """Switch runtime folders to the user-selected locations."""
@@ -1543,6 +1864,11 @@ def has_nvenc():
         r = run([ffmpeg_exe(), "-v", "quiet", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1",
                  "-frames:v", "1", "-c:v", "h264_nvenc", "-f", "null", "-"], capture_output=True)
         _nvenc = r.returncode == 0
+    if not _nvenc and nvidia_gpu_present():
+        raise RuntimeError(
+            "An NVIDIA GPU is installed, but FFmpeg could not initialize NVENC. "
+            "CPU video encoding is disabled while a GPU is available. Check the NVIDIA driver and FFmpeg build."
+        )
     return _nvenc
 
 def _find_streamlink_exe():
@@ -2191,6 +2517,7 @@ class Engine:
         tmp = f"{name}.tmp.mp4"
         render_prefix = [
             ffmpeg_exe(), "-y", "-v", "error", "-fflags", "+genpts",
+            *ffmpeg_cuda_decode_args(),
             "-ss", f"{start:.2f}", "-accurate_seek",
             "-t", f"{end - start:.2f}", "-i", str(pathlib.Path(src).resolve()),
             "-filter_complex", vf, "-map", "[v]",
@@ -2670,6 +2997,11 @@ class Core:
     def _creator_default_settings(self):
         return clean_cfg(getattr(self, "default_settings", getattr(self, "settings", {})))
 
+    def _creator_profile_defaults(self):
+        # New creator records contain only personal framing and visual caption treatment.
+        # Video layout, output aspect, AI/caption providers, and clipping stay global.
+        defaults = clean_cfg(DEFAULTS)
+        return {key: defaults[key] for key in CREATOR_PROFILE_SETTING_KEYS}
     @contextmanager
     def _creator_db(self):
         _data_root.mkdir(parents=True, exist_ok=True)
@@ -2712,9 +3044,26 @@ class Core:
                         if creator_id and name and target:
                             db.execute("INSERT OR IGNORE INTO creators(id,name,target) VALUES(?,?,?)",
                                        (creator_id, name, target))
-            default_settings = json.dumps(self._creator_default_settings(), ensure_ascii=False)
+            default_settings = json.dumps(self._creator_profile_defaults(), ensure_ascii=False)
             db.execute("""INSERT OR IGNORE INTO creator_settings(creator_id,settings_json)
                 SELECT id, ? FROM creators""", (default_settings,))
+
+            # Compact legacy full-config profile rows in place. Keep every validated
+            # creator-owned visual preference, and discard duplicated shared/default
+            # settings so the global provider and clipping defaults remain authoritative.
+            rows = db.execute("SELECT creator_id,settings_json FROM creator_settings").fetchall()
+            for row in rows:
+                try:
+                    stored = json.loads(row["settings_json"])
+                except (ValueError, TypeError):
+                    stored = {}
+                profile = creator_profile_values(stored)
+                compacted = json.dumps(profile, ensure_ascii=False, sort_keys=True)
+                if compacted != row["settings_json"]:
+                    db.execute(
+                        "UPDATE creator_settings SET settings_json=?,updated_at=CURRENT_TIMESTAMP WHERE creator_id=?",
+                        (compacted, row["creator_id"]),
+                    )
         # The database is now authoritative; remove the migrated JSON registry.
         if remove_legacy:
             try:
@@ -2741,37 +3090,74 @@ class Core:
                     ON CONFLICT(id) DO UPDATE SET name=excluded.name,target=excluded.target""",
                     (creator_id, profile["name"], profile["target"]))
                 db.execute("INSERT OR IGNORE INTO creator_settings(creator_id,settings_json) VALUES(?,?)",
-                           (creator_id, json.dumps(self._creator_default_settings(), ensure_ascii=False)))
+                           (creator_id, json.dumps(self._creator_profile_defaults(), ensure_ascii=False)))
 
     def get_creator_settings(self, creator_id):
         self._init_creator_database()
+        if creator_id not in self.creators:
+            raise ValueError("Creator monitor not found.")
         with self._creator_db() as db:
             row = db.execute("SELECT settings_json FROM creator_settings WHERE creator_id=?", (creator_id,)).fetchone()
-        if not row:
-            if creator_id not in self.creators:
-                raise ValueError("Creator monitor not found.")
-            return self._creator_default_settings()
-        try:
-            return clean_cfg(json.loads(row["settings_json"]))
-        except (ValueError, TypeError):
-            return self._creator_default_settings()
+        stored = {}
+        if row:
+            try:
+                stored = json.loads(row["settings_json"])
+            except (ValueError, TypeError):
+                stored = {}
+        profile = {**self._creator_profile_defaults(), **creator_profile_values(stored)}
+        shared = self._creator_default_settings()
+        merged = {**shared, **profile}
+        merged["mode"] = "live"
+        merged["target"] = self.creators[creator_id]["target"]
+        merged["creator_id"] = creator_id
+        return clean_cfg(merged)
 
     def save_creator_settings(self, creator_id, settings):
         creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
         if creator_id not in self.creators:
             raise ValueError("Creator monitor not found.")
         self._init_creator_database()
-        cfg = clean_cfg({**self.get_creator_settings(creator_id), **(settings if isinstance(settings, dict) else {})})
-        cfg["mode"] = "live"
-        cfg["target"] = self.creators[creator_id]["target"]
-        cfg["creator_id"] = creator_id
+        incoming = settings if isinstance(settings, dict) else {}
+
+        # AI provider remains in its separate global AI settings object. Caption/transcription,
+        # video layout/aspect, and clipping settings are shared; visual caption/profanity treatment is per creator.
+        shared_updates = {key: incoming[key] for key in CREATOR_SHARED_SETTING_KEYS if key in incoming}
+        if shared_updates:
+            defaults = self._creator_default_settings()
+            validated_shared = clean_cfg({**defaults, **shared_updates})
+            for key in shared_updates:
+                defaults[key] = validated_shared[key]
+            self.default_settings = clean_cfg(defaults)
+            current = clean_cfg(getattr(self, "settings", defaults))
+            for key in shared_updates:
+                current[key] = self.default_settings[key]
+            self.settings = clean_cfg(current)
+            save_settings(self.default_settings)
+
         with self._creator_db() as db:
-            db.execute("INSERT OR IGNORE INTO creators(id,name,target) VALUES(?,?,?)",
+            row = db.execute("SELECT settings_json FROM creator_settings WHERE creator_id=?", (creator_id,)).fetchone()
+            existing = {}
+            if row:
+                try:
+                    existing = json.loads(row["settings_json"])
+                except (ValueError, TypeError):
+                    existing = {}
+            profile = {**self._creator_profile_defaults(), **creator_profile_values(existing)}
+            profile.update(creator_profile_values(incoming))
+            # Persist only facecam/game geometry and visual caption/profanity treatment.
+            # Legacy full-config rows discard duplicated shared defaults on the next save.
+            db.execute("INSERT INTO creators(id,name,target) VALUES(?,?,?) "
+                       "ON CONFLICT(id) DO UPDATE SET name=excluded.name,target=excluded.target",
                        (creator_id, self.creators[creator_id]["name"], self.creators[creator_id]["target"]))
             db.execute("""INSERT INTO creator_settings(creator_id,settings_json,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)
                 ON CONFLICT(creator_id) DO UPDATE SET settings_json=excluded.settings_json,updated_at=CURRENT_TIMESTAMP""",
-                (creator_id, json.dumps(cfg, ensure_ascii=False)))
-        return cfg
+                (creator_id, json.dumps(profile, ensure_ascii=False)))
+        result = self.get_creator_settings(creator_id)
+        # Runtime output paths are supplied by Core.start, not persisted in a profile.
+        for key in ("creator_out_dir", "creator_rec_dir"):
+            if key in incoming:
+                result[key] = incoming[key]
+        return result
 
     def _creator_paths(self, creator_id):
         profile = getattr(self, "creators", {}).get(creator_id, {})
@@ -4080,8 +4466,10 @@ def detect_facecam(mode, target):
     stream_url = stream.stdout.strip().splitlines()[-1].strip()
     with tempfile.TemporaryDirectory(prefix="streamsnip-facecam-") as folder:
         sample = pathlib.Path(folder) / "live-sample.mp4"
-        result = run([ffmpeg_exe(), "-y", "-v", "error", "-i", stream_url,
-                      "-t", "22", "-an", "-c:v", "libx264", "-preset", "ultrafast",
+        sample_encoder = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "28", "-b:v", "0"]
+                          if has_nvenc() else ["-c:v", "libx264", "-preset", "ultrafast"])
+        result = run([ffmpeg_exe(), "-y", "-v", "error", *ffmpeg_cuda_decode_args(), "-i", stream_url,
+                      "-t", "22", "-an", *sample_encoder,
                       "-pix_fmt", "yuv420p", str(sample)],
                      capture_output=True, timeout=55)
         if result.returncode != 0 or not sample.is_file() or sample.stat().st_size < 100_000:
@@ -4158,6 +4546,8 @@ def grab_output_preview(mode, target, settings=None):
     with tempfile.TemporaryDirectory(prefix="streamsnip-output-preview-") as folder:
         ass_path = pathlib.Path(folder) / "preview.ass"
         preview_path = pathlib.Path(folder) / "preview.mp4"
+        preview_encoder = (["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "28", "-b:v", "0"]
+                           if has_nvenc() else ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28"])
         sample_words = [(0.0, 0.78, "THAT"), (0.78, 1.52, "WAS"), (1.52, preview_duration, "INSANE!")]
         make_ass(sample_words, 0.0, preview_duration, ass_path, cfg)
         video_filter = render_video_filter(cfg, ass_path.name)
@@ -4165,10 +4555,10 @@ def grab_output_preview(mode, target, settings=None):
         for input_args in input_attempts:
             preview_path.unlink(missing_ok=True)
             result = run(
-                [ffmpeg_exe(), "-y", "-v", "error", *input_args,
+                [ffmpeg_exe(), "-y", "-v", "error", *ffmpeg_cuda_decode_args(), *input_args,
                  "-t", f"{preview_duration:.2f}", "-filter_complex", video_filter,
-                 "-map", "[v]", "-an", "-c:v", "libx264", "-preset", "ultrafast",
-                 "-crf", "28", "-r", "24", "-pix_fmt", "yuv420p",
+                 "-map", "[v]", "-an", *preview_encoder,
+                 "-r", "24", "-pix_fmt", "yuv420p",
                  "-movflags", "+faststart", str(preview_path)],
                 cwd=folder, capture_output=True, timeout=60,
             )
@@ -4380,8 +4770,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 creator_id = q.get("id", [""])[0]
                 return self._send(200, {"settings": CORE.get_creator_settings(creator_id)})
             if path == "/api/config":
-                # Public UI configuration only: never expose provider credentials.
-                return self._send(200, {"settings": CORE.settings, "ai": public_ai_settings(),
+                # Return shared defaults, never the last creator-specific runtime snapshot.
+                # Provider credentials remain private and are exposed only as presence flags.
+                return self._send(200, {"settings": CORE.default_settings, "ai": public_ai_settings(),
                                         "transcriber_models": MODELS, "layouts": LAYOUTS,
                                         "output_formats": list(OUTPUT_FORMATS.keys())})
             if path == "/api/publishing/status":
@@ -4640,6 +5031,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, check_updates())
                 if path == "/api/check_app_update":
                     return self._send(200, check_app_update())
+                if path == "/api/install_app_update":
+                    return self._send(200, install_app_update(body.get("parent_pid") if isinstance(body, dict) else None))
                 if path == "/api/update_components":
                     return self._send(200, update_components())
                 if path == "/api/quit":
@@ -4649,7 +5042,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, {"ok": True, "shutting_down": True})
                     schedule_quit_after_response()
                     return
-            except (ValueError, AIProviderError) as e:
+            except (ValueError, RuntimeError, AIProviderError) as e:
                 CORE.push(f"API VALIDATION ERROR [POST {path}]: {e}")
                 return self._send(400, {"error": str(e)})
             self._send(404, {"error": "not found"})

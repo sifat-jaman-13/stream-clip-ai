@@ -96,11 +96,18 @@ public sealed partial class MainPage
                 await CreatorActionAsync("Could not remove creator", "/api/creators/remove", creator.Id);
             }, danger: true));
 
-            var row = new Grid { ColumnSpacing = 16, Padding = new Thickness(15) };
+            var row = new Grid { ColumnSpacing = 14, Padding = new Thickness(15) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var avatar = CreateCreatorAvatar(
+                creator.Name, size: 38, active: creator.Running || creator.CaptureActive);
+            Grid.SetRow(avatar, 0);
+            Grid.SetColumn(avatar, 0);
+            row.Children.Add(avatar);
+            Grid.SetColumn(details, 1);
             row.Children.Add(details);
-            Grid.SetColumn(actions, 1);
+            Grid.SetColumn(actions, 2);
             row.Children.Add(actions);
             list.Children.Add(new Border
             {

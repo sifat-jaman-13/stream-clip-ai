@@ -39,9 +39,9 @@ Workspace request throttling, account-specific posting caps, and upstream platfo
 ## Capabilities and constraints
 
 - The native application includes Dashboard, Live Studio, Creators, Clip library, Published, Hype words, Publishing, Settings, Activity, Help, and About.
-- Live Studio groups Source, Capture, AI provider, Transcription, and Captions into pre-capture setup.
+- Live Studio groups Source, Capture, AI provider, Transcription, Framing, and Captions into pre-capture setup.
 - Capture never begins automatically when a page opens; it requires an explicit user action.
-- Creator profiles support independent live monitoring and recorded-VOD folder watching.
+- Creator profiles support independent live monitoring and recorded-VOD folder watching. Each profile owns its facecam/game regions, video layout/aspect ratio, and caption appearance; AI/caption providers, clipping thresholds, and profanity filtering remain shared defaults.
 - Faster-Whisper and YuNet run locally when their dependencies and model assets are installed.
 - Hosted AI providers receive transcript text when selected; local Hook Words and a local Ollama instance are alternatives.
 - Provider availability, connected social accounts, and publishing outcomes depend on external configuration and responses.
@@ -53,8 +53,8 @@ Workspace request throttling, account-specific posting caps, and upstream platfo
 
 - Product name: StreamSnip AI.
 - Default visual system: Studio Dark, with near-black work surfaces, vivid red actions, neutral high-contrast text, and semantic green/amber status colors.
-- The React interface has multiple curated themes and font choices; Inter is the default in every theme, with a bundled, consistent font catalog.
-- The native interface uses the same default palette and Inter across shell, content, menus, inputs, and native controls; the font family is user-selectable and persists across themes.
+- The React interface has multiple curated themes and font choices; JetBrains Mono is the default in every theme, with bundled sans-serif and monospace fonts plus Windows system and serif alternatives.
+- The native interface uses the same default palette and JetBrains Mono across shell, content, menus, inputs, and native controls; the font family is user-selectable and persists across themes.
 - The interface is an original creator workspace informed by familiar creator-studio patterns, not a pixel copy of another product.
 
 ## Product principles

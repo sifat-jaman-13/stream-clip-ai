@@ -219,11 +219,9 @@ public sealed partial class MainPage
             Height = 46,
             CornerRadius = new CornerRadius(11),
             Background = Application.Current.Resources[state.Running ? "SurfaceSoftBrush" : "SurfaceSoftBrush"] as Brush,
-            Child = new FontIcon
+            Child = new PathIcon
             {
-                Glyph = new string((char)0xE714, 1),
-                FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = UiFontSize(20),
+                Data = CreateVideoIconGeometry(),
                 Width = 22,
                 Height = 22,
                 Foreground = Application.Current.Resources[state.Running ? "AccentBrush" : "MutedTextBrush"] as Brush
@@ -471,11 +469,9 @@ public sealed partial class MainPage
                 VerticalAlignment = VerticalAlignment.Center,
                 Padding = new Thickness(12, 22, 12, 22)
             };
-            empty.Children.Add(new FontIcon
+            empty.Children.Add(new PathIcon
             {
-                Glyph = new string((char)0xE714, 1),
-                FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = UiFontSize(20),
+                Data = CreateVideoIconGeometry(),
                 Width = 28,
                 Height = 28,
                 Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
@@ -502,11 +498,9 @@ public sealed partial class MainPage
                 Height = 40,
                 CornerRadius = new CornerRadius(8),
                 Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
-                Child = new FontIcon
+                Child = new PathIcon
                 {
-                    Glyph = new string((char)0xE714, 1),
-                FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = UiFontSize(20),
+                    Data = CreateVideoIconGeometry(),
                     Width = 20,
                     Height = 20,
                     Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
@@ -575,23 +569,15 @@ public sealed partial class MainPage
 
         foreach (var creator in creators)
         {
-            var row = new Grid { ColumnSpacing = 9, Padding = new Thickness(0, 10, 0, 10) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(31) });
+            var row = new Grid { ColumnSpacing = 10, Padding = new Thickness(0, 11, 0, 11), MinHeight = 58 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var initial = creator.Name.Trim().Length > 0
-                ? creator.Name.Trim()[0].ToString().ToUpperInvariant()
-                : "C";
-            var avatar = new Border
-            {
-                Width = 31,
-                Height = 31,
-                CornerRadius = new CornerRadius(8),
-                Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
-                Child = Txt(initial, 12, true),
-                VerticalAlignment = VerticalAlignment.Center
-            };
+            var avatar = CreateCreatorAvatar(
+                creator.Name, size: 32, active: creator.Running || creator.CaptureActive);
+            Grid.SetRow(avatar, 0);
+            Grid.SetColumn(avatar, 0);
             row.Children.Add(avatar);
 
             var captureActive = creator.CaptureActive;

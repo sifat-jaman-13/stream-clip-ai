@@ -16,7 +16,7 @@ colors:
   warning: "#f6c26b"
   danger: "#f28b82"
 typography:
-  family: "Inter, sans-serif"
+  family: "JetBrains Mono, monospace"
   weights: "400, 500, 600, 700"
   numerals: "Tabular for counts, durations, sizes, and progress"
 layout:
@@ -39,7 +39,7 @@ StreamSnip AI is an operational creator workspace, not a marketing dashboard. It
 
 The default visual direction is Studio Dark: near-black ground, restrained charcoal surfaces, vivid red actions, neutral high-contrast text, and semantic green/amber states. Preserve this exact user-selected palette. The native workspace should feel like a considered broadcast workstation: clear source context, a readable processing rundown, and obvious next actions. Avoid costume UI, dashboard vanity metrics, and decorative card grids.
 
-Inter is the default UI family across themes and surfaces. Preserve explicit user font choices, and use a genuine role-based type scale so operational labels and metadata remain readable.
+JetBrains Mono is the default UI family across themes and surfaces, as requested for the creator workstation. Keep Manrope and the other bundled sans-serif and serif options available, and use tabular numerals for operational data. Use the role scale, line height, and spacing to keep dense operational text comfortable to scan.
 
 ## Colors
 
@@ -67,13 +67,13 @@ The user may switch themes without changing layout or behavior:
 
 - **Studio Dark (default)** - near-black canvas, neutral charcoal surfaces, vivid red actions.
 - **Odysseus** - graphite, arctic cyan, coral, and semantic green/amber.
-- **Studio Light** - neutral light canvas with restrained red actions.
+- **Studio Light** - cool porcelain canvas, white panels, crisp graphite labels, and high-contrast signal red.
 - **GitHub Dark** - repository-inspired slate and signal red.
 - **Nord** - blue-gray surfaces, frost text, and soft cyan accent.
-- **Odysseus Paper** - retained navy, chalk, and orange palette.
+- **Odysseus Paper** - cool paper surfaces with a deep navy navigation rail and burnt-coral actions.
 - **Ocean Depths** - deep blue and cyan.
 - **Forest Night** - evergreen and mint.
-- **Solarized Paper** - warm parchment and teal.
+- **Solarized Paper** - warm parchment, deep ink, olive-gray metadata, and dark teal actions.
 - **Rose Graphite** - charcoal and muted rose.
 - **Ember Studio** - umber and amber.
 - **Slate Studio** - cool graphite and steel blue.
@@ -91,7 +91,7 @@ Each theme must define the same semantic tokens, with matching app background, s
 
 ## Typography
 
-Inter is the application-wide default, including WinUI shell controls, dynamically generated text, inputs, buttons, dialogs, and tabs. The bundled variable font is used directly. The font selector retains the available sans-serif and monospace alternatives, and the selected family must apply consistently across both navigation and workspace surfaces.
+JetBrains Mono is the application-wide default, including WinUI shell controls, dynamically generated text, inputs, buttons, dialogs, and tabs. The bundled variable font is used directly. The font selector retains the bundled sans-serif, serif, and monospace alternatives plus common Windows system families. The selected family must apply consistently across navigation, workspace surfaces, dropdowns, and dialogs. Keep the 14-DIP medium body baseline and restrained line spacing so the monospaced family remains readable in dense workflows.
 
 Use a role-based native desktop scale with a 14-DIP body baseline: Small 13, Medium 14 (default), Large 16, proportionally scaling labels and headings. Preserve heading hierarchy and do not use tiny interface copy. Interactive controls are at least 48px high. Keep line height near 1.45 for explanatory text. Use tabular numerals for durations, counts, sizes, and progress. Subtitle output typography is configured separately from the application interface font.
 
@@ -100,9 +100,9 @@ Use a role-based native desktop scale with a 14-DIP body baseline: Small 13, Med
 - Sidebar width: 260px. Top utility bar: 76px. Page content uses a 40px desktop gutter.
 - Main workspace is desktop-first and opens maximized. Two-column work areas stack below 900px; the sidebar remains independently scrollable.
 - Dashboard uses one live seven-stage source-to-publish rundown, then recent clips and creator monitors. Do not use a four-metric hero strip.
-- Live Studio uses a single source field, a real 16:9 preview, four pre-capture setup tabs, and a persistent bottom Start/Stop action bar.
+- Live Studio uses a single source field, a real 16:9 preview, five pre-capture setup tabs, and a persistent bottom Start/Stop action bar.
 - Live Studio follows one canonical order: source, configuration, session status, then Start/Stop.
-- Capture, AI provider, Transcription, and Captions are always available as visible tabs inside Live Studio before capture starts. They do not belong in global Settings.
+- Capture, Framing, AI provider, Transcription, and Captions are always available as visible tabs inside Live Studio before capture starts. Framing exposes automatic GPU-first facecam detection and separate draggable/resizable facecam and gameplay regions. They do not belong in global Settings.
 - Keep the source URL as the canonical source for source preview and creator-handle detection.
 - Keep a persistent capture action bar at the bottom of the Studio content.
 - Global Settings contains application-wide storage and appearance only.

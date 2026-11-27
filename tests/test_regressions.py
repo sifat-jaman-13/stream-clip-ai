@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import tempfile
 import threading
 import time
@@ -476,6 +476,157 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(engine.rec_dir, Path(cfg["creator_rec_dir"]).resolve())
         self.assertTrue(engine.out_dir.is_dir())
         self.assertTrue(engine.rec_dir.is_dir())
+
+    def test_creator_profiles_isolate_framing_and_caption_style_but_share_providers_and_clipping_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.multiple(
+                autoclip, _data_root=Path(directory),
+                load_settings=MagicMock(return_value=autoclip.clean_cfg({})),
+                apply_storage_paths=MagicMock(),
+                streamlink_available=MagicMock(return_value=True),
+            ):
+                core = autoclip.Core()
+                core.push = MagicMock()
+                first = core.add_creator({"name": "Creator One", "target": "https://twitch.tv/creatorone"})["creator"]["id"]
+                second = core.add_creator({"name": "Creator Two", "target": "https://twitch.tv/creatortwo"})["creator"]["id"]
+
+                core.save_creator_settings(first, {
+                    "cam_x": 14, "cam_y": 9, "cam_w": 31, "cam_h": 44,
+                    "game_area_x": 4, "game_area_y": 8, "game_area_w": 80, "game_area_h": 90,
+                    "crop_x": 7, "crop_y": 2, "crop_w": 60, "crop_h": 95,
+                    "subtitle_style": "Neon", "subtitle_animation": "pop_in",
+                    "subtitle_custom": True, "subtitle_text_color": "#00FF00",
+                    "caption_size": 111, "font": "Poppins", "streamer_tag": "@creatorone",
+                    "transcriber_provider": "custom-command", "transcriber_command": "caption-engine",
+                    "transcriber_language": "en", "model": "medium",
+                    "clips_per_chunk": 5, "chunk_min": 12, "pre": 31, "post": 22,
+                    "min_score": 91, "capture_bitrate_kbps": 12000,
+                    "layout": "Blur background", "output_format": "16:9", "delete_rec": True,
+                    "profanity_filter_enabled": False, "profanity_audio_mode": "mute",
+                })
+
+                one = core.get_creator_settings(first)
+                two = core.get_creator_settings(second)
+                self.assertEqual((one["cam_x"], one["cam_y"], one["subtitle_style"], one["caption_size"]),
+                                 (14, 9, "Neon", 111))
+                self.assertEqual((two["cam_x"], two["cam_y"], two["subtitle_style"], two["caption_size"]),
+                                 (autoclip.DEFAULTS["cam_x"], autoclip.DEFAULTS["cam_y"],
+                                  autoclip.DEFAULTS["subtitle_style"], autoclip.DEFAULTS["caption_size"]))
+                self.assertEqual((two["transcriber_provider"], two["transcriber_command"],
+                                  two["transcriber_language"], two["model"]),
+                                 ("custom-command", "caption-engine", "en", "medium"))
+                self.assertEqual((one["layout"], one["output_format"]), ("Blur background", "16:9"))
+                self.assertEqual((two["layout"], two["output_format"]), ("Blur background", "16:9"))
+                self.assertEqual((two["clips_per_chunk"], two["chunk_min"], two["pre"], two["post"],
+                                  two["min_score"], two["capture_bitrate_kbps"], two["delete_rec"]),
+                                 (5, 12, 31, 22, 91, 12000, True))
+                self.assertEqual((one["profanity_filter_enabled"], one["profanity_audio_mode"]), (False, "mute"))
+                self.assertEqual((two["profanity_filter_enabled"], two["profanity_audio_mode"]),
+                                 (autoclip.DEFAULTS["profanity_filter_enabled"], autoclip.DEFAULTS["profanity_audio_mode"]))
+                self.assertEqual(two["streamer_tag"], autoclip.DEFAULTS["streamer_tag"])
+
+                with core._creator_db() as db:
+                    stored = json.loads(db.execute(
+                        "SELECT settings_json FROM creator_settings WHERE creator_id=?", (first,)
+                    ).fetchone()["settings_json"])
+                for shared_key in ("transcriber_provider", "transcriber_command", "transcriber_language",
+                                   "model", "clips_per_chunk", "chunk_min", "pre", "post",
+                                   "min_score", "capture_bitrate_kbps", "delete_rec", "cpu_threads", "language",
+                                   "layout", "output_format"):
+                    self.assertNotIn(shared_key, stored)
+                for profile_key in ("profanity_filter_enabled", "profanity_filter_words", "profanity_audio_mode"):
+                    self.assertIn(profile_key, stored)
+                self.assertEqual(stored["cam_x"], 14)
+                self.assertEqual(stored["subtitle_style"], "Neon")
+                self.assertEqual(core.default_settings["transcriber_provider"], "custom-command")
+
+    def test_legacy_full_creator_rows_keep_visual_preferences_but_ignore_duplicated_shared_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = autoclip.clean_cfg({
+                "min_score": 73, "transcriber_provider": "faster-whisper",
+                "transcriber_language": "en", "model": "medium",
+                "clips_per_chunk": 1, "chunk_min": 6,
+                "layout": "Fill (crop center)", "output_format": "4:5",
+            })
+            with patch.multiple(
+                autoclip, _data_root=Path(directory),
+                load_settings=MagicMock(return_value=shared),
+                save_settings=MagicMock(), apply_storage_paths=MagicMock(),
+                streamlink_available=MagicMock(return_value=True),
+            ):
+                core = autoclip.Core()
+                core.push = MagicMock()
+                creator_id = core.add_creator({"name": "Legacy creator", "target": "https://twitch.tv/legacy"})["creator"]["id"]
+                legacy = autoclip.clean_cfg({
+                    "cam_x": 17, "subtitle_style": "Neon", "subtitle_animation": "pop_in",
+                    "transcriber_provider": "custom-command", "transcriber_command": "old-command",
+                    "transcriber_language": "fr", "model": "small", "min_score": 99,
+                    "clips_per_chunk": 8, "chunk_min": 15,
+                    "layout": "Blur background", "output_format": "16:9",
+                })
+                with core._creator_db() as db:
+                    db.execute("UPDATE creator_settings SET settings_json=? WHERE creator_id=?",
+                               (json.dumps(legacy), creator_id))
+
+                # Startup migration compacts old full-config rows without losing
+                # creator-specific framing/subtitle values.
+                core._init_creator_database()
+                with core._creator_db() as db:
+                    migrated = json.loads(db.execute(
+                        "SELECT settings_json FROM creator_settings WHERE creator_id=?", (creator_id,)
+                    ).fetchone()["settings_json"])
+                for shared_key in ("transcriber_provider", "transcriber_command", "transcriber_language",
+                                   "model", "min_score", "clips_per_chunk", "chunk_min", "layout", "output_format"):
+                    self.assertNotIn(shared_key, migrated)
+                self.assertEqual(migrated["cam_x"], 17)
+                self.assertEqual(migrated["subtitle_style"], "Neon")
+                self.assertEqual(migrated["subtitle_animation"], "pop_in")
+                self.assertIn("profanity_filter_enabled", migrated)
+
+                effective = core.get_creator_settings(creator_id)
+                self.assertEqual((effective["cam_x"], effective["subtitle_style"], effective["subtitle_animation"]),
+                                 (17, "Neon", "pop_in"))
+                self.assertEqual((effective["transcriber_provider"], effective["transcriber_language"], effective["model"]),
+                                 ("faster-whisper", "en", "medium"))
+                self.assertEqual((effective["min_score"], effective["clips_per_chunk"], effective["chunk_min"]),
+                                 (73, 1, 6))
+                self.assertEqual((effective["layout"], effective["output_format"]), ("Fill (crop center)", "4:5"))
+
+                core.save_creator_settings(creator_id, effective)
+                with core._creator_db() as db:
+                    compacted = json.loads(db.execute(
+                        "SELECT settings_json FROM creator_settings WHERE creator_id=?", (creator_id,)
+                    ).fetchone()["settings_json"])
+                for shared_key in ("transcriber_provider", "transcriber_command", "transcriber_language",
+                                   "model", "min_score", "clips_per_chunk", "chunk_min", "layout", "output_format"):
+                    self.assertNotIn(shared_key, compacted)
+                for profile_key in ("profanity_filter_enabled", "profanity_filter_words", "profanity_audio_mode"):
+                    self.assertIn(profile_key, compacted)
+                self.assertEqual(compacted["cam_x"], 17)
+                self.assertEqual(compacted["subtitle_style"], "Neon")
+
+    def test_new_creator_uses_fresh_profile_defaults_not_previous_creator_framing_or_caption_style(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.multiple(
+                autoclip, _data_root=Path(directory),
+                load_settings=MagicMock(return_value=autoclip.clean_cfg({"layout": "Fill (crop center)", "output_format": "4:5"})),
+                apply_storage_paths=MagicMock(),
+                streamlink_available=MagicMock(return_value=True),
+            ):
+                core = autoclip.Core()
+                core.push = MagicMock()
+                first = core.add_creator({"name": "Creator One", "target": "https://twitch.tv/creatorone"})["creator"]["id"]
+                second = core.add_creator({"name": "Creator Two", "target": "https://twitch.tv/creatortwo"})["creator"]["id"]
+                core.save_creator_settings(first, {"cam_x": 11, "subtitle_style": "MrBeast", "font": "Lato",
+                                                   "layout": "Blur background", "output_format": "9:16"})
+                first_profile = core.get_creator_settings(first)
+                new_profile = core.get_creator_settings(second)
+                self.assertEqual(new_profile["cam_x"], autoclip.DEFAULTS["cam_x"])
+                self.assertEqual(new_profile["subtitle_style"], autoclip.DEFAULTS["subtitle_style"])
+                self.assertEqual(new_profile["font"], autoclip.DEFAULTS["font"])
+                self.assertEqual((first_profile["layout"], first_profile["output_format"]),
+                                 ("Blur background", "9:16"))
+                self.assertEqual((new_profile["layout"], new_profile["output_format"]), ("Blur background", "9:16"))
 
     def test_creator_profiles_are_validated_and_persisted_locally(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2040,12 +2191,115 @@ class RegressionTests(unittest.TestCase):
             self.assertNotEqual(__import__("os").environ.get("HF_TOKEN"), "hf-secret")
             self.assertNotEqual(__import__("os").environ.get("HUGGING_FACE_HUB_TOKEN"), "hf-secret")
 
+    def test_app_update_uses_registered_install_version_and_release_checksum(self):
+        digest = "a" * 64
+        release = {
+            "tag_name": "v4.0.10",
+            "name": "StreamSnip AI 4.0.10",
+            "html_url": "https://github.com/sifat-jaman-13/stream-clip-ai/releases/tag/v4.0.10",
+            "assets": [{
+                "name": "StreamSnipAI-Native-Setup.exe",
+                "browser_download_url": "https://example.invalid/StreamSnipAI-Native-Setup.exe",
+                "digest": "sha256:" + digest,
+                "size": 12345,
+            }],
+        }
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(release).encode("utf-8")
+        installed = {
+            "version": "4.0.6",
+            "installed": True,
+            "install_dir": r"C:\Apps\StreamSnip AI Native",
+            "app_executable": r"C:\Apps\StreamSnip AI Native\desktop\StreamSnip.Desktop.exe",
+        }
+        with patch.object(autoclip, "_installed_app_info", return_value=installed, create=True), \
+             patch.object(autoclip.urllib.request, "urlopen", return_value=response):
+            result = autoclip.check_app_update()
+
+        self.assertEqual(result["current"], "4.0.6")
+        self.assertEqual(result["latest"], "4.0.10")
+        self.assertTrue(result["update"])
+        self.assertTrue(result["can_install"])
+        self.assertEqual(result["installer_sha256"], digest)
+        self.assertEqual(result["installer_size"], 12345)
+        self.assertEqual(result["installer_url"], release["assets"][0]["browser_download_url"])
+
+    @unittest.skipUnless(autoclip.os.name == "nt", "Windows-only native installer handoff")
+    def test_install_app_update_downloads_verifies_and_schedules_installer(self):
+        payload = b"test-installer-payload"
+        digest = __import__("hashlib").sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            response = MagicMock()
+            response.__enter__.return_value.read.return_value = payload
+            release = {
+                "current": "4.0.6",
+                "latest": "4.0.10",
+                "update": True,
+                "installer_url": "https://example.invalid/setup.exe",
+                "installer_name": "StreamSnipAI-Native-Setup.exe",
+                "installer_sha256": digest,
+                "installer_size": len(payload),
+                "can_install": True,
+            }
+            installed = {
+                "version": "4.0.6",
+                "installed": True,
+                "install_dir": directory,
+                "app_executable": str(Path(directory) / "desktop" / "StreamSnip.Desktop.exe"),
+            }
+            with patch.object(autoclip, "check_app_update", return_value=release), \
+                 patch.object(autoclip, "_installed_app_info", return_value=installed, create=True), \
+                 patch.object(autoclip.urllib.request, "urlopen", return_value=response), \
+                 patch.object(autoclip.tempfile, "mkdtemp", return_value=directory), \
+                 patch.object(autoclip.os, "getppid", return_value=4321), \
+                 patch.object(autoclip.subprocess, "Popen") as launch_helper:
+                result = autoclip.install_app_update(parent_pid=4321)
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["pending_restart"])
+            self.assertEqual(result["latest"], "4.0.10")
+            downloaded = Path(directory) / "StreamSnipAI-Native-Setup.exe"
+            self.assertEqual(downloaded.read_bytes(), payload)
+            helper = Path(directory) / "install-update.ps1"
+            self.assertTrue(helper.is_file())
+            self.assertIn("ParentPid", helper.read_text(encoding="utf-8-sig"))
+            helper_args = launch_helper.call_args.args[0]
+            installer_index = helper_args.index("-InstallerPath")
+            self.assertEqual(helper_args[installer_index + 1], str(downloaded))
+            self.assertIn("4321", str(launch_helper.call_args))
+
+    @unittest.skipUnless(autoclip.os.name == "nt", "Windows-only native installer handoff")
+    def test_install_app_update_rejects_a_bad_checksum_before_launching(self):
+        payload = b"tampered-installer"
+        with tempfile.TemporaryDirectory() as directory:
+            response = MagicMock()
+            response.__enter__.return_value.read.return_value = payload
+            release = {
+                "current": "4.0.6",
+                "latest": "4.0.10",
+                "update": True,
+                "installer_url": "https://example.invalid/setup.exe",
+                "installer_name": "StreamSnipAI-Native-Setup.exe",
+                "installer_sha256": "0" * 64,
+                "installer_size": len(payload),
+                "can_install": True,
+            }
+            with patch.object(autoclip, "check_app_update", return_value=release), \
+                 patch.object(autoclip, "_installed_app_info", return_value={"version": "4.0.6", "installed": True, "install_dir": directory,
+                     "app_executable": str(Path(directory) / "desktop" / "StreamSnip.Desktop.exe")}, create=True), \
+                 patch.object(autoclip.urllib.request, "urlopen", return_value=response), \
+                 patch.object(autoclip.tempfile, "mkdtemp", return_value=directory), \
+                 patch.object(autoclip.os, "getppid", return_value=4321), \
+                 patch.object(autoclip.subprocess, "Popen") as launch_helper:
+                with self.assertRaisesRegex(RuntimeError, "SHA-256"):
+                    autoclip.install_app_update(parent_pid=4321)
+            launch_helper.assert_not_called()
     def test_newer_installed_version_is_not_reported_as_outdated(self):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = b'{"tag_name":"v1.1.5"}'
         with patch.object(autoclip, "APP_VERSION", "1.1.6"), patch.object(
-            autoclip.urllib.request, "urlopen", return_value=response
-        ):
+            autoclip, "_installed_app_info", return_value={"version": "1.1.6", "installed": False}
+        ), patch.object(autoclip.urllib.request, "urlopen", return_value=response):
             result = autoclip.check_app_update()
         self.assertFalse(result["update"])
 
@@ -2504,3 +2758,39 @@ class RegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SharedCreatorSettingsApiTests(unittest.TestCase):
+    def test_api_config_returns_shared_defaults_not_last_creator_runtime_snapshot(self):
+        import http.client
+        import http.server
+        import json
+        import threading
+
+        previous_runtime = autoclip.CORE.settings
+        previous_defaults = autoclip.CORE.default_settings
+        server = None
+        worker = None
+        try:
+            runtime = {"layout": "Creator A layout", "output_format": "9:16", "min_score": 92}
+            shared = {"layout": "Local default layout", "output_format": "16:9", "min_score": 75}
+            autoclip.CORE.settings = runtime
+            autoclip.CORE.default_settings = shared
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), autoclip.Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            connection.request("GET", "/api/config")
+            response = connection.getresponse()
+            payload = json.loads(response.read().decode("utf-8"))
+            connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["settings"], shared)
+            self.assertNotEqual(payload["settings"], runtime)
+        finally:
+            if server is not None:
+                server.shutdown()
+                server.server_close()
+            if worker is not None:
+                worker.join(timeout=2)
+            autoclip.CORE.settings = previous_runtime
+            autoclip.CORE.default_settings = previous_defaults

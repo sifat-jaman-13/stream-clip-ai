@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
   <img src="assets/streamsnipai-banner.svg" width="100%" alt="StreamSnip AI, a native Windows studio for turning live streams into shareable clips">
   <p><strong>Capture the moment. Shape the clip. Review it. Publish when you are ready.</strong></p>
   <p>
@@ -27,10 +27,10 @@ The installed desktop app uses **WinUI 3** with a supervised local Python media 
 
 ## See the app
 
-Screenshots below are from the **4.0.9 native Windows Release build**.
+Screenshots below are from the **4.0.10 native Windows Release build**.
 
 <p align="center">
-  <img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.9 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
+  <img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.10 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
 </p>
 
 <details>
@@ -40,21 +40,21 @@ Screenshots below are from the **4.0.9 native Windows Release build**.
     <tr>
       <td width="50%">
         <p align="center"><strong>Live Studio</strong></p>
-        <img src="docs/assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.9 Live Studio in Studio Dark with source selection and pre-capture configuration">
+        <img src="docs/assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.10 Live Studio in Studio Dark with source selection and pre-capture configuration">
       </td>
       <td width="50%">
         <p align="center"><strong>Creator monitoring</strong></p>
-        <img src="docs/assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.9 Creators page in Studio Dark showing independent live and recorded VOD monitors">
+        <img src="docs/assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.10 Creators page in Studio Dark showing independent live and recorded VOD monitors">
       </td>
     </tr>
     <tr>
       <td width="50%">
         <p align="center"><strong>Clip Library</strong></p>
-        <img src="docs/assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.9 Clip Library in Studio Dark with Ready to review and Scheduled tabs">
+        <img src="docs/assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.10 Clip Library in Studio Dark with Ready to review and Scheduled tabs">
       </td>
       <td width="50%">
         <p align="center"><strong>Publisher</strong></p>
-        <img src="docs/assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.9 Publisher in Studio Dark with five Zernio connection slots">
+        <img src="docs/assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.10 Publisher in Studio Dark with five Zernio connection slots">
       </td>
     </tr>
   </table>
@@ -106,8 +106,10 @@ Live Studio keeps the full pre-capture setup in one place.
 | --- | --- |
 | Capture | Chunk length, seconds before/after a highlight, minimum score, bitrate, and max clips per chunk |
 | AI provider | Gemini, Ollama, OpenAI/ChatGPT API, Anthropic/Claude API, or custom OpenAI-compatible endpoint |
-| Transcription | Faster-Whisper model, language, and CPU threads |
-| Captions | Video layout, output ratio, subtitle mode/style, creator credit, creator tag, and profanity filter |
+| Transcription | Shared Faster-Whisper model, language, provider, and CPU/GPU settings |
+| Framing | Per-creator video layout and output ratio, GPU-first automatic facecam detection, and manual pink facecam/cyan gameplay regions |
+| Captions | Per-creator subtitle mode/style, font, colors, position, creator credit, and tag |
+| Shared defaults | AI provider, caption/transcription provider, clipping thresholds, and profanity filter apply to every creator |
 
 ### AI providers
 
@@ -119,9 +121,13 @@ The selected model analyzes transcript windows, selects candidate moments, and g
 
 ### Transcription and output
 
-Faster-Whisper, FFmpeg rendering, OpenCV/YuNet, and local Hook Words processing run on your PC. Facecam framing uses **local multi-frame facecam detection** and may need manual review.
+Faster-Whisper, FFmpeg rendering, OpenCV/YuNet, and local Hook Words processing run on your PC. Facecam framing uses local multi-frame facecam detection with a supported GPU provider first and CPU only when no compatible GPU is available; review automatic results and adjust the manual framing regions when needed.
 
-Supported output ratios are 9:16 portrait, 16:9 landscape, 1:1 square, and 4:5. Caption options include Karaoke and Classic modes, multiple styles, creator credit, and profanity filtering.
+Each creator keeps independent facecam/game regions, video layout, output ratio, and caption appearance. Supported ratios are 9:16 portrait, 16:9 landscape, 1:1 square, and 4:5. AI provider, caption/transcription provider, clipping thresholds, and profanity filtering remain shared defaults.
+
+## Appearance and typography
+
+JetBrains Mono remains the default UI font. The font picker also offers Manrope, DM Sans, Inter, Open Sans, IBM Plex Sans, Nunito Sans, Roboto, Source Sans 3, Poppins, Lato, Fira Code, and Windows/system and serif alternatives. Theme text colors are contrast-corrected so labels remain readable across the available palettes.
 
 ## Workspaces
 

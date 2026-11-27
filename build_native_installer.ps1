@@ -3,6 +3,8 @@ Set-Location $PSScriptRoot
 
 $project = Join-Path $PSScriptRoot "desktop\StreamSnip.Desktop\StreamSnip.Desktop.csproj"
 $publishDir = Join-Path $PSScriptRoot "dist\StreamSnipDesktopNative"
+$facecamProject = Join-Path $PSScriptRoot "tools\FacecamInference\FacecamInference.csproj"
+$facecamPublishDir = Join-Path $PSScriptRoot "dist\FacecamInference"
 $installerDir = Join-Path $PSScriptRoot "dist\installer"
 $iss = Join-Path $PSScriptRoot "installer\StreamSnipNative.iss"
 
@@ -18,7 +20,23 @@ try {
 if (Test-Path -LiteralPath $publishDir) {
     Remove-Item -LiteralPath $publishDir -Recurse -Force
 }
-New-Item -ItemType Directory -Force -Path $publishDir, $installerDir | Out-Null
+if (Test-Path -LiteralPath $facecamPublishDir) {
+    Remove-Item -LiteralPath $facecamPublishDir -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $publishDir, $facecamPublishDir, $installerDir | Out-Null
+
+Write-Host "Publishing the self-contained DirectML facecam inference helper..." -ForegroundColor Cyan
+& dotnet publish $facecamProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishTrimmed=false -o $facecamPublishDir
+if ($LASTEXITCODE -ne 0) { throw "DirectML facecam inference helper publish failed." }
+foreach ($required in @(
+    (Join-Path $facecamPublishDir "FacecamInference.exe"),
+    (Join-Path $facecamPublishDir "DirectML.dll"),
+    (Join-Path $facecamPublishDir "onnxruntime.dll")
+)) {
+    if (-not (Test-Path -LiteralPath $required)) {
+        throw "The DirectML facecam helper is missing a required runtime file: $required"
+    }
+}
 
 $fontAsset = Join-Path $PSScriptRoot "desktop\StreamSnip.Desktop\Assets\Fonts\JetBrainsMono-Variable.ttf"
 if (-not (Test-Path -LiteralPath $fontAsset)) {
@@ -48,6 +66,12 @@ foreach ($required in @(
     (Join-Path $publishDir "Assets\Fonts\IBMPlexSans-Variable.ttf"),
     (Join-Path $publishDir "Assets\Fonts\Roboto-Variable.ttf"),
     (Join-Path $publishDir "Assets\Fonts\SourceSans3-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\DMSans-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\Poppins-Regular.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\Lato-Regular.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\Manrope-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\NunitoSans-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\FiraCode-Variable.ttf"),
     (Join-Path $PSScriptRoot "zernio_connections.py"),
     (Join-Path $PSScriptRoot "dashboard\dist\index.html"),
     (Join-Path $PSScriptRoot "installer\setup_windows.ps1")
@@ -73,7 +97,7 @@ if (-not $iscc) {
 if (-not $iscc) { throw "Inno Setup 6 is required to create the native StreamSnip AI installer." }
 
 $versionMatch = Select-String -Path (Join-Path $PSScriptRoot "autoclip.py") -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
-$version = if ($versionMatch) { $versionMatch.Matches[0].Groups[1].Value } else { "4.0.9" }
+$version = if ($versionMatch) { $versionMatch.Matches[0].Groups[1].Value } else { "4.0.14" }
 
 Write-Host "Compiling StreamSnipAI-Native-Setup.exe (version $version)..." -ForegroundColor Cyan
 & $iscc "/DMyAppVersion=$version" $iss

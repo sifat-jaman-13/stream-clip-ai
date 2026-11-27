@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  font-family: var(--font-family, "Google Sans Flex"), "Google Sans", "Segoe UI", Arial, sans-serif;
+  font-family: var(--font-family, "JetBrains Mono"), Consolas, monospace;
   font-optical-sizing: auto;
   font-synthesis: none;
   text-rendering: optimizeLegibility;

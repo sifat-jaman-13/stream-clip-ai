@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 import re
 import unittest
 from html.parser import HTMLParser
@@ -62,7 +62,7 @@ class PublicReleaseAssetTests(unittest.TestCase):
             self.assertTrue((ROOT / image).is_file(), f"Missing README screenshot: {image}")
         for image in ("dashboard.png", "live-studio.png", "creator-monitoring.png", "clip-library.png", "publishing.png"):
             self.assertIn(f"docs/assets/product/{image}", screenshots)
-        self.assertIn("4.0.9 native Windows Release build", readme)
+        self.assertIn("4.0.10 native Windows Release build", readme)
         self.assertNotIn("Page render error", readme)
         self.assertIn("Facebook", readme)
         self.assertIn("Instagram", readme)
@@ -154,6 +154,9 @@ class PublicReleaseAssetTests(unittest.TestCase):
             "IBM Plex Sans": "IBMPlexSans-Variable.ttf",
             "Roboto": "Roboto-Variable.ttf",
             "Source Sans 3": "SourceSans3-Variable.ttf",
+            "DM Sans": "DMSans-Variable.ttf",
+            "Poppins": "Poppins-Regular.ttf",
+            "Lato": "Lato-Regular.ttf",
         }
         for family, asset in expected.items():
             self.assertIn(f'name: "{family}"', app)
@@ -161,15 +164,31 @@ class PublicReleaseAssetTests(unittest.TestCase):
             self.assertTrue((ROOT / "dashboard" / "public" / "fonts" / asset).is_file())
         self.assertIn('id: "segoe-ui", name: "Segoe UI"', app)
         self.assertIn('id: "consolas", name: "Consolas"', app)
-        self.assertIn('return "inter";', app)
-        self.assertIn('preferenceVersion !== "1"', app)
-        self.assertIn('saved === "jetbrains-mono" ? "inter" : saved', app)
+        for family in ("Manrope", "Nunito Sans", "Fira Code"):
+            self.assertIn(f'name: "{family}"', app)
+        for family in ("Aptos", "Arial", "Tahoma", "Verdana", "Georgia", "Trebuchet MS", "Times New Roman"):
+            self.assertIn(f'name: "{family}"', app)
+        self.assertIn('return "jetbrains-mono";', app)
+        self.assertIn('preferenceVersion !== "8"', app)
+        self.assertIn('saved === "manrope" || saved === "jetbrains-mono"', app)
+        self.assertIn('preferenceVersion === "1" && saved === "inter"', app)
+
+    def test_directml_facecam_helper_is_built_and_included_in_native_installer(self):
+        build = (ROOT / "build_native_installer.ps1").read_text(encoding="utf-8")
+        installer = (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
+        helper_project = ROOT / "tools" / "FacecamInference" / "FacecamInference.csproj"
+        self.assertTrue(helper_project.is_file())
+        self.assertIn('tools\\FacecamInference\\FacecamInference.csproj', build)
+        self.assertIn('dotnet publish $facecamProject', build)
+        self.assertIn('FacecamInference.exe', build)
+        self.assertIn('..\\dist\\FacecamInference\\*', installer)
+        self.assertIn('DestDir: "{app}\\source\\facecam-inference"', installer)
 
     def test_release_version_is_consistent(self):
-        self.assertIn('APP_VERSION = "4.0.9"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
-        self.assertIn('version = "4.0.9"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('#define MyAppVersion "4.0.9"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
-        self.assertIn('Version="4.0.9.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
+        self.assertIn('APP_VERSION = "4.0.16"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
+        self.assertIn('version = "4.0.16"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('#define MyAppVersion "4.0.16"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
+        self.assertIn('Version="4.0.16.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

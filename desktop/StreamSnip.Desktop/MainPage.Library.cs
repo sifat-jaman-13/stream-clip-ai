@@ -147,11 +147,9 @@ public sealed partial class MainPage
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            emptyPreviewContent.Children.Add(new FontIcon
+            emptyPreviewContent.Children.Add(new PathIcon
             {
-                Glyph = new string((char)0xE714, 1),
-                FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = UiFontSize(20),
+                Data = CreateVideoIconGeometry(),
                 Width = 32,
                 Height = 32,
                 Foreground = Application.Current.Resources["MutedTextBrush"] as Brush

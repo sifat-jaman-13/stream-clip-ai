@@ -12,15 +12,18 @@
   <p>
     <a href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"><strong>Download for Windows</strong></a>
     | <a href="https://sifat-jaman-13.github.io/stream-clip-ai/">Project website</a>
+    | <a href="docs/USER_GUIDE.md">Complete user guide</a>
     | <a href="https://github.com/sifat-jaman-13/stream-clip-ai/issues">Report a problem</a>
   </p>
 </div>
 
 ## What it is
 
-StreamSnip AI is a **native Windows creator studio** for turning supported Twitch and YouTube streams, recorded VODs, and local videos into short-form clips. It brings capture, creator monitoring, transcription, highlight analysis, facecam-aware framing, captioned rendering, clip review, and publishing into one workflow.
+StreamSnip AI is a **native Windows creator studio** for turning supported Twitch and YouTube live streams, recorded VODs, and local videos into short-form clips. It brings capture, creator monitoring, local transcription, AI-assisted highlight selection, facecam-aware framing, animated captions, clip review, metadata, and controlled publishing into one workflow.
 
-The installed app uses **WinUI 3** with a supervised local Python media engine. Your source files, recordings, transcription, framing, and rendering are handled on your PC. Hosted AI analysis and social publishing are optional services that you configure and invoke yourself.
+The installed desktop app uses **WinUI 3** with a supervised local Python media engine. The React/Vite dashboard in `dashboard/` is a separate browser-oriented frontend; it is not the installed native shell.
+
+**Capture and publishing are always explicit actions.** Opening Live Studio does not start recording, and StreamSnip does not publish clips automatically.
 
 ## See the app
 
@@ -57,32 +60,6 @@ Screenshots below are from the **4.0.7 native Windows Release build**.
   </table>
 </details>
 
-## From source to finished clip
-
-1. **Choose a source.** Use a supported Twitch or YouTube live stream, a recorded VOD, or a local video.
-2. **Capture or monitor.** Start and stop capture explicitly, or organise independent creators and their live/VOD workspaces.
-3. **Transcribe and find moments.** Run Faster-Whisper locally and score candidate highlights with Hook Words, Ollama, or a hosted provider you configure.
-4. **Frame and render.** Adjust facecam/gameplay framing, choose an output ratio, and render animated captions.
-5. **Review and publish.** Check the clip and its generated metadata, then send selected posts through your connected Zernio destinations.
-
-Opening Live Studio does **not** start recording. Capture begins only after you choose a source and explicitly start the session.
-
-## Workspaces and output
-
-| Workspace | Purpose |
-| --- | --- |
-| **Live Studio** | Configure source, capture, AI analysis, transcription, and captions before a session. |
-| **Creators** | Keep creator profiles and their live and recorded-VOD monitoring separate. |
-| **Clip Library** | Review rendered video with its matching title, description, and other post metadata. |
-| **Published** | Keep confirmed published records separate from clips still under review. |
-| **Publishing** | Manage Zernio connections, discover available accounts, and choose destinations per post. |
-
-**Clip output:** portrait 9:16, landscape 16:9, square 1:1, and 4:5. Configure word-level animated captions, placement, creator credit, and supported styles. Facecam framing uses **local multi-frame facecam detection** with OpenCV and YuNet.
-
-**Publishing destinations:** the current Zernio integration supports Facebook, Instagram, and YouTube. TikTok is not a supported destination in this integration. Posting availability and quotas are controlled by Zernio and the connected platforms. A destination is recorded as published only after success is confirmed.
-
-Highlight scores are suggestions, not guarantees of views or engagement. Review every clip and its metadata before publishing.
-
 ## Install on Windows
 
 1. Open [GitHub Releases](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest).
@@ -104,26 +81,102 @@ Write-Host "SHA-256 verified: $actual"
 
 4. Run the installer and launch StreamSnip AI from the Start menu or desktop shortcut.
 
-Setup prepares the self-contained WinUI 3 application and its isolated local engine. It checks for a compatible 64-bit Python runtime, FFmpeg/FFprobe, required packages, and the configured speech model. Compatible dependencies are reused; missing or incompatible components are installed or repaired. Setup does not replace system Python or change the global `PATH`.
+The app supports Windows 10/11 x64. You do not need to install Python or FFmpeg globally; setup prepares an isolated runtime, reuses compatible components, and installs or repairs missing packages. Internet access is required when setup needs to download packages or model files.
 
-An internet connection is needed when setup must download packages or model files. A Hugging Face token is optional and may help with gated or rate-limited model downloads. Setup diagnostics are written to `%LOCALAPPDATA%\StreamSnip AI\setup.log`.
+The installer is currently unsigned, so Windows SmartScreen may show a publisher warning. Only continue if the installer came from the official release and its checksum matches.
 
-## AI, privacy, and local processing
+## Quick start: first clip
 
-| Task | Where the work or data goes |
+1. **Check Dashboard.** Wait for the local engine to show that it is connected and ready.
+2. **Choose a source.** In Live Studio, select Live stream for Twitch/YouTube or Video file / VOD for a local video. Paste the URL or use Browse video.
+3. **Preview.** Press Preview source frame to verify the selected source. This is only a still-frame check.
+4. **Configure.** Set Capture, AI provider, Transcription, and Captions in Live Studio before recording.
+5. **Start.** Press Start capture. Follow the actual status and progress in Live Studio or Dashboard.
+6. **Stop.** Press Stop capture when you are finished. Allow active work to stop gracefully.
+7. **Review.** Open Clip Library, preview the MP4, and correct its title, description, and tags.
+8. **Publish if wanted.** Configure Zernio in Publishing, choose a connected destination, review the post, and submit it yourself.
+
+See the [complete user guide](docs/USER_GUIDE.md) for detailed setup, each setting, creator monitoring, publishing, storage, and troubleshooting.
+
+## What to configure in Live Studio
+
+Live Studio keeps the full pre-capture setup in one place.
+
+| Tab | Main options |
 | --- | --- |
-| Capture, recordings, local video, Faster-Whisper, OpenCV/YuNet, FFmpeg, and Hook Words | Your Windows PC |
-| Local language-model analysis | Your configured Ollama service |
-| Hosted AI analysis | Transcript text is sent to the provider you select for that task |
-| Social publishing | Selected media and post details are sent to Zernio and the destinations you choose |
+| Capture | Chunk length, seconds before/after a highlight, minimum score, bitrate, and max clips per chunk |
+| AI provider | Gemini, Ollama, OpenAI/ChatGPT API, Anthropic/Claude API, or custom OpenAI-compatible endpoint |
+| Transcription | Faster-Whisper model, language, and CPU threads |
+| Captions | Video layout, output ratio, subtitle mode/style, creator credit, creator tag, and profanity filter |
 
-You can use local capture, transcription, rendering, Hook Words, and Ollama without a hosted AI API key. Optional analysis providers include Gemini, Hugging Face, OpenAI/ChatGPT, Anthropic/Claude, and a custom OpenAI-compatible endpoint. A selected hosted provider receives transcript text for the task you request; check its privacy and retention terms before connecting it.
+### AI providers
 
-The local FastAPI engine binds to loopback and uses a per-process session token for state-changing requests. **Do not expose the engine API to an untrusted network or the public internet.** Credentials are kept in local application settings and are not returned by the browser-facing status API. Never commit API keys, social tokens, cookies, or local browser profiles.
+- **Gemini, OpenAI, and Claude** are hosted APIs. Use your own API key, model access, and quota.
+- **Ollama** runs on the local service you configure and does not require a hosted AI API key.
+- **Custom OpenAI-compatible API** can point to a compatible hosted or local endpoint.
+
+The selected model analyzes transcript windows, selects candidate moments, and generates title, description, and topical tags. Use Test provider, then Save AI settings. Hosted providers receive transcript text for the task you choose; check their privacy and billing terms.
+
+### Transcription and output
+
+Faster-Whisper, FFmpeg rendering, OpenCV/YuNet, and local Hook Words processing run on your PC. Facecam framing uses **local multi-frame facecam detection** and may need manual review.
+
+Supported output ratios are 9:16 portrait, 16:9 landscape, 1:1 square, and 4:5. Caption options include Karaoke and Classic modes, multiple styles, creator credit, and profanity filtering.
+
+## Workspaces
+
+| Workspace | Purpose |
+| --- | --- |
+| Dashboard | Session status, processing rundown, recent clips, creator activity, and engine events |
+| Live Studio | Source selection and all pre-capture settings |
+| Creators | Independent Twitch/YouTube monitors and recorded-VOD folder watching |
+| Clip Library | Find, preview, and review generated clips and metadata |
+| Published | Confirmed publishing records |
+| Hype words | Local phrases used by the Hook Words scoring option |
+| Publishing | Zernio connection, account discovery, and destination controls |
+| Settings | Application-wide appearance and storage |
+| Activity | Engine and workflow event history |
+| Help & how-to | In-app quick start and troubleshooting |
+| About | App version, architecture, source, and release links |
+
+## Publishing and supported destinations
+
+Publishing is optional and uses your configured Zernio integration. Connect Zernio, refresh the accounts it returns, enable the accounts you want to use, and select the intended destination for each post.
+
+The current integration supports **Facebook, Instagram, and YouTube**. **TikTok is not a supported destination in this integration.** Account availability, upload limits, quotas, and posting errors are controlled by Zernio and the connected platforms. A destination is recorded as published only after success is confirmed.
+
+Review every video and its metadata before posting. Highlight scores are suggestions, not guarantees of views or engagement.
+
+## Local files and privacy
+
+The installed app stores its local engine data under:
+
+```
+%LOCALAPPDATA%\StreamSnip AI\
+```
+
+Common folders include `out\` for generated clips, `rec\` for recordings and capture chunks, and `models\` for downloaded model files. Settings, provider configuration, creator profiles, publishing configuration, and logs are stored in the same local application-data area.
+
+- Capture, transcription, facecam detection, rendering, and Hook Words are local.
+- Ollama analysis stays on the local service you configure.
+- Hosted AI receives transcript text for the task you request.
+- Zernio receives selected media and post details when you publish.
+
+The local API binds to loopback and uses a per-process session token for state-changing requests. **Do not expose it to an untrusted network or the public internet.** Never commit API keys, social tokens, cookies, or local browser profiles.
+
+## Troubleshooting
+
+- **Engine offline:** wait for startup; use runtime repair or rerun the latest installer and choose Repair. Check `%LOCALAPPDATA%\StreamSnip AI\setup.log` and `streamsnip.log`.
+- **No source preview:** confirm the URL is supported and online, or verify the local file exists and opens in a media player.
+- **No clips:** confirm the AI provider test succeeds, check the model/quota, lower an overly restrictive minimum score, and allow transcription/rendering to finish.
+- **Slow transcription:** try a smaller Faster-Whisper model, ensure it is downloaded, and check available RAM/VRAM and disk space.
+- **Publishing failure:** refresh connected accounts, check account enablement and provider quota, and inspect Activity for the destination result.
+
+The [complete user guide](docs/USER_GUIDE.md) has step-by-step recovery instructions and more troubleshooting cases.
 
 ## Build from source
 
-**Prerequisites:** Windows 10/11 x64, Python 3.10 or newer, Node.js 22 with npm, .NET 10 SDK, Inno Setup 6, and FFmpeg.
+**Prerequisites:** Windows 10/11 x64, Python 3.10+, Node.js 22 with npm, .NET 10 SDK, Inno Setup 6, and FFmpeg.
 
 ```powershell
 git clone https://github.com/sifat-jaman-13/stream-clip-ai.git
@@ -144,16 +197,17 @@ cd ..
 python -m pytest -q
 ```
 
-The build script creates the dashboard bundle, publishes the self-contained `win-x64` WinUI 3 application, compiles the Inno Setup installer, and writes the installer and SHA-256 sidecar under `dist\installer\`.
+The build script creates the dashboard bundle, publishes the self-contained `win-x64` WinUI 3 app, compiles the Inno Setup installer, and writes the installer plus SHA-256 sidecar under `dist\installer\`.
 
 ## Project information
 
-- **Product overview:** [PRODUCT.md](PRODUCT.md)
-- **Design system:** [DESIGN.md](DESIGN.md)
-- **Release history:** [CHANGELOG.md](CHANGELOG.md)
-- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
-- **Security:** [SECURITY.md](SECURITY.md)
-- **Third-party notices:** [licenses/third-party/](licenses/third-party/)
+- [Complete user guide](docs/USER_GUIDE.md)
+- [Product overview](PRODUCT.md)
+- [Design system](DESIGN.md)
+- [Release history](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Third-party notices](licenses/third-party/)
 
 ### Licence
 

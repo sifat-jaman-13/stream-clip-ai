@@ -93,4 +93,31 @@
       if (window.innerWidth > 900) closeMenu();
     });
   }
+
+  // Keep the product screenshot alive only while it can be seen. The CSS animation owns each frame;
+  // JavaScript only gates playback for visibility, the page tab, and the user's motion preference.
+  const productMotion = document.querySelector(".product-motion");
+  if (productMotion) {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let inView = false;
+    const syncProductMotion = () => {
+      productMotion.classList.toggle(
+        "is-motion-active",
+        inView && !reducedMotion.matches && document.visibilityState === "visible"
+      );
+    };
+    if ("IntersectionObserver" in window) {
+      const observer = new IntersectionObserver(entries => {
+        inView = entries.some(entry => entry.isIntersecting);
+        syncProductMotion();
+      }, { threshold: 0.15 });
+      observer.observe(productMotion);
+    } else {
+      inView = true;
+      syncProductMotion();
+    }
+    document.addEventListener("visibilitychange", syncProductMotion);
+    if (reducedMotion.addEventListener) reducedMotion.addEventListener("change", syncProductMotion);
+    else if (reducedMotion.addListener) reducedMotion.addListener(syncProductMotion);
+  }
 })();

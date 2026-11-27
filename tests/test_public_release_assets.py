@@ -70,6 +70,43 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertIn("TikTok is not a supported destination", readme)
         self.assertIn("local multi-frame facecam detection", readme)
 
+    def test_readme_links_to_complete_guide_and_local_markdown_links_resolve(self):
+        readme_path = ROOT / "README.md"
+        guide_path = ROOT / "docs" / "USER_GUIDE.md"
+        readme = readme_path.read_text(encoding="utf-8")
+        guide = guide_path.read_text(encoding="utf-8")
+        self.assertIn("docs/USER_GUIDE.md", readme)
+        for heading in (
+            "## Install StreamSnip AI", "## First launch: make your first clip",
+            "## Creator monitoring", "## Publishing through Zernio",
+            "## Files, storage, and privacy", "## Troubleshooting",
+            "## Update, repair, backup, and uninstall",
+        ):
+            self.assertIn(heading, guide)
+        guide_images = re.findall(r'src="(assets/product/[^"]+)"', guide)
+        self.assertTrue(guide_images, "The user guide should include real product screenshots.")
+        for image in guide_images:
+            self.assertTrue((ROOT / "docs" / image).is_file(), f"Missing user-guide image: {image}")
+        for document_path, content in ((readme_path, readme), (guide_path, guide)):
+            for target in re.findall(r"\]\(([^)]+)\)", content):
+                target = target.split("#", 1)[0]
+                if not target or target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                local_path = (document_path.parent / target).resolve()
+                self.assertTrue(local_path.exists(), f"Broken local link in {document_path.name}: {target}")
+
+    def test_hero_product_screenshot_has_motion_and_respects_reduced_motion(self):
+        css = (ROOT / "docs" / "assets" / "site.css").read_text(encoding="utf-8")
+        js = (ROOT / "docs" / "assets" / "site.js").read_text(encoding="utf-8")
+        html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("@keyframes product-image-drift", css)
+        self.assertIn("@keyframes product-image-light-sweep", css)
+        self.assertRegex(css, r"prefers-reduced-motion\s*:\s*reduce")
+        self.assertIn("IntersectionObserver", js)
+        self.assertIn("visibilitychange", js)
+        self.assertIn("prefers-reduced-motion", js)
+        self.assertIn('class="app-window product-motion"', html)
+
     def test_third_party_notices_are_scoped_and_packaged(self):
         notices = ROOT / "licenses" / "third-party"
         self.assertTrue((notices / "YuNet-MIT.txt").is_file())

@@ -197,6 +197,47 @@ svg { display:block; }
 .stage-glow { position:absolute; inset:8% -8% 12%; z-index:-1; background:radial-gradient(ellipse at center,color-mix(in srgb,var(--accent) 15%,transparent),transparent 67%); filter:blur(30px); }
 .app-window { margin:0; overflow:hidden; border:1px solid var(--border-strong); border-radius:13px; background:#171e27; box-shadow:0 28px 80px rgba(0,0,0,.28),0 2px 8px rgba(0,0,0,.14); }
 .app-window img { display:block; width:100%; height:auto; aspect-ratio:1936/1048; object-fit:contain; }
+
+/* The hero's real product image gets one slow, continuous camera drift and a soft light pass.
+   Both effects stay inside the screenshot frame, pause when it is offscreen, and use compositor transforms. */
+.product-motion { position:relative; isolation:isolate; }
+.product-motion img {
+  transform-origin:50% 50%;
+  animation:product-image-drift 11s cubic-bezier(.65,0,.35,1) infinite;
+  animation-play-state:paused;
+}
+.product-motion.is-motion-active img { animation-play-state:running; }
+.product-motion::after {
+  content:"";
+  position:absolute;
+  z-index:1;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(108deg,transparent 0%,rgba(156,222,242,.025) 38%,rgba(255,255,255,.13) 50%,rgba(156,222,242,.025) 62%,transparent 100%);
+  transform:translate3d(-145%,0,0);
+  opacity:0;
+  animation:product-image-light-sweep 9.5s linear infinite;
+  animation-play-state:paused;
+}
+.product-motion.is-motion-active::after { animation-play-state:running; }
+@keyframes product-image-drift {
+  0%,100% { transform:scale(1.025) translate3d(0,0,0); }
+  50% { transform:scale(1.045) translate3d(-.3%,-.25%,0); }
+}
+@keyframes product-image-light-sweep {
+  0%,34% { opacity:0; transform:translate3d(-145%,0,0); }
+  40% { opacity:.9; }
+  59% { opacity:0; transform:translate3d(245%,0,0); }
+  100% { opacity:0; transform:translate3d(245%,0,0); }
+}
+@media (max-width:600px) {
+  .product-motion img { animation-duration:15s; }
+  .product-motion::after { display:none; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .product-motion img { animation:none; transform:none; }
+  .product-motion::after { display:none; }
+}
 .hero-bottom-line { width:min(var(--wrap),calc(100% - 2 * var(--gutter))); display:flex; align-items:center; gap:14px; margin:30px auto 0; color:var(--muted); font:500 9px var(--mono); letter-spacing:.08em; }
 .hero-bottom-line .line { height:1px; flex:1; background:var(--border); }
 .section-pad { padding:clamp(88px,10vw,142px) 0; }

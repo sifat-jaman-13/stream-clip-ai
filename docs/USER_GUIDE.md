@@ -81,7 +81,7 @@ The installer is currently unsigned, so Windows SmartScreen may show a publisher
 
 ### What setup does
 
-Setup prepares the native desktop app and its isolated local engine. It checks for compatible runtime components and required packages, reuses compatible components, and installs or repairs missing items. Speech-model downloads may be deferred until you first select or use a model. Setup diagnostics are written to:
+Setup prepares the native desktop app and its isolated local engine. It checks for compatible runtime components and required packages, reuses compatible components, and installs or repairs missing items. It can reuse a compatible 64-bit Python installation, including **Python 3.15**. On Python 3.15, setup installs Faster-Whisper 1.2.1 through a dedicated compatibility path and omits its optional ONNX Runtime-backed VAD dependency. If no installed Python passes the dependency checks, setup installs a private Python 3.14.10 runtime for the app. Speech-model downloads may be deferred until you first select or use a model. Setup diagnostics are written to:
 
 ```
 %LOCALAPPDATA%\StreamSnip AI\setup.log

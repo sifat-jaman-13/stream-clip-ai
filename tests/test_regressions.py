@@ -2482,6 +2482,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("3.15", python_support)
         self.assertIn('RuntimeSchema = "5"', setup_script)
         self.assertIn("Python 3.15", readme)
+        self.assertIn("ONNX Runtime-backed VAD dependency", readme)
+        self.assertIn("Python 3.14.10 runtime", readme)
 
 
 if __name__ == "__main__":

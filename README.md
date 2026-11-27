@@ -81,7 +81,7 @@ Write-Host "SHA-256 verified: $actual"
 
 4. Run the installer and launch StreamSnip AI from the Start menu or desktop shortcut.
 
-The app supports Windows 10/11 x64. You do not need to install Python or FFmpeg globally; setup prepares an isolated runtime, reuses compatible components, and installs or repairs missing packages. Internet access is required when setup needs to download packages or model files.
+The app supports Windows 10/11 x64. You do not need to install Python or FFmpeg globally; setup prepares an isolated runtime, reuses compatible components, and installs or repairs missing packages. It can reuse a compatible 64-bit Python installation, including **Python 3.15**. On Python 3.15, setup installs Faster-Whisper 1.2.1 through a dedicated compatibility path and omits its optional ONNX Runtime-backed VAD dependency. If no installed Python passes the dependency checks, setup installs a private Python 3.14.10 runtime for the app. Internet access is required when setup needs to download packages or model files.
 
 The installer is currently unsigned, so Windows SmartScreen may show a publisher warning. Only continue if the installer came from the official release and its checksum matches.
 

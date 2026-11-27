@@ -12,10 +12,10 @@ The installed desktop app is **WinUI 3**. A supervised local Python engine perfo
 
 ## Screenshots
 
-Screenshots below are from the **4.0.7 native Windows Release build**.
+Screenshots below are from the **4.0.9 native Windows Release build**.
 
 <p align="center">
-  <img src="assets/product/dashboard.png" width="100%" alt="StreamSnip AI Dashboard showing the connected local engine and session overview">
+  <img src="assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.9 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
 </p>
 
 <details>
@@ -25,21 +25,21 @@ Screenshots below are from the **4.0.7 native Windows Release build**.
     <tr>
       <td width="50%">
         <p align="center"><strong>Live Studio</strong></p>
-        <img src="assets/product/live-studio.png" width="100%" alt="Live Studio source selection and capture configuration">
+        <img src="assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.9 Live Studio in Studio Dark with source selection and pre-capture configuration">
       </td>
       <td width="50%">
         <p align="center"><strong>Creator monitoring</strong></p>
-        <img src="assets/product/creator-monitoring.png" width="100%" alt="Creator workspace with independent live and recorded VOD monitoring">
+        <img src="assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.9 Creators page in Studio Dark showing independent live and recorded VOD monitors">
       </td>
     </tr>
     <tr>
       <td width="50%">
         <p align="center"><strong>Clip Library</strong></p>
-        <img src="assets/product/clip-library.png" width="100%" alt="Clip Library with review filters and video inspector">
+        <img src="assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.9 Clip Library in Studio Dark with Ready to review and Scheduled tabs">
       </td>
       <td width="50%">
         <p align="center"><strong>Publisher</strong></p>
-        <img src="assets/product/publishing.png" width="100%" alt="Publisher workspace with Zernio connection and destination settings">
+        <img src="assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.9 Publisher in Studio Dark with five Zernio connection slots">
       </td>
     </tr>
   </table>
@@ -245,9 +245,11 @@ StreamSnip AI records a destination as scheduled or published only after Zernio 
 
 ## Appearance and settings
 
-The native app includes curated themes, including Odysseus, Studio Light, Studio Dark, GitHub Dark, Nord, Odysseus Paper, Ocean Depths, Forest Night, Solarized Paper, Rose Graphite, Ember Studio, and Slate Studio.
+Studio Dark is the default appearance for new installs. You can switch to any of the other curated palettes in Settings > Appearance; explicit saved theme choices are preserved.
 
 Use the topbar appearance selector or **Settings > Appearance** to choose a theme. Where available, you can set a custom six-digit hex accent and reset it to the active theme's default. The accent changes primary actions and current selections; semantic success, warning, and error colors remain distinct.
+
+In the native app, **Application font** offers the bundled Inter, Open Sans, IBM Plex Sans, Roboto, and Source Sans 3 families, plus Windows Segoe UI and the JetBrains Mono / Consolas monospace families. Inter is the default across every theme; JetBrains Mono remains available as a monospace option. **Application text size** offers Small (13 DIP body), Medium (14 DIP body, default), and Large (16 DIP body). Headings and supporting text scale proportionally. Both settings are saved locally and affect the desktop UI only; rendered video captions keep their separate typography.
 
 Settings are saved locally. AI credentials are managed separately in Live Studio's AI provider tab and require the explicit **Save AI settings** action.
 

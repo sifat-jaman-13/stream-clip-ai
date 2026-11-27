@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -14,6 +15,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Shapes;
 using WinRT.Interop;
 using Windows.Media.Core;
@@ -112,18 +114,28 @@ public sealed partial class MainPage : Page
 
 	private bool _quitting;
 
-	private const string JetBrainsFontUri = "ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono";
+	private const string InterFontUri = "ms-appx:///Assets/Fonts/Inter-Variable.ttf#Inter";
 
-	private static readonly FontFamily JetBrainsFontFamily = new FontFamily("ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono");
+	private static readonly FontFamily DefaultFontFamily = new FontFamily(InterFontUri);
 
-	private static FontFamily ActiveFontFamily = JetBrainsFontFamily;
+	private static FontFamily ActiveFontFamily = DefaultFontFamily;
 
 	private bool _refreshRunning;
 
-	private string _theme = "odysseus";
+	private string _theme = "studio-dark";
 	private string _customAccent = "";
 
-	private string _fontName = "JetBrains Mono";
+	private string _fontName = "Inter";
+	private string _fontSize = "medium";
+	private static double _applicationFontScale = 1.0;
+
+	private sealed class FontSizeBaseline(double value)
+	{
+		public double Value { get; } = value;
+	}
+
+	private static readonly ConditionalWeakTable<FrameworkElement, FontSizeBaseline> FontSizeBaselines = new();
+	private static readonly ConditionalWeakTable<FrameworkElement, object> FontLoadHandlers = new();
 
 	private string _lastEngineMessage = "";
 	private Border? _clipBadgeBorder;
@@ -135,9 +147,9 @@ public sealed partial class MainPage : Page
 
 	private static readonly ThemePalette[] Themes = new ThemePalette[12]
 	{
+		new ThemePalette("studio-dark", "Studio Dark", "#0F0F0F", "#181818", "#212121", "#2B2B2B", "#0F0F0F", "#F1F1F1", "#D6D6D6", "#AAAAAA", "#303030", "#FF0033", "#81C995", "#F6C26B", "#F28B82"),
 		new ThemePalette("odysseus", "Odysseus", "#282C34", "#1B2028", "#232B35", "#2D3743", "#171C23", "#E8F0F4", "#C8D5DC", "#9CDEF2", "#355A66", "#E06C75", "#80C99A", "#E6B96F", "#E06C75"),
 		new ThemePalette("studio-light", "Studio Light", "#F9F9F9", "#FFFFFF", "#F5F5F5", "#EFEFEF", "#FFFFFF", "#0F0F0F", "#303030", "#606060", "#E5E5E5", "#CC0000", "#137333", "#A15C00", "#B3261E"),
-		new ThemePalette("studio-dark", "Studio Dark", "#0F0F0F", "#181818", "#212121", "#2B2B2B", "#0F0F0F", "#F1F1F1", "#D6D6D6", "#AAAAAA", "#303030", "#FF0033", "#81C995", "#F6C26B", "#F28B82"),
 		new ThemePalette("github", "GitHub Dark", "#0D1117", "#161B22", "#21262D", "#292F38", "#010409", "#E6EDF3", "#C9D1D9", "#8B949E", "#30363D", "#F85149", "#3FB950", "#D29922", "#F85149"),
 		new ThemePalette("nord", "Nord", "#2E3440", "#3B4252", "#434C5E", "#4C566A", "#2E3440", "#ECEFF4", "#D8DEE9", "#88C0D0", "#4C566A", "#88C0D0", "#A3BE8C", "#EBCB8B", "#BF616A"),
 		new ThemePalette("odysseas", "Odysseus Paper", "#EDF0EC", "#FFFEFA", "#F5F6F2", "#E9EDE8", "#142838", "#172631", "#42515A", "#637277", "#D9DFD9", "#EF6A42", "#327B62", "#A9752D", "#C74E47"),
@@ -149,11 +161,10 @@ public sealed partial class MainPage : Page
 		new ThemePalette("slate", "Slate Studio", "#20262D", "#272F38", "#313B45", "#3D4853", "#181E24", "#EEF2F5", "#CAD2D9", "#AAB7C2", "#3C4853", "#8BB9D8", "#8EC7A1", "#E0BC77", "#E28B85")
 	};
 
-	private static readonly string[] FontChoices = new string[15]
-	{
-		"JetBrains Mono", "Segoe UI", "Google Sans", "Inter", "Roboto", "Open Sans", "Montserrat", "Poppins", "Lato", "Nunito Sans", "DM Sans",
-		"IBM Plex Sans", "Space Grotesk", "Fira Code", "Consolas"
-	};
+	private static readonly string[] FontChoices =
+	[
+		"Inter", "Open Sans", "IBM Plex Sans", "Roboto", "Source Sans 3", "Segoe UI", "JetBrains Mono", "Consolas"
+	];
 
 	private FontFamily CurrentFont => ActiveFontFamily;
 
@@ -210,6 +221,8 @@ public sealed partial class MainPage : Page
 	private async void Page_Loaded(object sender, RoutedEventArgs e)
 	{
 		ApplyFontToVisualTree(this);
+		var currentPalette = Themes.FirstOrDefault(item => item.Id == _theme) ?? Themes[0];
+		UpdateWindowTitleBar(currentPalette, IsValidAccent(_customAccent) ? _customAccent : currentPalette.Accent);
 		UpdateSidebarSelection();
 		if (!_loaded)
 		{
@@ -734,6 +747,7 @@ private void UpdateSidebarSelection()
 			PageHost.Children.Add(CreatePanel("Page render error", "The native app is still running. This diagnostic captures the failing control so it can be fixed.", details));
 		}
 		RestoreEngineNotice();
+		ApplyFontToVisualTree(this);
 	}
 
 	private void RestoreEngineNotice()
@@ -871,7 +885,7 @@ private void UpdateSidebarSelection()
 				"odysseus" => "Graphite · arctic cyan · coral",
 				"github" => "Midnight slate · signal red",
 				"studio-light" => "Clean neutral · signal red",
-				"studio-dark" => "Low-light charcoal · vivid red",
+				"studio-dark" => "Default · low-light charcoal · vivid red",
 				"nord" => "Blue-gray · frost · soft cyan",
 				"odysseas" => "Navy · chalk · warm orange",
 				"ocean" => "Deep blue · sea glass · cyan",
@@ -1038,6 +1052,7 @@ private void UpdateSidebarSelection()
 					Text = message,
 					TextWrapping = TextWrapping.Wrap,
 					FontFamily = CurrentFont,
+					FontSize = ScaledFontSize(12),
 					MaxWidth = 560.0
 				},
 				CloseButtonText = "Close",
@@ -1109,7 +1124,13 @@ private void UpdateSidebarSelection()
 				_theme = jsonObject?["theme"]?.GetValue<string>() ?? _theme;
 				_customAccent = jsonObject?["accent"]?.GetValue<string>() ?? "";
 				if (!IsValidAccent(_customAccent)) _customAccent = "";
-				_fontName = jsonObject?["font"]?.GetValue<string>() ?? _fontName;
+				var fontPreferenceVersion = jsonObject?["fontPreferenceVersion"]?.GetValue<int>() ?? 0;
+				var savedFont = jsonObject?["font"]?.GetValue<string>();
+				if (fontPreferenceVersion < 1 && string.Equals(savedFont, "JetBrains Mono", StringComparison.Ordinal))
+					savedFont = "Inter";
+				_fontName = NormalizeFontName(savedFont ?? _fontName);
+				_fontSize = NormalizeFontSize(jsonObject?["fontSize"]?.GetValue<string>() ?? _fontSize);
+				_applicationFontScale = FontSizeScaleFor(_fontSize);
 			}
 		}
 		catch
@@ -1128,7 +1149,9 @@ private void UpdateSidebarSelection()
 			{
 				["theme"] = _theme,
 				["accent"] = _customAccent,
-				["font"] = _fontName
+				["font"] = _fontName,
+				["fontSize"] = _fontSize,
+				["fontPreferenceVersion"] = 1
 			};
 			File.WriteAllText(_preferencesPath, jsonObject.ToJsonString(new JsonSerializerOptions
 			{
@@ -1161,7 +1184,44 @@ private void UpdateSidebarSelection()
 		SetResourceBrush("WarningBrush", themePalette.Warning);
 		SetResourceBrush("DangerBrush", themePalette.Danger);
 		RootBackgroundUpdate();
+		UpdateWindowTitleBar(themePalette, accent);
 		SavePreferences();
+	}
+
+	private static void UpdateWindowTitleBar(ThemePalette palette, string accent)
+	{
+		try
+		{
+			if (!AppWindowTitleBar.IsCustomizationSupported()) return;
+			var titleBar = App.MainWindowInstance?.AppWindow.TitleBar;
+			if (titleBar is null) return;
+
+			var app = ParseColor(palette.App);
+			var sidebar = ParseColor(palette.Sidebar);
+			var hover = ParseColor(palette.Hover);
+			var primaryText = ParseColor(palette.Ink);
+			var bodyText = ParseColor(palette.Body);
+			var mutedText = ParseColor(palette.Muted);
+			var accentColor = ParseColor(accent);
+			var accentText = ParseColor(AccentTextHex(accent));
+
+			titleBar.BackgroundColor = app;
+			titleBar.ForegroundColor = primaryText;
+			titleBar.ButtonBackgroundColor = app;
+			titleBar.ButtonForegroundColor = bodyText;
+			titleBar.ButtonHoverBackgroundColor = hover;
+			titleBar.ButtonHoverForegroundColor = primaryText;
+			titleBar.ButtonPressedBackgroundColor = accentColor;
+			titleBar.ButtonPressedForegroundColor = accentText;
+			titleBar.InactiveBackgroundColor = sidebar;
+			titleBar.InactiveForegroundColor = mutedText;
+			titleBar.ButtonInactiveBackgroundColor = sidebar;
+			titleBar.ButtonInactiveForegroundColor = mutedText;
+		}
+		catch
+		{
+			// Keep the native window available if the OS declines a title-bar color.
+		}
 	}
 
 	private static void SetResourceBrush(string key, string hex)
@@ -1185,38 +1245,100 @@ private void UpdateSidebarSelection()
 
 	private void ApplyFont(string fontName)
 	{
-		_fontName = FontChoices.Contains(fontName) ? fontName : "JetBrains Mono";
-		ActiveFontFamily = _fontName == "JetBrains Mono" ? JetBrainsFontFamily : new FontFamily(_fontName);
+		_fontName = NormalizeFontName(fontName);
+		ActiveFontFamily = ResolveFontFamily(_fontName);
 		Application.Current.Resources["AppFont"] = ActiveFontFamily;
 		SavePreferences();
 		if (XamlRoot is not null)
 			ApplyFontToVisualTree(this);
 	}
 
-	private static void ApplyFontToVisualTree(DependencyObject root)
+	private static string NormalizeFontName(string? fontName) => FontChoices.Contains(fontName ?? "", StringComparer.Ordinal) ? fontName! : "Inter";
+
+	private static FontFamily ResolveFontFamily(string fontName) => fontName switch
 	{
+		"JetBrains Mono" => new FontFamily("ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono"),
+		"Inter" => new FontFamily("ms-appx:///Assets/Fonts/Inter-Variable.ttf#Inter"),
+		"Open Sans" => new FontFamily("ms-appx:///Assets/Fonts/OpenSans-Variable.ttf#Open Sans"),
+		"IBM Plex Sans" => new FontFamily("ms-appx:///Assets/Fonts/IBMPlexSans-Variable.ttf#IBM Plex Sans"),
+		"Roboto" => new FontFamily("ms-appx:///Assets/Fonts/Roboto-Variable.ttf#Roboto"),
+		"Source Sans 3" => new FontFamily("ms-appx:///Assets/Fonts/SourceSans3-Variable.ttf#Source Sans 3"),
+		"Segoe UI" => new FontFamily("Segoe UI"),
+		"Consolas" => new FontFamily("Consolas"),
+		_ => DefaultFontFamily
+	};
+
+	private void ApplyFontSize(string fontSize)
+	{
+		_fontSize = NormalizeFontSize(fontSize);
+		_applicationFontScale = FontSizeScaleFor(_fontSize);
+		SavePreferences();
+		if (XamlRoot is not null)
+			ApplyFontToVisualTree(this);
+	}
+
+	private static string NormalizeFontSize(string? fontSize) => fontSize?.Trim().ToLowerInvariant() switch
+	{
+		"small" => "small",
+		"medium" => "medium",
+		"large" => "large",
+		_ => "medium"
+	};
+
+	private static double FontSizeScaleFor(string fontSize) => fontSize switch
+	{
+		"small" => 13.0 / 14.0,
+		"medium" => 1.0,
+		"large" => 16.0 / 14.0,
+		_ => 1.0
+	};
+
+	private static double ScaledFontSize(double size) => Math.Max(10.0, UiFontSize(size) * _applicationFontScale);
+
+	private void ApplyFontToVisualTree(DependencyObject root)
+	{
+		if (root is FrameworkElement element && !FontLoadHandlers.TryGetValue(element, out _))
+		{
+			FontLoadHandlers.Add(element, new object());
+			element.Loaded += (_, _) => ApplyFontToVisualTree(element);
+		}
+
 		if (root is TextBlock textBlock)
+		{
+			ApplyFontSizeToElement(textBlock, textBlock.FontSize, size => textBlock.FontSize = size);
 			textBlock.FontFamily = ActiveFontFamily;
-		if (root is Control control)
+		}
+		else if (root is Control control)
+		{
+			ApplyFontSizeToElement(control, control.FontSize, size => control.FontSize = size);
 			control.FontFamily = ActiveFontFamily;
+		}
 
 		var childCount = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
 		for (var index = 0; index < childCount; index++)
 			ApplyFontToVisualTree(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index));
 	}
 
+	private static void ApplyFontSizeToElement(FrameworkElement element, double currentSize, Action<double> setFontSize)
+	{
+		if (!FontSizeBaselines.TryGetValue(element, out var baseline))
+		{
+			baseline = new FontSizeBaseline(currentSize);
+			FontSizeBaselines.Add(element, baseline);
+		}
+		setFontSize(Math.Max(10.0, baseline.Value * _applicationFontScale));
+	}
+
 	private static double UiFontSize(double size)
 	{
-		// Slightly tightened native desktop type scale while preserving hierarchy.
-		if (size <= 9.0) return 13.0;
-		if (size <= 10.0) return 13.5;
-		if (size <= 11.5) return 14.0;
-		if (size <= 13.0) return 15.0;
-		if (size <= 15.0) return 16.5;
-		if (size <= 18.0) return 19.0;
-		if (size <= 22.0) return 24.0;
-		if (size <= 26.0) return 29.0;
-		return Math.Max(13.0, Math.Round(size * 1.18, 1) - 1.0);
+		// Consistent 14-DIP body scale with proportional hierarchy for labels and headings.
+		if (size <= 9.0) return 11.0;
+		if (size <= 10.0) return 12.0;
+		if (size <= 11.5) return 13.0;
+		if (size <= 15.0) return 14.0;
+		if (size <= 18.0) return 16.0;
+		if (size <= 22.0) return 20.0;
+		return 24.0; // Page headings use a restrained 24-DIP base at Medium.
 	}
 
 	private static bool IsValidAccent(string? value)
@@ -1308,6 +1430,7 @@ private void UpdateSidebarSelection()
 			FontWeight = (strong ? FontWeights.SemiBold : FontWeights.Normal),
 			TextWrapping = TextWrapping.Wrap
 		};
+		ApplyFontSizeToElement(textBlock, textBlock.FontSize, size => textBlock.FontSize = size);
 		if (!string.IsNullOrWhiteSpace(color))
 		{
 			if (Application.Current.Resources.TryGetValue(color, out var resource) && resource is Brush resourceBrush)
@@ -1344,7 +1467,8 @@ private void UpdateSidebarSelection()
 		Button button = new Button();
 		button.Content = label;
 		button.FontFamily = CurrentFont;
-		button.FontSize = 15.0;
+		button.FontSize = 14.0;
+		ApplyFontSizeToElement(button, button.FontSize, size => button.FontSize = size);
 		button.Padding = new Thickness(18.0, 10.0, 18.0, 10.0);
 		button.MinHeight = 48.0;
 		button.CornerRadius = new CornerRadius(8.0);
@@ -1378,7 +1502,8 @@ private void UpdateSidebarSelection()
 		textBox.Text = text;
 		textBox.PlaceholderText = placeholder;
 		textBox.FontFamily = CurrentFont;
-		textBox.FontSize = 15.0;
+		textBox.FontSize = 14.0;
+		ApplyFontSizeToElement(textBox, textBox.FontSize, size => textBox.FontSize = size);
 		textBox.MinHeight = (multiline ? 148 : 48);
 		textBox.AcceptsReturn = multiline;
 		textBox.TextWrapping = ((!multiline) ? TextWrapping.NoWrap : TextWrapping.Wrap);
@@ -1520,6 +1645,7 @@ private void UpdateSidebarSelection()
 					Text = message,
 					TextWrapping = TextWrapping.Wrap,
 					FontFamily = CurrentFont,
+					FontSize = ScaledFontSize(12),
 					MaxWidth = 520.0
 				},
 				CloseButtonText = "Close"

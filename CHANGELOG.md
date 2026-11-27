@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.0.9] - 2026-11-27
+
+### Changed
+- Promoted Studio Dark to the default appearance in the native app, browser Creator Studio, and public website.
+- Kept all 12 curated themes available; saved theme selections remain selectable and are preserved.
+- Updated the product screenshots across the README, user guide, and public website to match the Studio Dark 4.0.9 interface.
+- Added bundled Inter, Open Sans, IBM Plex Sans, Roboto, and Source Sans 3 font options alongside JetBrains Mono, Segoe UI, and Consolas in the native app and browser Creator Studio.
+- Corrected appearance-setting navigation to rebuild the Settings page instead of appending duplicate views; persisted Small, Medium, and Large text sizes now apply consistently.
+
+### Verification
+- Studio Dark contrast: primary 15.72:1, body 12.22:1, muted 7.64:1, quiet 5.14:1, accent text 4.77:1.
+- Theme parity: all 12 palettes match across React, CSS, and WinUI.
+- Full Python tests, frontend lint/build, Windows Release build, screenshot review, and installer workflow verified before release.
+
 ## [4.0.8] - 2026-11-27
 
 ### Added

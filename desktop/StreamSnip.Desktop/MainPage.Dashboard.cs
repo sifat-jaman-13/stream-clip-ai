@@ -223,7 +223,7 @@ public sealed partial class MainPage
             {
                 Glyph = new string((char)0xE714, 1),
                 FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = 22,
+                FontSize = UiFontSize(20),
                 Width = 22,
                 Height = 22,
                 Foreground = Application.Current.Resources[state.Running ? "AccentBrush" : "MutedTextBrush"] as Brush
@@ -404,7 +404,7 @@ public sealed partial class MainPage
                 {
                     Text = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
                     FontFamily = CurrentFont,
-                    FontSize = 15,
+                    FontSize = UiFontSize(14),
                     FontWeight = FontWeights.SemiBold,
                     Foreground = Application.Current.Resources[tone] as Brush,
                     HorizontalAlignment = HorizontalAlignment.Center,
@@ -475,7 +475,7 @@ public sealed partial class MainPage
             {
                 Glyph = new string((char)0xE714, 1),
                 FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = 22,
+                FontSize = UiFontSize(20),
                 Width = 28,
                 Height = 28,
                 Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
@@ -506,7 +506,7 @@ public sealed partial class MainPage
                 {
                     Glyph = new string((char)0xE714, 1),
                 FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = 22,
+                FontSize = UiFontSize(20),
                     Width = 20,
                     Height = 20,
                     Foreground = Application.Current.Resources["MutedTextBrush"] as Brush

@@ -16,8 +16,8 @@
     solarized:"#f6f2e8","rose-graphite":"#211c20",ember:"#1d1a16",slate:"#20262d"
   };
   const media = window.matchMedia("(prefers-color-scheme: dark)");
-  let choice = root.dataset.themeChoice || "system";
-  if (!names[choice]) choice = "system";
+  let choice = root.dataset.themeChoice || "studio-dark";
+  if (!names[choice]) choice = "studio-dark";
 
   const renderTheme = () => {
     const actual = choice === "system" ? (media.matches ? "odysseus" : "studio-light") : choice;
@@ -49,7 +49,7 @@
   }));
   const reset = document.getElementById("reset-theme");
   if (reset) reset.addEventListener("click", () => {
-    saveChoice("system");
+    saveChoice("studio-dark");
     closeAppearance();
   });
   if (media.addEventListener) media.addEventListener("change", () => {

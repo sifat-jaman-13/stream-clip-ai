@@ -42,6 +42,12 @@ if (-not (Test-Path -LiteralPath $nativeExe)) {
     throw "The native publish did not produce StreamSnip.Desktop.exe."
 }
 foreach ($required in @(
+    (Join-Path $publishDir "Assets\Fonts\JetBrainsMono-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\Inter-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\OpenSans-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\IBMPlexSans-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\Roboto-Variable.ttf"),
+    (Join-Path $publishDir "Assets\Fonts\SourceSans3-Variable.ttf"),
     (Join-Path $PSScriptRoot "zernio_connections.py"),
     (Join-Path $PSScriptRoot "dashboard\dist\index.html"),
     (Join-Path $PSScriptRoot "installer\setup_windows.ps1")
@@ -67,7 +73,7 @@ if (-not $iscc) {
 if (-not $iscc) { throw "Inno Setup 6 is required to create the native StreamSnip AI installer." }
 
 $versionMatch = Select-String -Path (Join-Path $PSScriptRoot "autoclip.py") -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
-$version = if ($versionMatch) { $versionMatch.Matches[0].Groups[1].Value } else { "4.0.8" }
+$version = if ($versionMatch) { $versionMatch.Matches[0].Groups[1].Value } else { "4.0.9" }
 
 Write-Host "Compiling StreamSnipAI-Native-Setup.exe (version $version)..." -ForegroundColor Cyan
 & $iscc "/DMyAppVersion=$version" $iss

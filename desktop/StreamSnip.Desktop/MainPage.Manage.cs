@@ -109,7 +109,7 @@ public sealed partial class MainPage
             card.Click += (_, _) =>
             {
                 ApplyTheme(palette.Id);
-                RenderSettingsPage();
+                RenderCurrentPage();
             };
             Grid.SetRow(card, i / 3);
             Grid.SetColumn(card, i % 3);
@@ -133,13 +133,13 @@ public sealed partial class MainPage
                 }
                 _customAccent = value;
                 ApplyTheme(_theme);
-                RenderSettingsPage();
+                RenderCurrentPage();
             }, primary: true),
             CreateButton("Reset to theme", () =>
             {
                 _customAccent = "";
                 ApplyTheme(_theme);
-                RenderSettingsPage();
+                RenderCurrentPage();
             })));
 
         var fontChoice = new ComboBox { MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -150,12 +150,26 @@ public sealed partial class MainPage
             if (fontChoice.SelectedItem is string selected)
             {
                 ApplyFont(selected);
-                RenderSettingsPage();
+                RenderCurrentPage();
             }
         };
         AddLabeled(appearance, "Application font", fontChoice,
-            "JetBrains Mono is the default. Font selection affects only the desktop interface, not rendered subtitles.");
-        PageHost.Children.Add(CreatePanel("Workspace appearance", "Choose a palette and font saved on this device.", appearance));
+            "Inter is the default. Also choose Open Sans, IBM Plex Sans, Roboto, Source Sans 3, Segoe UI, JetBrains Mono, or Consolas. All app panels and controls use the selected family; captions are unaffected.");
+
+        var fontSizeChoice = new ComboBox { MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Stretch };
+        fontSizeChoice.ItemsSource = new[] { "Small", "Medium", "Large" };
+        fontSizeChoice.SelectedItem = _fontSize switch { "small" => "Small", "large" => "Large", _ => "Medium" };
+        fontSizeChoice.SelectionChanged += (_, _) =>
+        {
+            if (fontSizeChoice.SelectedItem is string selected)
+            {
+                ApplyFontSize(selected.ToLowerInvariant());
+                RenderCurrentPage();
+            }
+        };
+        AddLabeled(appearance, "Application text size", fontSizeChoice,
+            "Small: 13 DIP | Medium: 14 DIP (default) | Large: 16 DIP. Applies across the desktop UI; headings scale proportionally and video captions are unaffected.");
+        PageHost.Children.Add(CreatePanel("Workspace appearance", "Choose a palette, font, and text size saved on this device.", appearance));
 
         var maintenance = new StackPanel { Spacing = 10 };
         var updateResult = Txt("Version and component checks do not change anything until you explicitly start an update.", 10, false, "#9CDEF2");
@@ -182,6 +196,7 @@ public sealed partial class MainPage
                 catch (Exception ex) { updateResult.Text = ex.Message; }
             })));
         PageHost.Children.Add(CreatePanel("Maintenance", "Review installed component versions and release availability.", maintenance));
+        ApplyFontToVisualTree(this);
     }
 
     private async Task<string?> PickFolderAsync()
@@ -966,7 +981,7 @@ public sealed partial class MainPage
         brand.Children.Add(Txt("StreamSnip AI", 20, true));
         brand.Children.Add(Txt("Creator Studio  ·  Native Windows desktop interface", 10, false, "#9CDEF2"));
         brand.Children.Add(Txt("The WinUI desktop app owns the windows and native controls. The Python engine handles Streamlink capture, FFmpeg media processing, Faster-Whisper transcription, AI highlight analysis, and clip rendering.", 11));
-        brand.Children.Add(Txt("Application version 4.0.8", 10, false, "#9CDEF2"));
+        brand.Children.Add(Txt("Application version 4.0.9", 10, false, "#9CDEF2"));
         brand.Children.Add(ActionRow(
             CreateButton("GitHub source", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai")),
             CreateButton("Latest releases", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"))));

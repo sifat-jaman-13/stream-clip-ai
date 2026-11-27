@@ -16,15 +16,15 @@ import "./App.css";
 
 type PageId = "overview" | "live" | "creators" | "clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
 type ThemeId = "odysseus" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseas" | "ocean" | "forest" | "solarized" | "rose-graphite" | "ember" | "slate";
-type FontId = "google-sans" | "inter" | "roboto" | "open-sans" | "montserrat" | "poppins" | "lato" | "nunito-sans" | "dm-sans" | "ibm-plex-sans" | "space-grotesk" | "fira-code" | "jetbrains-mono";
+type FontId = "jetbrains-mono" | "inter" | "open-sans" | "ibm-plex-sans" | "roboto" | "source-sans-3" | "segoe-ui" | "consolas";
 type StudioSetupTab = "capture" | "ai" | "speech" | "captions";
 type RecordLike = Record<string, any>;
 type ToastDetail = { tone: "success" | "error" | "info"; title: string; message?: string };
 
 const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
+  { id: "studio-dark", name: "Studio Dark", description: "Default · low-light workspace · vivid red", colors: ["#0f0f0f", "#181818", "#303030", "#ff0033"] },
   { id: "odysseus", name: "Odysseus", description: "Graphite · arctic cyan · coral", colors: ["#282c34", "#1b2028", "#355a66", "#e06c75"] },
   { id: "studio-light", name: "Studio Light", description: "Clean neutral surfaces · signal red", colors: ["#f9f9f9", "#ffffff", "#e5e5e5", "#cc0000"] },
-  { id: "studio-dark", name: "Studio Dark", description: "Low-light workspace · vivid red", colors: ["#0f0f0f", "#181818", "#303030", "#ff0033"] },
   { id: "github", name: "GitHub Dark", description: "Midnight slate · signal red", colors: ["#0d1117", "#161b22", "#30363d", "#f85149"] },
   { id: "nord", name: "Nord", description: "Blue-gray · frost · soft cyan", colors: ["#2e3440", "#3b4252", "#4c566a", "#88c0d0"] },
   { id: "odysseas", name: "Odysseus Paper", description: "Navy · chalk · warm orange", colors: ["#edf0ec", "#fffefa", "#d9dfd9", "#ef6a42"] },
@@ -37,19 +37,14 @@ const themes: Array<{ id: ThemeId; name: string; description: string; colors: st
 ];
 
 const fontOptions: Array<{ id: FontId; name: string; family: string; kind: string }> = [
+  { id: "inter", name: "Inter", family: 'Inter, "Segoe UI", sans-serif', kind: "Sans serif ? default" },
   { id: "jetbrains-mono", name: "JetBrains Mono", family: '"JetBrains Mono", Consolas, monospace', kind: "Monospace" },
-  { id: "google-sans", name: "Google Sans", family: '"Google Sans Flex", "Google Sans", "Segoe UI", Arial, sans-serif', kind: "Sans serif" },
-  { id: "inter", name: "Inter", family: '"Inter", Arial, sans-serif', kind: "Sans serif" },
-  { id: "roboto", name: "Roboto", family: '"Roboto", Arial, sans-serif', kind: "Sans serif" },
-  { id: "open-sans", name: "Open Sans", family: '"Open Sans", Arial, sans-serif', kind: "Sans serif" },
-  { id: "montserrat", name: "Montserrat", family: '"Montserrat", Arial, sans-serif', kind: "Sans serif" },
-  { id: "poppins", name: "Poppins", family: '"Poppins", Arial, sans-serif', kind: "Sans serif" },
-  { id: "lato", name: "Lato", family: '"Lato", Arial, sans-serif', kind: "Sans serif" },
-  { id: "nunito-sans", name: "Nunito Sans", family: '"Nunito Sans", Arial, sans-serif', kind: "Sans serif" },
-  { id: "dm-sans", name: "DM Sans", family: '"DM Sans", Arial, sans-serif', kind: "Sans serif" },
-  { id: "ibm-plex-sans", name: "IBM Plex Sans", family: '"IBM Plex Sans", Arial, sans-serif', kind: "Sans serif" },
-  { id: "space-grotesk", name: "Space Grotesk", family: '"Space Grotesk", Arial, sans-serif', kind: "Sans serif" },
-  { id: "fira-code", name: "Fira Code", family: '"Fira Code", Consolas, monospace', kind: "Monospace" },
+  { id: "open-sans", name: "Open Sans", family: '"Open Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "ibm-plex-sans", name: "IBM Plex Sans", family: '"IBM Plex Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "roboto", name: "Roboto", family: 'Roboto, "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "source-sans-3", name: "Source Sans 3", family: '"Source Sans 3", "Segoe UI", sans-serif', kind: "Sans serif" },
+  { id: "segoe-ui", name: "Segoe UI", family: '"Segoe UI", Arial, sans-serif', kind: "Windows system" },
+  { id: "consolas", name: "Consolas", family: 'Consolas, "Courier New", monospace', kind: "Monospace" },
 ];
 
 const pageInfo: Record<PageId, { title: string; description: string }> = {
@@ -166,7 +161,7 @@ const initialTheme = (): ThemeId => {
     const resolved = aliases[saved] || saved;
     if (themes.some((item) => item.id === resolved)) return resolved as ThemeId;
   } catch { /* Local storage may be disabled. */ }
-  return "odysseus";
+  return "studio-dark";
 };
 const initialAccent = (): string => {
   try {
@@ -178,9 +173,18 @@ const initialAccent = (): string => {
 const initialFont = (): FontId => {
   try {
     const saved = localStorage.getItem("streamsnip.font") || "";
+    const preferenceVersion = localStorage.getItem("streamsnip.font-version") || "";
+    if (preferenceVersion !== "1") {
+      // JetBrains Mono was the previous out-of-box choice; move only that legacy default to Inter.
+      const migrated = saved === "jetbrains-mono" ? "inter" : saved;
+      localStorage.setItem("streamsnip.font", migrated || "inter");
+      localStorage.setItem("streamsnip.font-version", "1");
+      if (fontOptions.some((item) => item.id === migrated)) return migrated as FontId;
+      return "inter";
+    }
     if (fontOptions.some((item) => item.id === saved)) return saved as FontId;
   } catch { /* Local storage may be disabled. */ }
-  return "jetbrains-mono";
+  return "inter";
 };
 const toneFor = (phase: string, running = false): "neutral" | "success" | "warning" | "danger" | "live" => {
   if (phase === "error") return "danger";
@@ -238,7 +242,10 @@ export default function App() {
   useEffect(() => {
     const selected = fontOptions.find((item) => item.id === font) || fontOptions[0];
     document.documentElement.style.setProperty("--font-family", selected.family);
-    try { localStorage.setItem("streamsnip.font", font); } catch { /* Local storage may be disabled. */ }
+    try {
+      localStorage.setItem("streamsnip.font", font);
+      localStorage.setItem("streamsnip.font-version", "1");
+    } catch { /* Local storage may be disabled. */ }
   }, [font]);
 
   useEffect(() => {
@@ -377,7 +384,7 @@ export default function App() {
                 <select id="workspace-font" value={font} onChange={(event) => setFont(event.target.value as FontId)}>
                   {fontOptions.map((item) => <option key={item.id} value={item.id}>{item.name}{item.kind === "Monospace" ? " · Monospace" : ""}</option>)}
                 </select>
-                <small>Saved on this device. JetBrains Mono is the default.</small>
+                <small>Saved on this device. Inter is the default across every theme; JetBrains Mono remains available as a monospace option.</small>
                 <span className="theme-font-preview" style={{ fontFamily: (fontOptions.find((item) => item.id === font) || fontOptions[0]).family }}>StreamSnip AI · Creator Studio</span>
               </div>
             </div> : null}

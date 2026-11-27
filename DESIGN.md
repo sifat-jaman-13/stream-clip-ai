@@ -2,21 +2,21 @@
 name: StreamSnip AI Creator Studio
 description: A desktop-first creator workspace for preparing stream capture, shaping clips, and publishing with a local media engine.
 colors:
-  app-bg: "#282c34"
-  surface: "#1b2028"
-  surface-soft: "#232b35"
-  surface-hover: "#2d3743"
-  sidebar-bg: "#171c23"
-  ink: "#e8f0f4"
-  body: "#c8d5dc"
-  muted: "#9cdef2"
-  line: "#355a66"
-  accent: "#e06c75"
-  success: "#80c99a"
-  warning: "#e6b96f"
-  danger: "#e06c75"
+  app-bg: "#0f0f0f"
+  surface: "#181818"
+  surface-soft: "#212121"
+  surface-hover: "#2b2b2b"
+  sidebar-bg: "#0f0f0f"
+  ink: "#f1f1f1"
+  body: "#d6d6d6"
+  muted: "#aaaaaa"
+  line: "#303030"
+  accent: "#ff0033"
+  success: "#81c995"
+  warning: "#f6c26b"
+  danger: "#f28b82"
 typography:
-  family: "JetBrains Mono, Fira Code, Cascadia Code, Consolas, monospace"
+  family: "Inter, sans-serif"
   weights: "400, 500, 600, 700"
   numerals: "Tabular for counts, durations, sizes, and progress"
 layout:
@@ -37,37 +37,37 @@ motion:
 
 StreamSnip AI is an operational creator workspace, not a marketing dashboard. Its main job is to let a creator prepare a capture session, monitor processing, review clips, and hand work to publishing.
 
-The default visual direction is Odysseus: graphite ground, layered charcoal surfaces, arctic-cyan information, coral actions, and semantic green/amber states. Preserve this exact user-selected palette. The native workspace should feel like a considered broadcast workstation: clear source context, a readable processing rundown, and obvious next actions. Avoid costume UI, dashboard vanity metrics, and decorative card grids.
+The default visual direction is Studio Dark: near-black ground, restrained charcoal surfaces, vivid red actions, neutral high-contrast text, and semantic green/amber states. Preserve this exact user-selected palette. The native workspace should feel like a considered broadcast workstation: clear source context, a readable processing rundown, and obvious next actions. Avoid costume UI, dashboard vanity metrics, and decorative card grids.
 
-JetBrains Mono is the user's saved default. Preserve it, but use a genuine role-based type scale so operational labels and metadata are never tiny.
+Inter is the default UI family across themes and surfaces. Preserve explicit user font choices, and use a genuine role-based type scale so operational labels and metadata remain readable.
 
 ## Colors
 
-### Odysseus (default)
+### Studio Dark (default)
 
 | Token | Value | Role |
 |---|---|---|
-| Canvas | #282C34 | Main application background |
-| Surface | #1B2028 | Panels and menus |
-| Soft surface | #232B35 | Inputs and inset work areas |
-| Hover surface | #2D3743 | Interactive surface emphasis |
-| Sidebar | #171C23 | Primary navigation |
-| Text | #E8F0F4 | Primary content |
-| Body | #C8D5DC | Secondary content |
-| Muted | #9CDEF2 | Informational labels and supporting text |
-| Border | #355A66 | Structure and separation |
-| Accent | #E06C75 | Primary action and current selection |
-| Success | #80C99A | Ready and completed states |
-| Warning | #E6B96F | Attention and pending states |
-| Danger | #E06C75 | Errors and stop actions |
+| Canvas | #0F0F0F | Main application background |
+| Surface | #181818 | Panels and menus |
+| Soft surface | #212121 | Inputs and inset work areas |
+| Hover surface | #2B2B2B | Interactive surface emphasis |
+| Sidebar | #0F0F0F | Primary navigation |
+| Text | #F1F1F1 | Primary content |
+| Body | #D6D6D6 | Secondary content |
+| Muted | #AAAAAA | Supporting text |
+| Border | #303030 | Structure and separation |
+| Accent | #FF0033 | Primary action and current selection |
+| Success | #81C995 | Ready and completed states |
+| Warning | #F6C26B | Attention and pending states |
+| Danger | #F28B82 | Errors and stop actions |
 
 ### Available themes
 
 The user may switch themes without changing layout or behavior:
 
-- **Odysseus (default)** - graphite, arctic cyan, coral, and semantic green/amber.
+- **Studio Dark (default)** - near-black canvas, neutral charcoal surfaces, vivid red actions.
+- **Odysseus** - graphite, arctic cyan, coral, and semantic green/amber.
 - **Studio Light** - neutral light canvas with restrained red actions.
-- **Studio Dark** - low-light charcoal with red actions.
 - **GitHub Dark** - repository-inspired slate and signal red.
 - **Nord** - blue-gray surfaces, frost text, and soft cyan accent.
 - **Odysseus Paper** - retained navy, chalk, and orange palette.
@@ -91,9 +91,9 @@ Each theme must define the same semantic tokens, with matching app background, s
 
 ## Typography
 
-JetBrains Mono is the application-wide default, including WinUI shell controls, dynamically generated text, inputs, buttons, and tabs. The bundled variable font is used directly. The font selector retains the existing alternatives, but a screen must never silently mix the selected font with Segoe UI.
+Inter is the application-wide default, including WinUI shell controls, dynamically generated text, inputs, buttons, dialogs, and tabs. The bundled variable font is used directly. The font selector retains the available sans-serif and monospace alternatives, and the selected family must apply consistently across both navigation and workspace surfaces.
 
-Use a role-based native desktop scale: 32px page titles; 20-22px panel headings; 16px body and control text; 15-16px supporting metadata; 14px tertiary status only. Do not shrink controls or use 9-12px interface copy. Interactive controls are at least 48px high. Keep line height near 1.45 for explanatory text. Use tabular numerals for durations, counts, sizes, and progress. Subtitle output typography is configured separately from the application interface font.
+Use a role-based native desktop scale with a 14-DIP body baseline: Small 13, Medium 14 (default), Large 16, proportionally scaling labels and headings. Preserve heading hierarchy and do not use tiny interface copy. Interactive controls are at least 48px high. Keep line height near 1.45 for explanatory text. Use tabular numerals for durations, counts, sizes, and progress. Subtitle output typography is configured separately from the application interface font.
 
 ## Layout
 

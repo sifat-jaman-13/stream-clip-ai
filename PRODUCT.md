@@ -52,9 +52,9 @@ Workspace request throttling, account-specific posting caps, and upstream platfo
 ## Brand and appearance
 
 - Product name: StreamSnip AI.
-- Default visual system: Odysseus, with graphite work surfaces, arctic-cyan information, coral actions, and semantic green/amber status colors.
-- The React interface has multiple curated themes and font choices; JetBrains Mono is the default.
-- The native interface uses the same default palette and JetBrains Mono across shell, content, and native controls.
+- Default visual system: Studio Dark, with near-black work surfaces, vivid red actions, neutral high-contrast text, and semantic green/amber status colors.
+- The React interface has multiple curated themes and font choices; Inter is the default in every theme, with a bundled, consistent font catalog.
+- The native interface uses the same default palette and Inter across shell, content, menus, inputs, and native controls; the font family is user-selectable and persists across themes.
 - The interface is an original creator workspace informed by familiar creator-studio patterns, not a pixel copy of another product.
 
 ## Product principles

@@ -151,7 +151,7 @@ public sealed partial class MainPage
             {
                 Glyph = new string((char)0xE714, 1),
                 FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                FontSize = 22,
+                FontSize = UiFontSize(20),
                 Width = 32,
                 Height = 32,
                 Foreground = Application.Current.Resources["MutedTextBrush"] as Brush

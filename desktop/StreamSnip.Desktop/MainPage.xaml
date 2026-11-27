@@ -14,7 +14,7 @@
         <Grid x:Name="SidebarRoot" Grid.Column="0" Background="{StaticResource SidebarBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="82" />
-                <RowDefinition Height="64" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="100" />
@@ -26,8 +26,8 @@
                         <Image Source="ms-appx:///Assets/app-icon.png" Stretch="Uniform" Margin="5" />
                     </Border>
                     <StackPanel Spacing="3" VerticalAlignment="Center">
-                        <TextBlock Text="StreamSnip AI" FontSize="20" FontWeight="SemiBold" />
-                        <TextBlock Text="CREATOR STUDIO" FontSize="17" Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock Text="StreamSnip AI" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="CREATOR STUDIO" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -43,22 +43,22 @@
                     <Ellipse x:Name="SidebarEngineDot" Width="8" Height="8"
                              Fill="{StaticResource WarningBrush}" VerticalAlignment="Center" />
                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                        <TextBlock Text="Local workspace" FontSize="17" FontWeight="SemiBold" />
-                        <TextBlock Text="This device" FontSize="15" Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock Text="Local workspace" FontSize="14" FontWeight="SemiBold" />
+                        <TextBlock Text="This device" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
                     </StackPanel>
                 </Grid>
             </Border>
 
             <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Padding="12,10,12,14" Spacing="3">
-                    <TextBlock Text="STUDIO" Margin="10,6,0,8" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock Text="STUDIO" Margin="10,6,0,8" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
                     <Button x:Name="NavOverviewButton" AutomationProperties.Name="Dashboard" Tag="overview" Click="NavItem_Click"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                             Background="Transparent" Foreground="{StaticResource BodyTextBrush}"
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Dashboard" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Dashboard" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavLiveButton" AutomationProperties.Name="Live Studio" Tag="live" Click="NavItem_Click"
@@ -67,7 +67,7 @@
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Live Studio" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Live Studio" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavCreatorsButton" AutomationProperties.Name="Creators" Tag="creators" Click="NavItem_Click"
@@ -76,18 +76,18 @@
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Creators" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Creators" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
 
-                    <TextBlock Text="LIBRARY" Margin="10,20,0,8" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock Text="LIBRARY" Margin="10,20,0,8" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
                     <Button x:Name="NavClipsButton" AutomationProperties.Name="Clip library" Tag="clips" Click="NavItem_Click"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                             Background="Transparent" Foreground="{StaticResource BodyTextBrush}"
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Clip library" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Clip library" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavPublishedButton" AutomationProperties.Name="Scheduled" Tag="published" Click="NavItem_Click"
@@ -96,7 +96,7 @@
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Scheduled" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Scheduled" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavWordsButton" AutomationProperties.Name="Hype words" Tag="words" Click="NavItem_Click"
@@ -105,18 +105,18 @@
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Hype words" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Hype words" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
 
-                    <TextBlock Text="MANAGE" Margin="10,20,0,8" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock Text="MANAGE" Margin="10,20,0,8" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
                     <Button x:Name="NavPublishingButton" AutomationProperties.Name="Publisher" Tag="publishing" Click="NavItem_Click"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                             Background="Transparent" Foreground="{StaticResource BodyTextBrush}"
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Publisher" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Publisher" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavSettingsButton" AutomationProperties.Name="Settings" Tag="settings" Click="NavItem_Click"
@@ -125,7 +125,7 @@
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Settings" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Settings" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavActivityButton" AutomationProperties.Name="Activity" Tag="activity" Click="NavItem_Click"
@@ -134,7 +134,7 @@
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Activity" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Activity" FontSize="14" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
@@ -144,8 +144,8 @@
                     Background="{StaticResource SurfaceSoftBrush}"
                     BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8">
                 <StackPanel Spacing="3">
-                    <TextBlock x:Name="SidebarEngineText" Text="Connecting to engine" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock Text="LOCAL PROCESSING" FontSize="15" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock x:Name="SidebarEngineText" Text="Connecting to engine" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text="LOCAL PROCESSING" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
                 </StackPanel>
             </Border>
 
@@ -156,7 +156,7 @@
                         BorderBrush="Transparent" BorderThickness="1" Padding="14,8"
                         CornerRadius="8" MinHeight="44">
                     <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                        <TextBlock Text="Help" FontSize="16" VerticalAlignment="Center" />
+                        <TextBlock Text="Help" FontSize="14" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
                 <Button x:Name="NavAboutButton" AutomationProperties.Name="About" Tag="about" Click="NavItem_Click"
@@ -165,7 +165,7 @@
                         BorderBrush="Transparent" BorderThickness="1" Padding="14,8"
                         CornerRadius="8" MinHeight="44">
                     <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                        <TextBlock Text="About" FontSize="16" VerticalAlignment="Center" />
+                        <TextBlock Text="About" FontSize="14" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -192,9 +192,9 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="12">
-                    <TextBlock Text="StreamSnip AI" Foreground="{StaticResource MutedTextBrush}" FontSize="16" />
+                    <TextBlock Text="StreamSnip AI" Foreground="{StaticResource MutedTextBrush}" FontSize="14" />
                     <Border Width="1" Height="20" Background="{StaticResource LineBrush}" />
-                    <TextBlock x:Name="PageTitleText" Text="Dashboard" FontSize="20" FontWeight="SemiBold" />
+                    <TextBlock x:Name="PageTitleText" Text="Dashboard" FontSize="24" FontWeight="SemiBold" />
                 </StackPanel>
 
                 <AutoSuggestBox x:Name="GlobalSearchBox" Grid.Column="1"
@@ -209,7 +209,7 @@
                         BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
                     <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                         <Ellipse x:Name="EngineStatusDot" Width="8" Height="8" Fill="{StaticResource WarningBrush}" />
-                        <TextBlock x:Name="EngineStatusText" Text="Starting engine…" FontSize="16" Foreground="{StaticResource BodyTextBrush}" />
+                        <TextBlock x:Name="EngineStatusText" Text="Starting engine…" FontSize="14" Foreground="{StaticResource BodyTextBrush}" />
                     </StackPanel>
                 </Border>
 
@@ -218,7 +218,7 @@
                         BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
                         ToolTipService.ToolTip="Appearance and themes"
                         Click="AppearanceButton_Click" AutomationProperties.Name="Change theme">
-                    <TextBlock Text="Aa" FontFamily="{StaticResource AppFont}" FontSize="15"
+                    <TextBlock Text="Aa" FontFamily="{ThemeResource AppFont}" FontSize="14"
                                Foreground="{StaticResource MutedTextBrush}" />
                 </Button>
                 <Button Grid.Column="4" Width="46" Height="46" Padding="0" Margin="6,0"
@@ -226,7 +226,7 @@
                         BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
                         Click="HelpButton_Click" ToolTipService.ToolTip="Help"
                         AutomationProperties.Name="Help">
-                    <TextBlock Text="?" FontFamily="{StaticResource AppFont}" FontSize="17"
+                    <TextBlock Text="?" FontFamily="{ThemeResource AppFont}" FontSize="14"
                                Foreground="{StaticResource MutedTextBrush}" />
                 </Button>
                 <Button x:Name="QuitButton" Grid.Column="5" Content="Quit"
@@ -252,11 +252,11 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
                     <Ellipse x:Name="FooterEngineDot" Width="7" Height="7" Fill="{StaticResource WarningBrush}" />
-                    <TextBlock x:Name="FooterEngineText" Text="Local engine" FontSize="16" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock x:Name="FooterEngineText" Text="Local engine" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
                     <TextBlock Text="·" Foreground="{StaticResource LineBrush}" />
-                    <TextBlock Text="Capture and rendering stay on this PC" FontSize="16" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock Text="Capture and rendering stay on this PC" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
                 </StackPanel>
-                <TextBlock Grid.Column="2" Text="StreamSnip AI  ·  4.0.8" FontSize="15" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="StreamSnip AI  ·  4.0.9" FontSize="14" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Grid>
     </Grid>

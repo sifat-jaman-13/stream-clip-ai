@@ -27,7 +27,7 @@ class PublicReleaseAssetTests(unittest.TestCase):
     def test_landing_page_is_declared_as_software_and_uses_real_local_images(self):
         html_path = ROOT / "docs" / "index.html"
         html = html_path.read_text(encoding="utf-8")
-        self.assertIn('<html lang="en" data-type="software">', html)
+        self.assertIn('<html lang="en" data-type="software" data-theme="studio-dark" data-theme-choice="studio-dark">', html)
         self.assertIn('<meta name="page-type" content="software">', html)
         self.assertIn('<meta name="site-kind" content="software">', html)
         css = (ROOT / "docs" / "assets" / "site.css").read_text(encoding="utf-8")
@@ -62,7 +62,7 @@ class PublicReleaseAssetTests(unittest.TestCase):
             self.assertTrue((ROOT / image).is_file(), f"Missing README screenshot: {image}")
         for image in ("dashboard.png", "live-studio.png", "creator-monitoring.png", "clip-library.png", "publishing.png"):
             self.assertIn(f"docs/assets/product/{image}", screenshots)
-        self.assertIn("4.0.7 native Windows Release build", readme)
+        self.assertIn("4.0.9 native Windows Release build", readme)
         self.assertNotIn("Page render error", readme)
         self.assertIn("Facebook", readme)
         self.assertIn("Instagram", readme)
@@ -126,11 +126,50 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertIn("!models/face_detection_yunet_2023mar.onnx", gitignore)
         self.assertIn("custom_words.txt", gitignore)
 
+    def test_studio_dark_is_the_default_without_overriding_saved_theme(self):
+        html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        site_js = (ROOT / "docs" / "assets" / "site.js").read_text(encoding="utf-8")
+        react = (ROOT / "dashboard" / "src" / "App.tsx").read_text(encoding="utf-8")
+        native = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.xaml.cs").read_text(encoding="utf-8")
+        css = (ROOT / "dashboard" / "src" / "App.css").read_text(encoding="utf-8")
+
+        self.assertIn('data-theme="studio-dark" data-theme-choice="studio-dark"', html)
+        self.assertIn('let choice = "studio-dark";', html)
+        self.assertIn('let choice = root.dataset.themeChoice || "studio-dark";', site_js)
+        self.assertIn('saveChoice("studio-dark");', site_js)
+        self.assertIn('localStorage.getItem("streamsnip.theme")', react)
+        self.assertIn('return "studio-dark";', react)
+        self.assertIn('private string _theme = "studio-dark";', native)
+        self.assertIn('html[data-theme="studio-dark"]', css)
+        self.assertIn('data-theme-choice="studio-dark" aria-pressed="true"', html)
+        self.assertIn('data-theme-choice="system" aria-pressed="false"', html)
+
+    def test_browser_font_picker_uses_the_same_offline_font_catalog(self):
+        app = (ROOT / "dashboard" / "src" / "App.tsx").read_text(encoding="utf-8")
+        css = (ROOT / "dashboard" / "src" / "App.css").read_text(encoding="utf-8")
+        expected = {
+            "JetBrains Mono": "JetBrainsMono-Variable.ttf",
+            "Inter": "Inter-Variable.ttf",
+            "Open Sans": "OpenSans-Variable.ttf",
+            "IBM Plex Sans": "IBMPlexSans-Variable.ttf",
+            "Roboto": "Roboto-Variable.ttf",
+            "Source Sans 3": "SourceSans3-Variable.ttf",
+        }
+        for family, asset in expected.items():
+            self.assertIn(f'name: "{family}"', app)
+            self.assertIn(f'font-family: "{family}"', css)
+            self.assertTrue((ROOT / "dashboard" / "public" / "fonts" / asset).is_file())
+        self.assertIn('id: "segoe-ui", name: "Segoe UI"', app)
+        self.assertIn('id: "consolas", name: "Consolas"', app)
+        self.assertIn('return "inter";', app)
+        self.assertIn('preferenceVersion !== "1"', app)
+        self.assertIn('saved === "jetbrains-mono" ? "inter" : saved', app)
+
     def test_release_version_is_consistent(self):
-        self.assertIn('APP_VERSION = "4.0.8"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
-        self.assertIn('version = "4.0.8"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('#define MyAppVersion "4.0.8"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
-        self.assertIn('Version="4.0.8.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
+        self.assertIn('APP_VERSION = "4.0.9"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
+        self.assertIn('version = "4.0.9"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('#define MyAppVersion "4.0.9"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
+        self.assertIn('Version="4.0.9.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

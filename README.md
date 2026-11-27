@@ -27,10 +27,10 @@ The installed desktop app uses **WinUI 3** with a supervised local Python media 
 
 ## See the app
 
-Screenshots below are from the **4.0.7 native Windows Release build**.
+Screenshots below are from the **4.0.9 native Windows Release build**.
 
 <p align="center">
-  <img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI Dashboard showing the connected local engine and session overview">
+  <img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.9 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
 </p>
 
 <details>
@@ -40,21 +40,21 @@ Screenshots below are from the **4.0.7 native Windows Release build**.
     <tr>
       <td width="50%">
         <p align="center"><strong>Live Studio</strong></p>
-        <img src="docs/assets/product/live-studio.png" width="100%" alt="Live Studio source selection and capture configuration">
+        <img src="docs/assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.9 Live Studio in Studio Dark with source selection and pre-capture configuration">
       </td>
       <td width="50%">
         <p align="center"><strong>Creator monitoring</strong></p>
-        <img src="docs/assets/product/creator-monitoring.png" width="100%" alt="Creator workspace with independent live and recorded VOD monitoring">
+        <img src="docs/assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.9 Creators page in Studio Dark showing independent live and recorded VOD monitors">
       </td>
     </tr>
     <tr>
       <td width="50%">
         <p align="center"><strong>Clip Library</strong></p>
-        <img src="docs/assets/product/clip-library.png" width="100%" alt="Clip Library with review filters and video inspector">
+        <img src="docs/assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.9 Clip Library in Studio Dark with Ready to review and Scheduled tabs">
       </td>
       <td width="50%">
         <p align="center"><strong>Publisher</strong></p>
-        <img src="docs/assets/product/publishing.png" width="100%" alt="Publisher workspace with Zernio connection and destination settings">
+        <img src="docs/assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.9 Publisher in Studio Dark with five Zernio connection slots">
       </td>
     </tr>
   </table>

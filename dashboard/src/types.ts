@@ -26,6 +26,10 @@ export interface Clip {
   description?: string;
   posted?: boolean;
   posted_at?: number | string | null;
+  scheduled?: boolean;
+  scheduled_at?: number | string | null;
+  delivery_state?: "ready" | "scheduled" | "posted";
+
 }
 
 export interface LogEntry {
@@ -59,4 +63,5 @@ export interface DashboardState {
   clips: Clip[];
   clip_total: number;
   posted_total: number;
+  scheduled_total: number;
 }

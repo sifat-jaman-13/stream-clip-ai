@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.0.8] - 2026-11-27
+
+### Added
+- Reworked Zernio publishing into five fixed, equivalent API-key connection slots in the native Publisher and browser Creator Studio.
+- Added immediate per-clip Zernio publishing and an explicit Auto schedule action for all ready clips.
+- Added a persistent Scheduled registry that separates provider-confirmed future posts from completed posts while keeping both visible in Scheduled history.
+
+### Fixed
+- Clips leave the ready-to-review list only after Zernio confirms a scheduled or published destination.
+- A zero-minute Auto schedule interval now defaults to five minutes between clips; the per-clip Post action always publishes immediately.
+- Enforced the five-connection limit in the local backend and clarified that multiple keys can still share Zernio team quotas.
+- Preserved Scheduled and Posted registry state when deleting clips and updated the Publisher/Scheduled documentation.
+
+### Verification
+- Full Python regression suite, frontend lint and production build, and Windows Release build verified before release.
+- Zernio scheduling and failure-state regression tests cover confirmed and rejected provider outcomes.
+
 ## [4.0.7] - 2026-11-27
 
 ### Fixed

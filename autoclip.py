@@ -34,7 +34,7 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            ollama_models, select_moments, test_provider)
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
-APP_VERSION = "4.0.7"
+APP_VERSION = "4.0.8"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -345,6 +345,7 @@ ZERNIO_FILE = _data_root / "zernio.json"
 PUBLISHING_FILE = _data_root / "publishing.json"
 AI_SETTINGS_FILE = _data_root / "ai_settings.json"
 POSTED_FILE = _data_root / "posted.json"
+SCHEDULED_FILE = _data_root / "scheduled.json"
 ZERNIO_IDEMPOTENCY_FILE = _data_root / "zernio-idempotency.json"
 INSTANCE_LOCK_FILE = _data_root / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
@@ -884,33 +885,72 @@ def load_posted_registry():
 def save_posted_registry(registry):
     atomic_json_write(POSTED_FILE, registry)
 
+def load_scheduled_registry():
+    try:
+        raw = json.loads(SCHEDULED_FILE.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+def save_scheduled_registry(registry):
+    atomic_json_write(SCHEDULED_FILE, registry)
+
+def _merge_registry_accounts(previous, accounts=None):
+    return list(dict.fromkeys(
+        [str(x)[:150] for x in (previous.get("accounts", []) if isinstance(previous.get("accounts"), list) else [])]
+        + [str(x)[:150] for x in (accounts or [])]
+    ))[:20]
+
 def record_zernio_posted(name, accounts=None):
     path = find_clip_path(name)
     if not path:
         raise ValueError("Clip not found.")
     registry = load_posted_registry()
     previous = registry.get(name, {}) if isinstance(registry.get(name), dict) else {}
-    destinations = list(dict.fromkeys(
-        [str(x)[:150] for x in (previous.get("accounts", []) if isinstance(previous.get("accounts"), list) else [])]
-        + [str(x)[:150] for x in (accounts or [])]
-    ))[:20]
+    scheduled = load_scheduled_registry()
+    scheduled.pop(name, None)
+    save_scheduled_registry(scheduled)
     registry[name] = {
         "posted_at": time.time(), "platform": "zernio",
-        "accounts": destinations,
+        "accounts": _merge_registry_accounts(previous, accounts),
     }
     save_posted_registry(registry)
     invalidate_clip_cache()
     return registry[name]
 
+def record_zernio_scheduled(name, accounts=None):
+    path = find_clip_path(name)
+    if not path:
+        raise ValueError("Clip not found.")
+    registry = load_scheduled_registry()
+    previous = registry.get(name, {}) if isinstance(registry.get(name), dict) else {}
+    posted = load_posted_registry()
+    posted.pop(name, None)
+    save_posted_registry(posted)
+    registry[name] = {
+        "scheduled_at": time.time(), "platform": "zernio",
+        "accounts": _merge_registry_accounts(previous, accounts),
+    }
+    save_scheduled_registry(registry)
+    invalidate_clip_cache()
+    return registry[name]
+
 def forget_posted_clips(names):
-    registry = load_posted_registry()
-    changed = False
+    posted = load_posted_registry()
+    scheduled = load_scheduled_registry()
+    posted_changed = False
+    scheduled_changed = False
     for name in names:
-        if name in registry:
-            registry.pop(name, None)
-            changed = True
-    if changed:
-        save_posted_registry(registry)
+        if name in posted:
+            posted.pop(name, None)
+            posted_changed = True
+        if name in scheduled:
+            scheduled.pop(name, None)
+            scheduled_changed = True
+    if posted_changed:
+        save_posted_registry(posted)
+    if scheduled_changed:
+        save_scheduled_registry(scheduled)
     invalidate_clip_cache()
 
 def load_ai_settings():
@@ -3145,6 +3185,7 @@ class Core:
             return ZernioMultiPublisher(
                 self.push, connections,
                 on_success=lambda path, platforms: record_zernio_posted(path.name, platforms),
+                on_scheduled=lambda path, platforms: record_zernio_scheduled(path.name, platforms),
                 on_account_success=self._record_zernio_account_success,
                 on_account_error=self._record_zernio_account_error,
                 on_account_resume=self._record_zernio_account_resume,
@@ -3155,6 +3196,7 @@ class Core:
         return ZernioPublisher(
             self.push, cfg,
             on_success=lambda path, destinations: record_zernio_posted(path.name, destinations),
+            on_scheduled=lambda path, destinations: record_zernio_scheduled(path.name, destinations),
         )
 
     def _record_zernio_account_success(self, account):
@@ -3322,6 +3364,11 @@ class Core:
         clip_total = len(list_clips(limit=1_000_000, clip_tab=clip_tab))
         posted_registry = load_posted_registry()
         posted_total = sum(1 for item in _clip_index() if item["name"] in posted_registry)
+        scheduled_registry = load_scheduled_registry()
+        scheduled_total = sum(
+            1 for item in _clip_index()
+            if item["name"] in posted_registry or item["name"] in scheduled_registry
+        )
         with self.lock:
             s = self.session
             el = int((s["ended"] or time.time()) - s["started"]) if s["started"] else 0
@@ -3340,6 +3387,7 @@ class Core:
                 "clips": clips,
                 "clip_total": clip_total,
                 "posted_total": posted_total,
+                "scheduled_total": scheduled_total,
             }
 
     def stop_file_holder(self, name, pid):
@@ -3479,6 +3527,8 @@ class Core:
         raw_connections = body.get("connections")
         if not isinstance(raw_connections, list):
             raise ValueError("Zernio connections must be a list.")
+        if len(raw_connections) > 5:
+            raise ValueError("StreamSnip supports up to five Zernio API connections.")
         cfg = dict(self._config_for())
         existing = {str(item.get("id", "")): item
                     for item in self._configured_zernio_connections(cfg)}
@@ -3707,7 +3757,8 @@ class Core:
     def zernio_accounts(self):
         return self.publishing_accounts("zernio")
 
-    def publish_clips(self, names, caption_overrides=None, account_ids=None):
+    def publish_clips(self, names, caption_overrides=None, account_ids=None,
+                      auto_schedule=False, force_publish_now=False):
         provider = "zernio"
         cfg = self._config_for()
         if isinstance(cfg.get("connections"), list) and ZERNIO_AVAILABLE:
@@ -3776,7 +3827,9 @@ class Core:
                         if publisher and not isinstance(publisher, ZernioMultiPublisher):
                             publisher.on_success = lambda path, destinations: record_zernio_posted(path.name, destinations)
                         interval = max(0, int(cfg.get("schedule_minutes", 0) or 0))
-                        delay = interval * (index + 1)
+                        if auto_schedule and interval <= 0:
+                            interval = 5
+                        delay = 0 if force_publish_now else interval * (index + 1)
                         with self.lock: self.posting["current"] = name
                         self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
                         caption_override = (caption_overrides or {}).get(name) if isinstance(caption_overrides, dict) else None
@@ -3917,12 +3970,23 @@ def split_clip_post_copy(text):
 
 def list_clips(limit=60, offset=0, clip_tab="clips"):
     posted = load_posted_registry()
+    scheduled = load_scheduled_registry()
     indexed = _clip_index()
     if clip_tab == "posted":
         indexed = [item for item in indexed if item["name"] in posted]
         indexed.sort(key=lambda item: float(posted[item["name"]].get("posted_at", item["mtime"])), reverse=True)
+    elif clip_tab == "scheduled":
+        indexed = [item for item in indexed if item["name"] in posted or item["name"] in scheduled]
+        indexed.sort(
+            key=lambda item: float(
+                scheduled.get(item["name"], {}).get(
+                    "scheduled_at", posted.get(item["name"], {}).get("posted_at", item["mtime"])
+                )
+            ),
+            reverse=True,
+        )
     else:
-        indexed = [item for item in indexed if item["name"] not in posted]
+        indexed = [item for item in indexed if item["name"] not in posted and item["name"] not in scheduled]
     items = [dict(item) for item in indexed[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]]
     for item in items:
         clip_path = pathlib.Path(item.pop("_path"))
@@ -3933,6 +3997,9 @@ def list_clips(limit=60, offset=0, clip_tab="clips"):
         item["title"], item["description"] = split_clip_post_copy(item["caption"])
         item["posted"] = item["name"] in posted
         item["posted_at"] = posted.get(item["name"], {}).get("posted_at")
+        item["scheduled"] = item["name"] in scheduled and item["name"] not in posted
+        item["scheduled_at"] = scheduled.get(item["name"], {}).get("scheduled_at")
+        item["delivery_state"] = "posted" if item["posted"] else "scheduled" if item["scheduled"] else "ready"
     return items
 
 def reveal(path):
@@ -4296,10 +4363,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if path == "/api/clips/names":
                 q = urllib.parse.parse_qs(u.query)
                 tab = q.get("tab", ["clips"])[0]
-                if tab not in {"clips", "posted"}: tab = "clips"
-                registry = load_posted_registry()
+                if tab not in {"clips", "posted", "scheduled"}: tab = "clips"
+                posted = load_posted_registry()
+                scheduled = load_scheduled_registry()
                 names = [item["name"] for item in _clip_index()
-                         if (item["name"] in registry) == (tab == "posted")]
+                         if (
+                             (item["name"] in posted) if tab == "posted"
+                             else (item["name"] in posted or item["name"] in scheduled) if tab == "scheduled"
+                             else (item["name"] not in posted and item["name"] not in scheduled)
+                         )]
                 return self._send(200, {"names": names})
             if path == "/api/creators":
                 return self._send(200, {"creators": CORE.list_creators()})
@@ -4322,7 +4394,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 try: clip_offset = max(0, int(q.get("clip_offset", ["0"])[0]))
                 except ValueError: clip_offset = 0
                 clip_tab = q.get("clip_tab", ["clips"])[0]
-                if clip_tab not in {"clips", "posted"}: clip_tab = "clips"
+                if clip_tab not in {"clips", "posted", "scheduled"}: clip_tab = "clips"
                 return self._send(200, CORE.state(since, clip_offset, clip_tab))
             if path == "/api/log/download":
                 if not RUNTIME_LOG.is_file():
@@ -4446,12 +4518,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     names = body.get("names", [])
                     if body.get("all"):
                         posted_names = load_posted_registry()
+                        scheduled_names = load_scheduled_registry()
                         names = [item["name"] for item in _clip_index()
-                                 if item["name"] not in posted_names]
+                                 if item["name"] not in posted_names and item["name"] not in scheduled_names]
                     elif not isinstance(names, list): names = []
                     return self._send(200, CORE.publish_clips(
                         [str(n) for n in names],
                         account_ids=body.get("account_refs", body.get("account_ids")),
+                        auto_schedule=bool(body.get("auto_schedule", False)),
                     ))
                 if path == "/api/publishing/publish-one":
                     name = str(body.get("name", ""))
@@ -4463,6 +4537,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, CORE.publish_clips(
                         [name], caption_overrides={name: caption},
                         account_ids=body.get("account_refs", body.get("account_ids")),
+                        force_publish_now=True,
                     ))
                 if path == "/api/ai/settings":
                     return self._send(200, save_ai_settings(body))
@@ -4483,10 +4558,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True})
                 if path == "/api/delete_all":
                     tab = str(body.get("clip_tab", "clips"))
-                    if tab not in {"clips", "posted"}: tab = "clips"
-                    registry = load_posted_registry()
+                    if tab not in {"clips", "posted", "scheduled"}: tab = "clips"
+                    posted = load_posted_registry()
+                    scheduled = load_scheduled_registry()
                     names = [item["name"] for item in _clip_index()
-                             if (item["name"] in registry) == (tab == "posted")]
+                             if (
+                                 (item["name"] in posted) if tab == "posted"
+                                 else (item["name"] in posted or item["name"] in scheduled) if tab == "scheduled"
+                                 else (item["name"] not in posted and item["name"] not in scheduled)
+                             )]
                     deleted = []
                     try:
                         for name in names:

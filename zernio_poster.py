@@ -44,9 +44,10 @@ def _truthy(value):
 class ZernioPublisher:
     """Uploads and publishes clips in background threads when explicitly enabled."""
 
-    def __init__(self, log, config=None, on_success=None):
+    def __init__(self, log, config=None, on_success=None, on_scheduled=None):
         self.log = log
         self.on_success = on_success
+        self.on_scheduled = on_scheduled
         self.configure(config or {})
 
     def configure(self, config):
@@ -415,6 +416,7 @@ class ZernioPublisher:
             destination_rows = post.get("platforms") if isinstance(post.get("platforms"), list) else []
             successful = []
             successful_destinations = []
+            scheduled_destinations = []
             failed = []
             for target in platforms:
                 match = next((row for row in destination_rows
@@ -425,14 +427,15 @@ class ZernioPublisher:
                 if state in {"published", "partial"} and status == "published":
                     successful.append(target["platform"])
                     successful_destinations.append(f"{target['platform']}:{target['accountId']}")
-                elif state in {"scheduled", "queued", "pending", "draft", "processing"} and status in {"scheduled", "queued", "pending", "processing", "submitted"}:
-                    continue
+                elif state in {"scheduled", "queued", "pending", "draft", "processing", "partial"} and status in {"scheduled", "queued", "pending", "processing", "submitted"}:
+                    scheduled_destinations.append(f"{target['platform']}:{target['accountId']}")
                 else:
                     detail = (match or {}).get("errorMessage") or (match or {}).get("error") or (match or {}).get("errorCategory") or f"Destination status: {status or 'missing'}; post status: {state or 'missing'}."
                     failed.append({"platform": target["platform"], "account_id": target["accountId"],
                                    "status": status or "unknown", "error": str(detail)[:500]})
             summary = {"post_id": str(post.get("id") or post.get("_id") or ""), "post_status": state,
                        "successful_platforms": successful, "successful_destinations": successful_destinations,
+                       "scheduled_destinations": scheduled_destinations,
                        "failed_platforms": failed, "scheduled": bool(self.schedule_minutes)}
             targets = ", ".join(p["platform"] for p in platforms)
             suffix = f" ({self.schedule_minutes} min delay)" if self.schedule_minutes else ""
@@ -442,11 +445,18 @@ class ZernioPublisher:
                     self.on_success(path, successful_destinations)
                 except Exception as callback_error:
                     self.log(f"Zernio Posted status update failed for {path.name}: {callback_error}")
+            if self.schedule_minutes and scheduled_destinations and callable(self.on_scheduled):
+                try:
+                    self.on_scheduled(path, scheduled_destinations)
+                except Exception as callback_error:
+                    self.log(f"Zernio Scheduled status update failed for {path.name}: {callback_error}")
             if failed:
                 details = "; ".join(f"{item['platform']}: {item['error']}" for item in failed)
                 raise RuntimeError(f"Zernio post {state or 'unknown'}; destination failure: {details}")
             if not summary["scheduled"] and not successful:
                 raise RuntimeError(f"Zernio did not confirm a published destination (post status: {state or 'missing'}).")
+            if summary["scheduled"] and not scheduled_destinations:
+                raise RuntimeError(f"Zernio did not confirm a scheduled destination (post status: {state or 'missing'}).")
             return summary
         except Exception as e:
             self.log(f"Zernio error for {path.name}: {e}")

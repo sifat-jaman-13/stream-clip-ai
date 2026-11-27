@@ -28,12 +28,12 @@ public sealed partial class MainPage
     private void RenderClipLibraryPage(bool published)
     {
         _clipPublished = published;
-        _clipTab = published ? "posted" : "clips";
+        _clipTab = published ? "scheduled" : "clips";
         AddPageHeading(
-            published ? "Published" : "Clip library",
+            published ? "Scheduled" : "Clip library",
             published
-                ? "Clips recorded in your local posted registry."
-                : "Review generated clips, edit their post metadata, and prepare publishing.");
+                ? "Zernio posts accepted for future publishing and clips already sent successfully."
+                : "Review generated clips, edit their post metadata, and publish or schedule them with Zernio.");
 
         var toolbar = new Grid { ColumnSpacing = 12 };
         toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -47,9 +47,12 @@ public sealed partial class MainPage
             RefreshClipRows(published);
         };
         toolbar.Children.Add(search);
+        var autoScheduleButton = CreateButton("Auto schedule", async () => await AutoScheduleClipsAsync(), primary: !published);
+        autoScheduleButton.Visibility = published ? Visibility.Collapsed : Visibility.Visible;
         var actions = ActionRow(
             CreateButton("Ready to review", () => NavigateTo("clips"), primary: !published),
-            CreateButton("Published", () => NavigateTo("published"), primary: published),
+            CreateButton("Scheduled", () => NavigateTo("published"), primary: published),
+            autoScheduleButton,
             CreateButton("Open clips folder", async () =>
             {
                 try { await PostAsync("/api/open_folder", new JsonObject()); }
@@ -87,7 +90,7 @@ public sealed partial class MainPage
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var listPanel = new StackPanel { Spacing = 10 };
-        var currentTotal = published ? (_state?.PostedTotal ?? 0) : (_state?.ClipTotal ?? 0);
+        var currentTotal = published ? (_state?.ScheduledTotal ?? 0) : (_state?.ClipTotal ?? 0);
         _clipLibraryCount = ThemeText($"{currentTotal:N0} total", 10, false, "MutedTextBrush");
         _clipSelectPage = new CheckBox
         {
@@ -112,7 +115,7 @@ public sealed partial class MainPage
         listPanel.Children.Add(scroll);
 
         var pageSize = 60;
-        var total = published ? (_state?.PostedTotal ?? 0) : (_state?.ClipTotal ?? 0);
+        var total = published ? (_state?.ScheduledTotal ?? 0) : (_state?.ClipTotal ?? 0);
         var pageNumber = _clipOffset / pageSize + 1;
         var pages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
         _clipPreviousButton = CreateButton("Previous", async () =>
@@ -197,9 +200,11 @@ public sealed partial class MainPage
             AddLabeled(preview, "Post description", _clipDescriptionInput);
 
             var previewActions = new StackPanel { Spacing = 8 };
+            var postSelected = CreateButton("Post via Zernio", async () => await PostClipViaZernioAsync(_selectedClip), primary: false);
+            postSelected.IsEnabled = !published && !_selectedClip.Posted && !_selectedClip.Scheduled;
             previewActions.Children.Add(ActionRow(
                 CreateButton("Save details", async () => await SaveSelectedClipMetadataAsync(), primary: true),
-                CreateButton("Publish", () => NavigateToPublishingForClip(_selectedClip), primary: false)));
+                postSelected));
             previewActions.Children.Add(ActionRow(
                 CreateButton("Show in folder", async () =>
                 {
@@ -211,7 +216,7 @@ public sealed partial class MainPage
         }
 
         var listSection = CreatePanel(
-            published ? "Published clips" : "Ready to review",
+            published ? "Scheduled clips" : "Ready to review",
             "Your newest MP4 files and their TXT-backed post metadata.",
             listPanel);
         var inspector = CreatePanel("Inspector", "Native Windows video preview and editable post metadata.", preview);
@@ -242,7 +247,7 @@ public sealed partial class MainPage
     {
         if (_clipRowsHost is null) return;
         var published = _clipPublished;
-        var total = published ? (_state?.PostedTotal ?? 0) : (_state?.ClipTotal ?? 0);
+        var total = published ? (_state?.ScheduledTotal ?? 0) : (_state?.ClipTotal ?? 0);
         const int pageSize = 60;
         var pageNumber = _clipOffset / pageSize + 1;
         var pages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
@@ -271,11 +276,13 @@ public sealed partial class MainPage
         {
             _clipRowsHost.Children.Add(Txt(
                 string.IsNullOrWhiteSpace(_clipSearch)
-                    ? published ? "Nothing has been published yet." : "Your clip library is empty."
+                    ? published ? "Nothing has been scheduled yet." : "Your clip library is empty."
                     : "No clips match this search.",
                 11, true));
             _clipRowsHost.Children.Add(ThemeText(
-                "Clips appear here after the engine finishes rendering a highlight.",
+                published
+                    ? "Scheduled posts and successful Zernio posts appear here."
+                    : "Clips appear here after the engine finishes rendering a highlight.",
                 10, false, "MutedTextBrush"));
             return;
         }
@@ -288,7 +295,7 @@ public sealed partial class MainPage
                 string.IsNullOrWhiteSpace(clip.Title) ? clip.Name : clip.Title,
                 10, true));
             copy.Children.Add(ThemeText(
-                $"{(string.IsNullOrWhiteSpace(clip.CreatorName) ? clip.Source : clip.CreatorName)}  ·  {FormatSize(clip.SizeMb)}",
+                $"{(clip.Posted ? "Posted" : clip.Scheduled ? "Scheduled" : "Ready to post")}  ·  {(string.IsNullOrWhiteSpace(clip.CreatorName) ? clip.Source : clip.CreatorName)}  ·  {FormatSize(clip.SizeMb)}",
                 10, false, "MutedTextBrush"));
             copy.Children.Add(ThemeText(FormatClipDate(clip.ModifiedAt), 10, false, "MutedTextBrush"));
 
@@ -320,9 +327,16 @@ public sealed partial class MainPage
             var row = new Grid { ColumnSpacing = 8 };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.Children.Add(selectedCheck);
             Grid.SetColumn(choose, 1);
             row.Children.Add(choose);
+            var postNow = CreateButton("Post", async () => await PostClipViaZernioAsync(clip), primary: true);
+            postNow.Visibility = published ? Visibility.Collapsed : Visibility.Visible;
+            postNow.IsEnabled = !clip.Posted && !clip.Scheduled;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(postNow, $"Post {clip.Name} via Zernio");
+            Grid.SetColumn(postNow, 2);
+            row.Children.Add(postNow);
             _clipRowsHost.Children.Add(row);
         }
         UpdateClipSelectionBar();
@@ -370,6 +384,66 @@ public sealed partial class MainPage
         if (publish is not null) publish.IsEnabled = count > 0 && !_clipPublished;
     }
 
+    private async Task AutoScheduleClipsAsync()
+    {
+        var count = _state?.ClipTotal ?? 0;
+        if (count <= 0)
+        {
+            await DialogResultAsync("No clips to schedule", "Your ready-to-review clip list is empty.");
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"Auto-schedule {count:N0} clip(s)?",
+            Content = "StreamSnip will send every ready clip to your enabled Zernio accounts and space the posts using the Publisher schedule interval. If no interval is set, posts are spaced 5 minutes apart. Clips move to Scheduled only after Zernio confirms the scheduled destinations.",
+            PrimaryButtonText = "Schedule all",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        try
+        {
+            var result = await PostAsync("/api/publishing/publish", new JsonObject
+            {
+                ["all"] = true,
+                ["auto_schedule"] = true
+            });
+            var queued = result["queued"]?.ToString() ?? count.ToString();
+            await DialogResultAsync("Auto-schedule started", $"{queued} clip(s) were submitted to the scheduler. Their status will move to Scheduled when Zernio confirms each post.");
+            await RefreshStateAsync(forceRender: true);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not auto-schedule clips", ex.Message);
+        }
+    }
+
+    private async Task PostClipViaZernioAsync(ClipItem? clip)
+    {
+        if (clip is null || clip.Posted || clip.Scheduled) return;
+        var title = string.IsNullOrWhiteSpace(clip.Title) ? clip.Name : clip.Title;
+        try
+        {
+            var result = await PostAsync("/api/publishing/publish-one", new JsonObject
+            {
+                ["name"] = clip.Name,
+                ["title"] = title,
+                ["description"] = clip.Description
+            });
+            await DialogResultAsync(
+                "Publishing started",
+                $"Zernio accepted the publishing job for {clip.Name}. It will appear in Scheduled with a Posted status once Zernio confirms publication.");
+            await RefreshStateAsync(forceRender: true);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not post clip via Zernio", ex.Message);
+        }
+    }
+
     private async Task DeleteSelectedClipsAsync()
     {
         var names = _selectedClipNames.ToList();
@@ -399,13 +473,13 @@ public sealed partial class MainPage
 
     private async Task DeleteAllClipsAsync(bool published)
     {
-        var count = published ? (_state?.PostedTotal ?? 0) : (_state?.ClipTotal ?? 0);
+        var count = published ? (_state?.ScheduledTotal ?? 0) : (_state?.ClipTotal ?? 0);
         if (count <= 0) return;
-        var tab = published ? "posted" : "clips";
+        var tab = published ? "scheduled" : "clips";
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = $"Delete all {count:N0} {(published ? "published" : "ready")} clip(s)?",
+            Title = $"Delete all {count:N0} {(published ? "scheduled" : "ready")} clip(s)?",
             Content = "This permanently removes every MP4 and matching metadata file in this tab. This cannot be undone.",
             PrimaryButtonText = "Delete all",
             CloseButtonText = "Cancel",

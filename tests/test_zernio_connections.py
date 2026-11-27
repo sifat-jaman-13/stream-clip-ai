@@ -109,6 +109,44 @@ def test_selected_account_refs_can_include_multiple_accounts_on_same_platform():
     assert {item["id"] for item in selected} == {"ig1", "ig2"}
 
 
+
+def test_multi_publisher_records_zernio_scheduling_separately(monkeypatch, tmp_path):
+    scheduled = []
+    posted = []
+
+    class FakePublisher:
+        def __init__(self, log, config, on_success=None):
+            self.api_key = config["api_key"]
+
+        def publish_one(self, path, schedule_minutes=None, accounts=None, caption_override=None):
+            platform, account_id = next(iter(accounts.items()))
+            return {
+                "failed_platforms": [],
+                "scheduled_destinations": [f"{platform}:{account_id}"],
+            }
+
+    monkeypatch.setattr(zc, "ZernioPublisher", FakePublisher)
+    publisher = zc.ZernioMultiPublisher(
+        lambda _message: None,
+        [{
+            "id": "connection-1",
+            "api_key": "test-key",
+            "accounts": [account("ig-1", "instagram")],
+        }],
+        on_success=lambda path, destinations: posted.append((path, destinations)),
+        on_scheduled=lambda path, destinations: scheduled.append((path, destinations)),
+    )
+    video = tmp_path / "scheduled.mp4"
+    video.write_bytes(b"video")
+
+    result = publisher.publish_one(video, schedule_minutes=5)
+
+    assert result["succeeded"] == ["connection-1:ig-1"]
+    assert result["failed"] == []
+    assert scheduled == [(video, ["instagram:ig-1"])]
+    assert posted == []
+
+
 def test_one_account_rate_limit_does_not_stop_other_accounts(monkeypatch, tmp_path):
     calls = []
     errors = []

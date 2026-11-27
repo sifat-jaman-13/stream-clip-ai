@@ -239,7 +239,7 @@ export async function apiPost<T>(path: string, body: unknown = {}): Promise<T> {
   return payload as T;
 }
 
-export async function loadDashboard(tab: "clips" | "posted", since: number, offset = 0) {
+export async function loadDashboard(tab: "clips" | "scheduled", since: number, offset = 0) {
   const [state, creatorResponse] = await Promise.all([
     apiGet<DashboardState>(
       "/api/state?since=" + since + "&clip_offset=" + offset + "&clip_tab=" + tab,

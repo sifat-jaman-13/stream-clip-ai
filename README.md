@@ -53,8 +53,8 @@ Screenshots below are from the **4.0.7 native Windows Release build**.
         <img src="docs/assets/product/clip-library.png" width="100%" alt="Clip Library with review filters and video inspector">
       </td>
       <td width="50%">
-        <p align="center"><strong>Publishing</strong></p>
-        <img src="docs/assets/product/publishing.png" width="100%" alt="Publishing workspace with Zernio connection and destination settings">
+        <p align="center"><strong>Publisher</strong></p>
+        <img src="docs/assets/product/publishing.png" width="100%" alt="Publisher workspace with Zernio connection and destination settings">
       </td>
     </tr>
   </table>
@@ -94,7 +94,7 @@ The installer is currently unsigned, so Windows SmartScreen may show a publisher
 5. **Start.** Press Start capture. Follow the actual status and progress in Live Studio or Dashboard.
 6. **Stop.** Press Stop capture when you are finished. Allow active work to stop gracefully.
 7. **Review.** Open Clip Library, preview the MP4, and correct its title, description, and tags.
-8. **Publish if wanted.** Configure Zernio in Publishing, choose a connected destination, review the post, and submit it yourself.
+8. **Publish if wanted.** Open Publisher, connect up to five Zernio API keys, and enable the destinations you want. Use **Post** on a clip for immediate publishing or **Auto schedule** to queue every ready clip.
 
 See the [complete user guide](docs/USER_GUIDE.md) for detailed setup, each setting, creator monitoring, publishing, storage, and troubleshooting.
 
@@ -131,9 +131,9 @@ Supported output ratios are 9:16 portrait, 16:9 landscape, 1:1 square, and 4:5. 
 | Live Studio | Source selection and all pre-capture settings |
 | Creators | Independent Twitch/YouTube monitors and recorded-VOD folder watching |
 | Clip Library | Find, preview, and review generated clips and metadata |
-| Published | Confirmed publishing records |
+| Scheduled | Zernio-confirmed scheduled posts and completed publishing history |
 | Hype words | Local phrases used by the Hook Words scoring option |
-| Publishing | Zernio connection, account discovery, and destination controls |
+| Publisher | Five Zernio API-key slots, account discovery, and destination controls |
 | Settings | Application-wide appearance and storage |
 | Activity | Engine and workflow event history |
 | Help & how-to | In-app quick start and troubleshooting |
@@ -141,9 +141,9 @@ Supported output ratios are 9:16 portrait, 16:9 landscape, 1:1 square, and 4:5. 
 
 ## Publishing and supported destinations
 
-Publishing is optional and uses your configured Zernio integration. Connect Zernio, refresh the accounts it returns, enable the accounts you want to use, and select the intended destination for each post.
+Publishing is optional and uses your configured Zernio integration. Publisher provides five independent API-key slots. Each slot discovers its Facebook, Instagram, and YouTube destinations, and you can enable the accounts you want to use. Use the per-clip **Post** action for immediate publishing or **Auto schedule** to queue all ready clips using your saved spacing interval (5 minutes when the interval is zero).
 
-The current integration supports **Facebook, Instagram, and YouTube**. **TikTok is not a supported destination in this integration.** Account availability, upload limits, quotas, and posting errors are controlled by Zernio and the connected platforms. A destination is recorded as published only after success is confirmed.
+The current integration supports **Facebook, Instagram, and YouTube**. **TikTok is not a supported destination in this integration.** Account availability, upload limits, quotas, and posting errors are controlled by Zernio and the connected platforms. A clip moves to **Scheduled** only after Zernio confirms a future-dated destination. The Scheduled view also retains completed posts with a **Posted** status; pending or failed requests do not move a clip out of Clip Library.
 
 Review every video and its metadata before posting. Highlight scores are suggestions, not guarantees of views or engagement.
 

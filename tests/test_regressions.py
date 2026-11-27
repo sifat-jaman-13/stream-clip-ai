@@ -95,17 +95,31 @@ class RegressionTests(unittest.TestCase):
             output.mkdir()
             clip = output / "finished_clip.mp4"
             clip.write_bytes(b"video")
-            with patch.object(autoclip, "OUT", output), patch.object(autoclip, "POSTED_FILE", root / "posted.json"), patch.object(autoclip, "CORE", None):
+            with patch.object(autoclip, "OUT", output), patch.object(autoclip, "POSTED_FILE", root / "posted.json"), patch.object(autoclip, "SCHEDULED_FILE", root / "scheduled.json"), patch.object(autoclip, "CORE", None):
                 autoclip.invalidate_clip_cache()
                 self.assertEqual(len(autoclip.list_clips(clip_tab="clips")), 1)
-                autoclip.record_zernio_posted(clip.name)
+                autoclip.record_zernio_scheduled(clip.name, ["instagram:account"])
                 self.assertEqual(autoclip.list_clips(clip_tab="clips"), [])
-                posted = autoclip.list_clips(clip_tab="posted")
-                self.assertEqual([item["name"] for item in posted], [clip.name])
-                self.assertEqual(posted[0]["posted"], True)
+                scheduled = autoclip.list_clips(clip_tab="scheduled")
+                self.assertEqual([item["name"] for item in scheduled], [clip.name])
+                self.assertTrue(scheduled[0]["scheduled"])
+                self.assertFalse(scheduled[0]["posted"])
+                self.assertEqual(autoclip.load_scheduled_registry()[clip.name]["accounts"], ["instagram:account"])
+                autoclip.record_zernio_posted(clip.name)
+                scheduled = autoclip.list_clips(clip_tab="scheduled")
+                self.assertEqual([item["name"] for item in scheduled], [clip.name])
+                self.assertTrue(scheduled[0]["posted"])
+                self.assertFalse(scheduled[0]["scheduled"])
+                self.assertEqual(autoclip.list_clips(clip_tab="posted")[0]["name"], clip.name)
                 self.assertEqual(autoclip.load_posted_registry()[clip.name]["platform"], "zernio")
                 autoclip.forget_posted_clips([clip.name])
                 self.assertEqual(len(autoclip.list_clips(clip_tab="clips")), 1)
+                self.assertEqual(autoclip.list_clips(clip_tab="scheduled"), [])
+
+    def test_publishing_connections_reject_more_than_five_slots(self):
+        core = object.__new__(autoclip.Core)
+        with self.assertRaisesRegex(ValueError, "up to five"):
+            core.publishing_connections_save({"connections": [{"id": f"slot-{index}"} for index in range(6)]})
 
     def test_custom_openai_compatible_highlight_provider_uses_chat_completions(self):
         config = {
@@ -1257,8 +1271,9 @@ class RegressionTests(unittest.TestCase):
             video = Path(directory) / "clip.mp4"
             video.write_bytes(b"video")
             callback = MagicMock()
+            scheduled_callback = MagicMock()
             publisher = ZernioPublisher(lambda *_: None, {"api_key": "test", "enabled": True},
-                                        on_success=callback)
+                                        on_success=callback, on_scheduled=scheduled_callback)
             publisher.accounts_map = {"instagram": "account"}
             publisher.schedule_minutes = 10
             publisher._upload = MagicMock(return_value="https://cdn.invalid/clip.mp4")
@@ -1270,6 +1285,7 @@ class RegressionTests(unittest.TestCase):
             }}})
             publisher._publish(video, raise_errors=True)
             callback.assert_not_called()
+            scheduled_callback.assert_called_once_with(video, ["instagram:account"])
 
     def test_zernio_upload_streams_file_instead_of_reading_all_bytes(self):
         with tempfile.TemporaryDirectory() as directory:

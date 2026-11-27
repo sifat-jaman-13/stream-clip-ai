@@ -367,7 +367,7 @@ public sealed partial class MainPage : Page
 			string currentPage = _currentPage;
 			bool flag = ((currentPage == "clips" || currentPage == "published") ? true : false);
 			int offset = (flag ? _clipOffset : 0);
-			string tab = ((_currentPage == "published") ? "posted" : _clipTab);
+			string tab = ((_currentPage == "published") ? "scheduled" : _clipTab);
 			foreach (LogItem item in (_state = JsonSerializer.Deserialize<EngineState>((await _engine.GetJsonAsync($"/api/state?since={since}&clip_offset={offset}&clip_tab={tab}", _shutdown.Token)).ToJsonString(), JsonOptions) ?? new EngineState()).Logs.OrderBy((LogItem x) => x.Id))
 			{
 				if (item.Id > _lastLogId)
@@ -658,7 +658,7 @@ private void UpdateSidebarSelection()
         PageTitleText.Text = GetPageTitle(page);
         UpdateSidebarSelection();
         if (page == "clips") _clipTab = "clips";
-        if (page == "published") _clipTab = "posted";
+        if (page == "published") _clipTab = "scheduled";
         RenderCurrentPage();
     }
 
@@ -673,8 +673,8 @@ private void UpdateSidebarSelection()
 			"live" => "Live Studio",
 			"creators" => "Creators",
 			"clips" => "Clip library",
-			"published" => "Published",
-			"publishing" => "Publishing",
+			"published" => "Scheduled",
+			"publishing" => "Publisher",
 			"words" => "Hype words",
 			"activity" => "Activity",
 			"settings" => "Settings",

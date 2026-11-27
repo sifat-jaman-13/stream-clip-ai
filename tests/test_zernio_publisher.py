@@ -104,6 +104,70 @@ def test_published_overall_status_does_not_override_failed_destination(tmp_path)
     assert posted == []
 
 
+
+def test_scheduled_status_without_a_confirmed_destination_does_not_move_clip(tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video")
+    scheduled = []
+    publisher = ZernioPublisher(
+        lambda _message: None,
+        {"enabled": True, "api_key": "test-key"},
+        on_scheduled=lambda path, destinations: scheduled.append((path.name, destinations)),
+    )
+    publisher._upload = lambda _path: "https://media.example/clip.mp4"
+    publisher._json_request = lambda *_args, **_kwargs: {
+        "data": {
+            "post": {
+                "id": "post-unscheduled",
+                "status": "scheduled",
+                "platforms": [
+                    {"platform": "instagram", "accountId": "ig-1", "status": "failed",
+                     "errorMessage": "Destination rejected the schedule."},
+                ],
+            }
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="instagram"):
+        publisher.publish_one(video, accounts={"instagram": "ig-1"}, schedule_minutes=5)
+
+    assert scheduled == []
+
+
+def test_partial_schedule_records_only_confirmed_scheduled_destinations(tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video")
+    scheduled = []
+    publisher = ZernioPublisher(
+        lambda _message: None,
+        {"enabled": True, "api_key": "test-key"},
+        on_scheduled=lambda path, destinations: scheduled.append((path.name, destinations)),
+    )
+    publisher._upload = lambda _path: "https://media.example/clip.mp4"
+    publisher._json_request = lambda *_args, **_kwargs: {
+        "data": {
+            "post": {
+                "id": "post-partial-schedule",
+                "status": "partial",
+                "platforms": [
+                    {"platform": "instagram", "accountId": "ig-1", "status": "scheduled"},
+                    {"platform": "youtube", "accountId": "yt-1", "status": "failed",
+                     "errorMessage": "YouTube destination rejected the schedule."},
+                ],
+            }
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="youtube"):
+        publisher.publish_one(
+            video,
+            accounts={"instagram": "ig-1", "youtube": "yt-1"},
+            schedule_minutes=5,
+        )
+
+    assert scheduled == [("clip.mp4", ["instagram:ig-1"])]
+
+
 def test_post_idempotency_key_is_attached_and_kept_stable_for_retry(monkeypatch, tmp_path):
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"video")

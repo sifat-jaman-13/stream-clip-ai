@@ -8,7 +8,7 @@ namespace StreamSnip_Desktop;
 public sealed partial class MainPage
 {
     private TextBlock? _dashboardClipCount;
-    private TextBlock? _dashboardPublishedCount;
+    private TextBlock? _dashboardScheduledCount;
     private TextBlock? _dashboardCreatorCount;
     private TextBlock? _dashboardElapsed;
     private TextBlock? _dashboardClipDetail;
@@ -38,7 +38,7 @@ public sealed partial class MainPage
     private void RenderDashboardPage()
     {
         _dashboardClipCount = null;
-        _dashboardPublishedCount = null;
+        _dashboardScheduledCount = null;
         _dashboardCreatorCount = null;
         _dashboardElapsed = null;
         _dashboardClipDetail = null;
@@ -662,7 +662,7 @@ public sealed partial class MainPage
     {
         if (_state is null) return;
         _dashboardClipCount?.SetValue(TextBlock.TextProperty, _state.ClipTotal.ToString("N0"));
-        _dashboardPublishedCount?.SetValue(TextBlock.TextProperty, _state.PostedTotal.ToString("N0"));
+        _dashboardScheduledCount?.SetValue(TextBlock.TextProperty, _state.ScheduledTotal.ToString("N0"));
         _dashboardCreatorCount?.SetValue(TextBlock.TextProperty,
             _creators.Count(x => x.Running || x.CaptureActive).ToString("N0"));
         if (_dashboardElapsed is not null)

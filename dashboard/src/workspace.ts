@@ -96,6 +96,7 @@ const emptyState: DashboardState = {
   clips: [],
   clip_total: 0,
   posted_total: 0,
+  scheduled_total: 0,
 };
 
 const emptyAI: AISettings = {
@@ -137,7 +138,7 @@ export function useWorkspace() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState("");
   const [error, setError] = useState("");
-  const [clipTabState, setClipTabState] = useState<"clips" | "posted">("clips");
+  const [clipTabState, setClipTabState] = useState<"clips" | "scheduled">("clips");
   const [clipOffset, setClipOffsetState] = useState(0);
 
   const lastId = useRef(0);
@@ -345,7 +346,7 @@ export function useWorkspace() {
     return result;
   }, []);
 
-  const setClipTab = useCallback((tab: "clips" | "posted") => {
+  const setClipTab = useCallback((tab: "clips" | "scheduled") => {
     setClipTabState(tab);
     setClipOffsetState(0);
   }, []);

@@ -90,13 +90,13 @@
                             <TextBlock Text="Clip library" FontSize="17" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="NavPublishedButton" AutomationProperties.Name="Published" Tag="published" Click="NavItem_Click"
+                    <Button x:Name="NavPublishedButton" AutomationProperties.Name="Scheduled" Tag="published" Click="NavItem_Click"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                             Background="Transparent" Foreground="{StaticResource BodyTextBrush}"
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Published" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Scheduled" FontSize="17" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavWordsButton" AutomationProperties.Name="Hype words" Tag="words" Click="NavItem_Click"
@@ -110,13 +110,13 @@
                     </Button>
 
                     <TextBlock Text="MANAGE" Margin="10,20,0,8" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" />
-                    <Button x:Name="NavPublishingButton" AutomationProperties.Name="Publishing" Tag="publishing" Click="NavItem_Click"
+                    <Button x:Name="NavPublishingButton" AutomationProperties.Name="Publisher" Tag="publishing" Click="NavItem_Click"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                             Background="Transparent" Foreground="{StaticResource BodyTextBrush}"
                             BorderBrush="Transparent" BorderThickness="1" Padding="14,9"
                             CornerRadius="8" MinHeight="46">
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                            <TextBlock Text="Publishing" FontSize="17" VerticalAlignment="Center" />
+                            <TextBlock Text="Publisher" FontSize="17" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavSettingsButton" AutomationProperties.Name="Settings" Tag="settings" Click="NavItem_Click"
@@ -256,7 +256,7 @@
                     <TextBlock Text="·" Foreground="{StaticResource LineBrush}" />
                     <TextBlock Text="Capture and rendering stay on this PC" FontSize="16" Foreground="{StaticResource MutedTextBrush}" />
                 </StackPanel>
-                <TextBlock Grid.Column="2" Text="StreamSnip AI  ·  4.0.7" FontSize="15" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="StreamSnip AI  ·  4.0.8" FontSize="15" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Grid>
     </Grid>

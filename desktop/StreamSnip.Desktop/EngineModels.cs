@@ -15,6 +15,7 @@ public sealed record EngineState
     [JsonPropertyName("revision")] public long Revision { get; init; }
     [JsonPropertyName("clip_total")] public int ClipTotal { get; init; }
     [JsonPropertyName("posted_total")] public int PostedTotal { get; init; }
+    [JsonPropertyName("scheduled_total")] public int ScheduledTotal { get; init; }
     [JsonPropertyName("session")] public SessionState Session { get; init; } = new();
     [JsonPropertyName("posting")] public PostingState Posting { get; init; } = new();
     [JsonPropertyName("clips")] public List<ClipItem> Clips { get; init; } = [];
@@ -57,6 +58,9 @@ public sealed record ClipItem
     [JsonPropertyName("size_mb")] public double SizeMb { get; init; }
     [JsonPropertyName("posted")] public bool Posted { get; init; }
     [JsonPropertyName("posted_at")] public JsonNode? PostedAt { get; init; }
+    [JsonPropertyName("scheduled")] public bool Scheduled { get; init; }
+    [JsonPropertyName("scheduled_at")] public JsonNode? ScheduledAt { get; init; }
+    [JsonPropertyName("delivery_state")] public string DeliveryState { get; init; } = "ready";
 }
 
 public sealed record CreatorItem

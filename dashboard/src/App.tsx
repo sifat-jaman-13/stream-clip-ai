@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity, AlertCircle, ArrowRight, ArrowUpRight, BadgeCheck, Check, CheckCircle2,
-  ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clapperboard, CloudUpload, Copy, Cpu, Download,
+  ChevronDown, ChevronLeft, ChevronRight, CalendarClock, CircleHelp, Clapperboard, CloudUpload, Copy, Cpu, Download,
   ExternalLink, Eye, FileText, FileVideo, FolderOpen, HardDrive, Info, LayoutDashboard,
   Menu, MoreHorizontal, Palette, Pause, Play, Plus, Radio,
   RadioTower, RefreshCw, Search, Send, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Square, Trash2,
@@ -57,8 +57,8 @@ const pageInfo: Record<PageId, { title: string; description: string }> = {
   live: { title: "Live Studio", description: "Choose a source and control capture from your local engine." },
   creators: { title: "Creators", description: "Manage independent live monitors and recorded-VOD folders." },
   clips: { title: "Clip library", description: "Review generated clips and edit metadata." },
-  published: { title: "Published", description: "Clips recorded in your local posted registry." },
-  publishing: { title: "Publishing", description: "Connect Zernio or prepare a manual upload in your browser." },
+  published: { title: "Scheduled", description: "Scheduled Zernio posts and completed publishing history." },
+  publishing: { title: "Publisher", description: "Manage five Zernio connections and their publishing destinations." },
   words: { title: "Hype words", description: "Tune the phrase list used by the local highlight scorer." },
   activity: { title: "Activity", description: "Recent engine events and actionable processing errors." },
   settings: { title: "Settings", description: "Manage application storage and workspace appearance. Prepare sessions in Live Studio." },
@@ -74,11 +74,11 @@ const navGroups: Array<{ label: string; items: Array<{ id: PageId; label: string
   ] },
   { label: "Content", items: [
     { id: "clips", label: "Clip library", icon: Clapperboard },
-    { id: "published", label: "Published", icon: BadgeCheck },
+    { id: "published", label: "Scheduled", icon: BadgeCheck },
     { id: "words", label: "Hype words", icon: WandSparkles },
   ] },
   { label: "Manage", items: [
-    { id: "publishing", label: "Publishing", icon: CloudUpload },
+    { id: "publishing", label: "Publisher", icon: CloudUpload },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "activity", label: "Activity", icon: Activity },
   ] },
@@ -294,7 +294,7 @@ export default function App() {
     setMobileOpen(false);
     setThemeOpen(false);
     if (next === "clips") setClipTab("clips");
-    if (next === "published") setClipTab("posted");
+    if (next === "published") setClipTab("scheduled");
   }, [setClipTab]);
 
   const post = useCallback(async <T,>(key: string, path: string, body: RecordLike = {}): Promise<T | null> => {
@@ -319,11 +319,6 @@ export default function App() {
     }
   }, [quitting]);
 
-  const openForPublishing = (clip: Clip) => {
-    setPublishClip(clip);
-    setBulkNames([]);
-    navigate("publishing");
-  };
   const openBulkPublishing = (names: string[]) => {
     setPublishClip(null);
     setBulkNames(names);
@@ -398,7 +393,7 @@ export default function App() {
         {page === "overview" ? <OverviewPage workspace={workspace} navigate={navigate} openClip={(clip) => { setSelectedClip(clip); navigate("clips"); }} /> : null}
         {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
         {page === "creators" ? <CreatorsPage workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
-        {page === "clips" || page === "published" ? <ClipLibraryPage key={page + "|" + workspace.clipOffset} workspace={workspace} published={page === "published"} navigate={navigate} query={clipSearch} setQuery={setClipSearch} selectedClip={selectedClip} setSelectedClip={setSelectedClip} openForPublishing={openForPublishing} openBulkPublishing={openBulkPublishing} busy={busy} post={post} /> : null}
+        {page === "clips" || page === "published" ? <ClipLibraryPage key={page + "|" + workspace.clipOffset} workspace={workspace} published={page === "published"} navigate={navigate} query={clipSearch} setQuery={setClipSearch} selectedClip={selectedClip} setSelectedClip={setSelectedClip} openBulkPublishing={openBulkPublishing} busy={busy} post={post} /> : null}
         {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
         {page === "words" ? <HypeWordsPage key={workspace.words.text} workspace={workspace} /> : null}
         {page === "activity" ? <ActivityPage workspace={workspace} busy={busy} post={post} /> : null}
@@ -502,7 +497,7 @@ function OverviewPage({ workspace, navigate, openClip }: { workspace: Workspace;
     <PageHeading title="Studio overview" description="Monitor sources, review the latest clips, and keep your workflow moving." actions={<Button kind="primary" onClick={() => navigate("live")}><Radio size={16} />Open Live Studio</Button>} />
     <div className="summary-strip">
       <Stat label="Ready to review" value={count(state.clip_total)} detail="Unpublished clips" />
-      <Stat label="Published" value={count(state.posted_total)} detail="In your local registry" />
+      <Stat label="Scheduled" value={count(state.scheduled_total)} detail="Scheduled and completed Zernio posts" />
       <Stat label="Active creators" value={count(active.length)} detail={count(creators.length) + " configured"} />
       <Stat label="Current session" value={duration(state.session.elapsed)} detail={count(state.session.clips) + " clips · " + count(state.session.chunks) + " chunks"} />
     </div>
@@ -890,13 +885,15 @@ function CreatorsPage({ workspace, busy, post, navigate }: { workspace: Workspac
   </div>;
 }
 
-function ClipLibraryPage({ workspace, published, navigate, query, setQuery, selectedClip, setSelectedClip, openForPublishing, openBulkPublishing, busy, post }: {
+function ClipLibraryPage({ workspace, published, navigate, query, setQuery, selectedClip, setSelectedClip, openBulkPublishing, busy, post }: {
   workspace: Workspace; published: boolean; navigate: (page: PageId) => void; query: string; setQuery: (value: string) => void; selectedClip: Clip | null;
-  setSelectedClip: (clip: Clip | null) => void; openForPublishing: (clip: Clip) => void; openBulkPublishing: (names: string[]) => void;
+  setSelectedClip: (clip: Clip | null) => void; openBulkPublishing: (names: string[]) => void;
   busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>;
 }) {
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [metadataDraft, setMetadataDraft] = useState<{ name: string; title: string; description: string } | null>(null);
+  const [confirm, setConfirm] = useState<"selected" | "all" | null>(null);
+  const [confirmAutoSchedule, setConfirmAutoSchedule] = useState(false);
   const title = metadataDraft && metadataDraft.name === selectedClip?.name ? metadataDraft.title : selectedClip?.title || "";
   const description = metadataDraft && metadataDraft.name === selectedClip?.name ? metadataDraft.description : selectedClip?.description || "";
   const setTitle = (value: string) => {
@@ -915,20 +912,40 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
       description: value,
     }));
   };
-  const [confirm, setConfirm] = useState<"selected" | "all" | null>(null);
   const clips = workspace.state.clips;
-  const filtered = useMemo(() => clips.filter((clip) => (clip.title || "").concat(" ", clip.name, " ", clip.creator_name || "", " ", clip.source || "").toLowerCase().includes(query.toLowerCase())), [clips, query]);
-  const total = published ? workspace.state.posted_total : workspace.state.clip_total;
+  const filtered = useMemo(() => clips.filter((clip) =>
+    (clip.title || "").concat(" ", clip.name, " ", clip.creator_name || "", " ", clip.source || "")
+      .toLowerCase().includes(query.toLowerCase())
+  ), [clips, query]);
+  const total = published ? workspace.state.scheduled_total : workspace.state.clip_total;
   const pageSize = 60;
   const currentPage = Math.floor(workspace.clipOffset / pageSize) + 1;
   const maxPages = Math.max(1, Math.ceil(total / pageSize));
+  const postingBlocked = !!busy || workspace.state.posting.active;
   const toggleAll = () => setSelectedNames(selectedNames.length === filtered.length ? [] : filtered.map((clip) => clip.name));
   const toggleOne = (name: string) => setSelectedNames((items) => items.includes(name) ? items.filter((item) => item !== name) : items.concat(name));
   const deleteNow = async () => {
-    if (confirm === "all") await post("delete-all", "/api/delete_all", { clip_tab: published ? "posted" : "clips" });
+    if (confirm === "all") await post("delete-all", "/api/delete_all", { clip_tab: published ? "scheduled" : "clips" });
     else if (selectedClip && selectedNames.length === 0) await post("delete-one", "/api/delete", { name: selectedClip.name });
     else if (selectedNames.length) await post("delete-many", "/api/delete_many", { names: selectedNames });
-    setConfirm(null); setSelectedNames([]); setSelectedClip(null);
+    setConfirm(null);
+    setSelectedNames([]);
+    setSelectedClip(null);
+  };
+  const publishClip = async (clip: Clip, postTitle = clip.title || clip.name, postDescription = clip.description || "") => {
+    if (published || postingBlocked || clip.posted || clip.scheduled) return;
+    const result = await post("publish-" + clip.name, "/api/publishing/publish-one", {
+      name: clip.name,
+      title: postTitle,
+      description: postDescription,
+    });
+    if (result) setSelectedNames((items) => items.filter((name) => name !== clip.name));
+  };
+  const autoSchedule = async () => {
+    setConfirmAutoSchedule(false);
+    await post("auto-schedule", "/api/publishing/publish", { all: true, auto_schedule: true });
+    setSelectedNames([]);
+    setSelectedClip(null);
   };
   const saveMetadata = async () => {
     if (!selectedClip || !title.trim()) return;
@@ -939,28 +956,82 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
     }
   };
   return <div className="page-stack">
-    <PageHeading title={published ? "Published" : "Clip library"} description={published ? "Clips recorded in your local posted registry." : "Review generated clips, edit post metadata, and prepare a publishing handoff."} actions={<Button onClick={() => void post("open-clips-folder", "/api/open_folder", {})}><FolderOpen size={15} />Open folder</Button>} />
+    <PageHeading
+      title={published ? "Scheduled" : "Clip library"}
+      description={published
+        ? "Scheduled Zernio posts and completed publishing history appear here."
+        : "Review generated clips, edit metadata, publish a single video, or schedule the ready queue."}
+      actions={<>
+        {!published ? <Button kind="primary" onClick={() => setConfirmAutoSchedule(true)} disabled={!workspace.state.clip_total || postingBlocked}>
+          <CalendarClock size={15} />Auto schedule
+        </Button> : null}
+        <Button onClick={() => void post("open-clips-folder", "/api/open_folder", {})}><FolderOpen size={15} />Open folder</Button>
+      </>}
+    />
     <div className="library-toolbar">
       <div className="library-tabs">
-        <button className={!published ? "selected" : ""} onClick={() => { navigate("clips"); setSelectedClip(null); }}><Video size={15} />Ready to review <b>{count(workspace.state.clip_total)}</b></button>
-        <button className={published ? "selected" : ""} onClick={() => { navigate("published"); setSelectedClip(null); }}><BadgeCheck size={15} />Published <b>{count(workspace.state.posted_total)}</b></button>
+        <button className={!published ? "selected" : ""} onClick={() => { navigate("clips"); setSelectedClip(null); setSelectedNames([]); }}>
+          <Video size={15} />Ready to review <b>{count(workspace.state.clip_total)}</b>
+        </button>
+        <button className={published ? "selected" : ""} onClick={() => { navigate("published"); setSelectedClip(null); setSelectedNames([]); }}>
+          <BadgeCheck size={15} />Scheduled <b>{count(workspace.state.scheduled_total)}</b>
+        </button>
       </div>
-      <label className="library-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter this page by title or creator" />{query ? <button type="button" className="search-clear-btn" aria-label="Clear clip search" onClick={() => setQuery("")}><X size={13} /></button> : null}</label>
+      <label className="library-search">
+        <Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter this page by title or creator" />
+        {query ? <button type="button" className="search-clear-btn" aria-label="Clear clip search" onClick={() => setQuery("")}><X size={13} /></button> : null}
+      </label>
     </div>
-    {selectedNames.length ? <div className="selection-bar"><strong>{count(selectedNames.length)} selected</strong><Button size="small" onClick={() => openBulkPublishing(selectedNames)} disabled={published}><Send size={14} />Publish selected</Button><Button size="small" kind="danger" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete</Button><Button size="small" kind="quiet" onClick={() => setSelectedNames([])}>Clear</Button></div> : null}
+    {selectedNames.length ? <div className="selection-bar">
+      <strong>{count(selectedNames.length)} selected</strong>
+      <Button size="small" onClick={() => openBulkPublishing(selectedNames)} disabled={published}><Send size={14} />Publish selected</Button>
+      <Button size="small" kind="danger" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete</Button>
+      <Button size="small" kind="quiet" onClick={() => setSelectedNames([])}>Clear</Button>
+    </div> : null}
     <div className={"clip-library-layout" + (selectedClip ? " has-inspector" : "")}>
       <section className="clip-list-panel">
-        <div className="clip-list-head"><label><input type="checkbox" checked={filtered.length > 0 && selectedNames.length === filtered.length} onChange={toggleAll} /><span>{filtered.length ? "Select this page" : "Clips"}</span></label><span>{count(total)} total</span><button className="text-button danger-text" onClick={() => setConfirm("all")} disabled={!total}>Delete all</button></div>
+        <div className="clip-list-head">
+          <label><input type="checkbox" checked={filtered.length > 0 && selectedNames.length === filtered.length} onChange={toggleAll} /><span>{filtered.length ? "Select this page" : "Clips"}</span></label>
+          <span>{count(total)} total</span>
+          <button className="text-button danger-text" onClick={() => setConfirm("all")} disabled={!total}>Delete all</button>
+        </div>
         {filtered.length ? <div className="clip-list">{filtered.map((clip) => <div className={"clip-row" + (selectedClip?.name === clip.name ? " selected" : "")} key={clip.name}>
           <input className="clip-checkbox" type="checkbox" aria-label={"Select " + (clip.title || clip.name)} checked={selectedNames.includes(clip.name)} onChange={() => toggleOne(clip.name)} />
           <button className="clip-thumb" onClick={() => setSelectedClip(clip)} aria-label={"Preview " + (clip.title || clip.name)}>
             <video src={clipUrl(clip.name)} muted playsInline preload="metadata" onLoadedMetadata={(event) => { try { event.currentTarget.currentTime = 0.35; } catch { /* This file may not seek on metadata load. */ } }} />
             <span className="thumb-play"><Play size={15} fill="currentColor" /></span>
           </button>
-          <button className="clip-main-copy" onClick={() => setSelectedClip(clip)}><strong>{clip.title || clip.name}</strong><span>{clip.creator_name || clip.source || "Generated clip"}</span><small>{dateLabel(clip.mtime)} · {sizeLabel(clip.size_mb)}</small></button>
-          <button className="icon-button clip-row-open" aria-label={"Open " + clip.name} onClick={() => setSelectedClip(clip)}><ArrowUpRight size={16} /></button>
-        </div>)}</div> : <EmptyState icon={published ? BadgeCheck : Clapperboard} title={query ? "No matching clips" : published ? "Nothing published yet" : "Your clip library is empty"} description={query ? "Try another title, file name, or creator." : "Clips appear here after a source has been processed and a highlight rendered."} action={query ? <Button onClick={() => setQuery("")}>Clear search</Button> : undefined} />}
-        <div className="pagination-row"><span>Page {currentPage} of {maxPages}</span><div><Button size="small" disabled={workspace.clipOffset <= 0} onClick={() => workspace.setClipOffset(Math.max(0, workspace.clipOffset - pageSize))}><ChevronLeft size={15} />Previous</Button><Button size="small" disabled={workspace.clipOffset + pageSize >= total} onClick={() => workspace.setClipOffset(workspace.clipOffset + pageSize)}>Next<ChevronRight size={15} /></Button></div></div>
+          <button className="clip-main-copy" onClick={() => setSelectedClip(clip)}>
+            <strong>{clip.title || clip.name}</strong>
+            <span>{clip.creator_name || clip.source || "Generated clip"}</span>
+            <small>{dateLabel(clip.mtime)} · {sizeLabel(clip.size_mb)}{clip.posted ? " · Posted" : clip.scheduled ? " · Scheduled" : ""}</small>
+          </button>
+          {published
+            ? <button className="icon-button clip-row-open" aria-label={"Open " + clip.name} onClick={() => setSelectedClip(clip)}><ArrowUpRight size={16} /></button>
+            : <button
+                className="button button-primary button-small clip-row-publish"
+                type="button"
+                onClick={() => void publishClip(clip)}
+                disabled={postingBlocked || clip.posted || clip.scheduled}
+                aria-label={"Post " + (clip.title || clip.name) + " via Zernio"}
+              ><Send size={13} />{busy === "publish-" + clip.name ? "Sending…" : "Post"}</button>}
+        </div>)}</div> : <EmptyState
+          icon={published ? BadgeCheck : Clapperboard}
+          title={query ? "No matching clips" : published ? "Nothing scheduled yet" : "Your clip library is empty"}
+          description={query
+            ? "Try another title, file name, or creator."
+            : published
+              ? "Scheduled posts and completed Zernio posts will appear here after the provider confirms them."
+              : "Clips appear here after a source has been processed and a highlight rendered."}
+          action={query ? <Button onClick={() => setQuery("")}>Clear search</Button> : undefined}
+        />}
+        <div className="pagination-row">
+          <span>Page {currentPage} of {maxPages}</span>
+          <div>
+            <Button size="small" disabled={workspace.clipOffset <= 0} onClick={() => workspace.setClipOffset(Math.max(0, workspace.clipOffset - pageSize))}><ChevronLeft size={15} />Previous</Button>
+            <Button size="small" disabled={workspace.clipOffset + pageSize >= total} onClick={() => workspace.setClipOffset(workspace.clipOffset + pageSize)}>Next<ChevronRight size={15} /></Button>
+          </div>
+        </div>
       </section>
       {selectedClip ? <aside className="clip-inspector">
         <div className="inspector-head"><strong>Clip details</strong><button className="icon-button" aria-label="Close clip details" onClick={() => setSelectedClip(null)}><X size={16} /></button></div>
@@ -968,12 +1039,28 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
         <div className="inspector-file"><strong>{selectedClip.name}</strong><span>{sizeLabel(selectedClip.size_mb)}</span></div>
         <Field label="Post title"><input maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Add a title" /></Field>
         <Field label="Post description"><textarea rows={5} maxLength={2200} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Write a description" /></Field>
-        <div className="inspector-actions"><Button kind="primary" onClick={() => void saveMetadata()} disabled={!title.trim() || !!busy}><Check size={15} />Save details</Button><Button onClick={() => openForPublishing(selectedClip)} disabled={published}><Send size={15} />Publish</Button></div>
-        <div className="inspector-subactions"><a href={clipUrl(selectedClip.name)} download><Download size={14} />Download clip</a><button type="button" onClick={() => { const text = [title.trim(), description.trim()].filter(Boolean).join("\n\n"); if (!text) return; void navigator.clipboard?.writeText(text).then(() => window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "success", title: "Copied post copy" } }))); }}><Copy size={14} />Copy post copy</button><button onClick={() => void post("reveal-clip", "/api/reveal", { name: selectedClip.name })}><FolderOpen size={14} />Show in folder</button></div>
+        <div className="inspector-actions">
+          <Button kind="primary" onClick={() => void saveMetadata()} disabled={!title.trim() || !!busy}><Check size={15} />Save details</Button>
+          {!published ? <Button onClick={() => void publishClip(selectedClip, title, description)} disabled={postingBlocked || selectedClip.posted || selectedClip.scheduled}><Send size={15} />Publish via Zernio</Button> : null}
+        </div>
+        <div className="inspector-subactions">
+          <a href={clipUrl(selectedClip.name)} download><Download size={14} />Download clip</a>
+          <button type="button" onClick={() => { const text = [title.trim(), description.trim()].filter(Boolean).join("\n\n"); if (!text) return; void navigator.clipboard?.writeText(text).then(() => window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "success", title: "Copied post copy" } }))); }}><Copy size={14} />Copy post copy</button>
+          <button onClick={() => void post("reveal-clip", "/api/reveal", { name: selectedClip.name })}><FolderOpen size={14} />Show in folder</button>
+        </div>
         <Button kind="danger" size="small" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete clip</Button>
       </aside> : null}
     </div>
-    {confirm ? <div className="inline-confirm"><span>{confirm === "all" ? "Permanently delete all " + count(total) + " clips in this tab?" : "Permanently delete the selected clip(s) and their caption files?"}</span><Button kind="danger" size="small" onClick={() => void deleteNow()}>Confirm delete</Button><Button size="small" onClick={() => setConfirm(null)}>Cancel</Button></div> : null}
+    {confirmAutoSchedule && !published ? <div className="inline-confirm" role="alert">
+      <span>Schedule all {count(workspace.state.clip_total)} ready clips through the enabled Zernio accounts? The default spacing is 5 minutes when no interval is configured. Clips move here only after Zernio confirms acceptance.</span>
+      <Button kind="primary" size="small" onClick={() => void autoSchedule()} disabled={postingBlocked}>Schedule all</Button>
+      <Button size="small" onClick={() => setConfirmAutoSchedule(false)}>Cancel</Button>
+    </div> : null}
+    {confirm ? <div className="inline-confirm" role="alert">
+      <span>{confirm === "all" ? "Permanently delete all " + count(total) + " clips in this tab?" : "Permanently delete the selected clip(s) and their caption files?"}</span>
+      <Button kind="danger" size="small" onClick={() => void deleteNow()}>Confirm delete</Button>
+      <Button size="small" onClick={() => setConfirm(null)}>Cancel</Button>
+    </div> : null}
   </div>;
 }
 
@@ -1009,14 +1096,14 @@ function PublishingPage({ workspace, clip, bulkNames, busy, post, openLibrary }:
     else if (clip) await post("publish-one", "/api/publishing/publish-one", { name: clip.name, title, description, account_refs: accountRefs });
   };
   return <div className="page-stack">
-    <PageHeading title="Publishing" description="Connect social accounts and publish through Zernio." actions={<Button onClick={() => void workspace.refreshPublishing()}><RefreshCw size={15} />Refresh status</Button>} />
+    <PageHeading title="Publisher" description="Manage five Zernio connections and choose where your clips are published." actions={<Button onClick={() => void workspace.refreshPublishing()}><RefreshCw size={15} />Refresh status</Button>} />
     <div className="publishing-layout">
       <div className="publishing-main">
         <MultiZernioConnections workspace={workspace} />
-        <Panel title="Publishing defaults" description="These options apply to Zernio jobs.">
-          <div className="settings-grid"><Field label="YouTube visibility"><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></Field><Field label="Queue interval (minutes)" hint="Optional delay between scheduled clips. Set 0 to publish immediately; Zernio controls account and workspace limits."><input type="number" min="0" step="1" value={schedule} onChange={(event) => setSchedule(event.target.value)} onBlur={() => setSchedule(String(Math.round(Math.max(0, Number(schedule) || 0))))} /></Field></div>
+        <Panel title="Publisher defaults" description="These options apply to Zernio jobs.">
+          <div className="settings-grid"><Field label="YouTube visibility"><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></Field><Field label="Queue interval (minutes)" hint="Auto schedule spaces clips by this interval. When set to 0, Auto schedule uses 5 minutes; per-video Publish sends immediately. Zernio controls account and workspace limits."><input type="number" min="0" step="1" value={schedule} onChange={(event) => setSchedule(event.target.value)} onBlur={() => setSchedule(String(Math.round(Math.max(0, Number(schedule) || 0))))} /></Field></div>
           <Toggle checked={autoPost} onChange={setAutoPost} label="Automatically submit finished clips" description="When enabled and configured, the local publisher submits completed clips to selected accounts." />
-          <div className="form-actions"><Button kind="primary" onClick={() => void saveSettings()} disabled={!!busy}><Check size={15} />Save publishing defaults</Button></div>
+          <div className="form-actions"><Button kind="primary" onClick={() => void saveSettings()} disabled={!!busy}><Check size={15} />Save Publisher defaults</Button></div>
         </Panel>
       </div>
       <aside className="publishing-aside">
@@ -1324,7 +1411,7 @@ function HelpPage({ navigate }: { navigate: (page: PageId) => void }) {
         <li><strong>Choose transcription.</strong> Faster-Whisper runs locally. Select a model and language (Auto detects); the speech model may download the first time.</li>
         <li><strong>Set framing and captions.</strong> Load a still frame in Facecam detection and layout. Drag the pink facecam box and cyan game-capture box independently, then save both regions. In Captions, choose one of four location presets or switch to Custom caption and review the placement preview.</li>
         <li><strong>Start processing.</strong> Confirm the source and settings, then explicitly press Start. Watch progress in Studio and Activity.</li>
-        <li><strong>Review and publish.</strong> Open Clip library, edit the TXT-backed title/description, then use Publishing to send through Zernio.</li>
+        <li><strong>Review and publish.</strong> Open Clip library, edit the TXT-backed title/description, then use Publisher to manage Zernio destinations.</li>
       </ol>
       <Button kind="primary" onClick={() => navigate("live")}>Open Live Studio setup <ArrowRight size={14} /></Button>
     </Panel>
@@ -1334,8 +1421,8 @@ function HelpPage({ navigate }: { navigate: (page: PageId) => void }) {
       <Panel title="Selected Gemini model & automatic fallback" description="Your selected model is always tried first. Temporary failures are retried, then the engine moves to the next available model."><p>The exact Gemini model selected in AI settings gets up to three attempts first. If it keeps failing, StreamSnip moves to the next available Gemini model and tries that model up to three times. It makes one ordered pass through available Gemini models, then uses configured fallback providers (local Ollama first, followed by configured Hugging Face or custom API). A fallback is announced in Activity and does not overwrite your selection: your chosen Gemini model is tried first again on the next clip/task.</p><p>For the best fallback coverage, install Ollama and download a model, or configure another provider in AI settings.</p></Panel>
       <Panel title="Creators & multi-monitor" description="Save channels and run independent monitor jobs."><p>Add a Twitch or YouTube channel in Creators. Each creator has isolated live/VOD folders and status. Start or stop each monitor individually; stop all before closing the app. Removing a profile does not delete its existing media.</p><Button onClick={() => navigate("creators")}>Manage creators</Button></Panel>
       <Panel title="Transcription & captions" description="Speech recognition and visual subtitle rendering."><p>Faster-Whisper uses your PC and compatible NVIDIA GPU acceleration. Larger models can improve recognition but use more VRAM and time. Facecam (pink) and game capture (cyan) are independent source-frame regions in Live Studio. Caption placement offers Top, Upper third, Lower third, and Bottom presets; Custom caption exposes manual size, color, stroke, alignment, and nudge controls.</p><Button onClick={() => navigate("live")}>Configure framing and captions</Button></Panel>
-      <Panel title="Clip library & metadata" description="Find, edit, and organize generated clips."><p>Clips include a video and matching text metadata. Gemini, Ollama, Hugging Face, and compatible custom models generate both title and description from the clip transcript. Built-in Hook words mode uses its strongest matched phrase as the title and a conservative transcript-based description. Search the library, preview, edit title/description, open the containing folder, or download. The Published view records successful Zernio publishing jobs.</p><Button onClick={() => navigate("clips")}>Open clip library</Button></Panel>
-      <Panel title="Publishing" description="Zernio scheduling and publishing."><p>Save your Zernio key, load connected accounts, select accounts, and save defaults. Queueing sends the selected clip through Zernio.</p><Button onClick={() => navigate("publishing")}>Publishing settings</Button></Panel>
+      <Panel title="Clip library & metadata" description="Find, edit, and organize generated clips."><p>Clips include a video and matching text metadata. Gemini, Ollama, Hugging Face, and compatible custom models generate both title and description from the clip transcript. Built-in Hook words mode uses its strongest matched phrase as the title and a conservative transcript-based description. Search the library, preview, edit title/description, open the containing folder, or download. The Scheduled view records Zernio-confirmed scheduled posts and completed posts.</p><Button onClick={() => navigate("clips")}>Open clip library</Button></Panel>
+      <Panel title="Publisher" description="Zernio scheduling and publishing."><p>Configure up to five Zernio connections, discover accounts, enable posting destinations, and save scheduling defaults.</p><Button onClick={() => navigate("publishing")}>Publisher settings</Button></Panel>
       <Panel title="Settings & component checks" description="Storage, app updates, and runtime versions."><p>Settings controls output/recording folders and appearance. Check app update queries the latest GitHub release. Check components reads installed FFmpeg, Python package versions and the selected Whisper model cache; it is read-only and does not install anything. Update components changes packages and may download the speech model—review the confirmation first.</p><Button onClick={() => navigate("settings")}>Open Settings</Button></Panel>
       <Panel title="Troubleshooting" description="Common issues and where to look."><p><strong>Source won’t open:</strong> verify the URL, stream is live/public, and Streamlink/FFmpeg are available. <strong>AI test fails:</strong> check API key, model availability, quota, and network; review Activity. <strong>Clips are missing:</strong> check output folder and Activity errors. <strong>Slow processing:</strong> use a smaller Whisper model, reduce parallel workload, and check GPU/VRAM. <strong>Disk full:</strong> move output/recording folders in Settings.</p><Button onClick={() => navigate("activity")}>Open Activity log</Button></Panel>
     </div>

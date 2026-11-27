@@ -431,7 +431,7 @@ html[data-theme="odysseas"] .sidebar-engine small, html[data-theme="odysseas"] .
 .clip-list-head label { display: flex; align-items: center; gap: 7px; flex: 1; }
 input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); }
 .clip-list { display: grid; }
-.clip-row { display: grid; grid-template-columns: 16px 116px minmax(0, 1fr) 30px; align-items: center; gap: 11px; min-height: 91px; padding: 10px 13px; border-bottom: 1px solid var(--line); transition: background-color 140ms var(--ease-out); }
+.clip-row { display: grid; grid-template-columns: 16px 116px minmax(0, 1fr) auto; align-items: center; gap: 11px; min-height: 91px; padding: 10px 13px; border-bottom: 1px solid var(--line); transition: background-color 140ms var(--ease-out); }
 .clip-row:hover:not(.selected) { background: var(--surface-soft); }
 .clip-row:last-child { border-bottom: 0; }
 .clip-row.selected { background: var(--accent-soft); }
@@ -445,6 +445,8 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
 .clip-main-copy span { overflow: hidden; max-width: 100%; color: var(--body); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .clip-main-copy small { color: var(--muted); font-size: 9px; }
 .clip-row-open { width: 30px; height: 30px; }
+.clip-row-publish { min-width: 76px; justify-content: center; white-space: nowrap; }
+.library-heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .clip-inspector { position: sticky; top: 16px; display: grid; min-width: 0; gap: 12px; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow-soft); }
 .inspector-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .inspector-head strong { font-size: 12px; }
@@ -638,7 +640,8 @@ input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent);
   .library-tabs { overflow: auto; }
   .library-tabs button { white-space: nowrap; }
   .library-search { width: 100%; }
-  .clip-row { grid-template-columns: 16px 90px minmax(0,1fr) 26px; gap: 8px; padding: 9px; }
+  .clip-row { grid-template-columns: 16px 90px minmax(0,1fr) auto; gap: 8px; padding: 9px; }
+  .clip-row-publish { min-width: 66px; padding-inline: 7px; font-size: 10px; }
   .clip-thumb { width: 90px; }
   .clip-main-copy strong { font-size: 10px; }
   .clip-main-copy span, .clip-main-copy small { font-size: 9px; }

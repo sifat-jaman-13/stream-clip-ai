@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, Camera, CheckCircle2, CirclePlay, Plus, RefreshCw, ShieldCheck, Trash2, Users } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, CirclePlay, RefreshCw, ShieldCheck, Trash2, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { PublishingAccount, PublishingConnection, Workspace } from "../../workspace";
 import "./MultiZernioConnections.css";
@@ -13,16 +13,22 @@ const platformDetails: Record<string, { label: string; icon: LucideIcon }> = {
 };
 
 function createDrafts(connections: PublishingConnection[] = []): ConnectionDraft[] {
-  return connections.map((connection, index) => ({
-    id: connection.id || `zernio-connection-${index + 1}`,
-    label: connection.label || `Zernio API connection ${index + 1}`,
-    apiKey: "",
-    saved: Boolean(connection.api_key_set),
-  }));
-}
-function createConnectionDraft(index: number): ConnectionDraft {
-  const id = `zernio-${window.crypto.randomUUID()}`;
-  return { id, label: `Zernio API connection ${index + 1}`, apiKey: "", saved: false };
+  const savedIds = new Set(connections.map((connection) => connection.id));
+  return Array.from({ length: 5 }, (_, index) => {
+    const connection = connections[index];
+    if (connection) {
+      return {
+        id: connection.id || ("zernio-connection-" + (index + 1)),
+        label: connection.label || ("Zernio connection " + (index + 1)),
+        apiKey: "",
+        saved: Boolean(connection.api_key_set),
+      };
+    }
+    let id = "streamsnip-zernio-slot-" + (index + 1);
+    while (savedIds.has(id)) id += "-empty";
+    savedIds.add(id);
+    return { id, label: "Zernio connection " + (index + 1), apiKey: "", saved: false };
+  });
 }
 function accountHandle(account: PublishingAccount) {
   return account.username
@@ -36,11 +42,10 @@ function showToast(tone: "success" | "error" | "info", title: string, message?: 
 export default function MultiZernioConnections({ workspace }: { workspace: Workspace }) {
   const remoteConnections = workspace.publishing.connections ?? EMPTY_CONNECTIONS;
   const [draftOverrides, setDraftOverrides] = useState<Record<string, Partial<ConnectionDraft>>>({});
-  const [newDrafts, setNewDrafts] = useState<ConnectionDraft[]>([]);
-  const drafts = useMemo(() => [
-    ...createDrafts(remoteConnections).map((draft) => ({ ...draft, ...draftOverrides[draft.id] })),
-    ...newDrafts.map((draft) => ({ ...draft, ...draftOverrides[draft.id] })),
-  ], [remoteConnections, draftOverrides, newDrafts]);
+  const drafts = useMemo(
+    () => createDrafts(remoteConnections).map((draft) => ({ ...draft, ...draftOverrides[draft.id] })),
+    [remoteConnections, draftOverrides],
+  );
   const refreshPublishing = workspace.refreshPublishing;
 
   useEffect(() => {
@@ -71,18 +76,10 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
   ).length;
 
   const updateDraft = (id: string, patch: Partial<ConnectionDraft>) => {
-    if (newDrafts.some((item) => item.id === id)) {
-      setNewDrafts((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
-      return;
-    }
     setDraftOverrides((current) => ({
       ...current,
       [id]: { ...current[id], ...patch },
     }));
-  };
-
-  const addConnection = () => {
-    setNewDrafts((items) => items.concat(createConnectionDraft(remoteConnections.length + items.length + 1)));
   };
 
   const saveConnections = async () => {
@@ -102,7 +99,6 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
         schedule_minutes: Number(workspace.publishing.schedule_minutes || 0),
         visibility: workspace.publishing.visibility || "public",
       });
-      setNewDrafts([]);
       setDraftOverrides({});
       showToast("success", "Zernio connections saved", "API keys were checked and every supported account returned by Zernio was discovered.");
     } catch (error) {
@@ -131,28 +127,21 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
   };
 
   const removeConnection = (item: ConnectionDraft) => {
-    const isRemote = remoteConnections.some((connection) => connection.id === item.id);
-    if (item.saved && !window.confirm(`Remove ${item.label}? Its API key and discovered accounts will be removed from StreamSnip AI.`)) return;
-    if (isRemote) {
-      updateDraft(item.id, { apiKey: "", saved: false });
-    } else {
-      setNewDrafts((items) => items.filter((draft) => draft.id !== item.id));
-    }
+    if (!item.saved && !item.apiKey) return;
+    if (!window.confirm(`Disconnect ${item.label}? Its API key and discovered accounts will be removed from StreamSnip AI.`)) return;
+    updateDraft(item.id, { apiKey: "", saved: false });
   };
 
   return (
     <section className="zernio-multi panel">
       <div className="panel-heading">
         <div>
-          <h2>Zernio API connections</h2>
-          <p>Add the Zernio API keys you use. StreamSnip discovers every supported Facebook, Instagram and YouTube account returned by Zernio.</p>
+          <h2>Five Zernio connections</h2>
+          <p>Each slot works the same way: save its API key, discover its connected accounts, then choose which destinations can receive clips.</p>
         </div>
         <div className="zernio-connection-actions">
           <button className="button button-secondary button-small" type="button" onClick={() => void refreshAccounts()} disabled={refreshing || !remoteConnections.length}>
             <RefreshCw size={14} className={refreshing ? "zernio-spin" : ""} />{refreshing ? "Discovering…" : "Refresh accounts"}
-          </button>
-          <button className="button button-secondary button-small" type="button" onClick={addConnection}>
-            <Plus size={14} />Add API connection
           </button>
           <button className="button button-primary button-small" type="button" onClick={() => void saveConnections()} disabled={saving}>
             <ShieldCheck size={14} />{saving ? "Verifying…" : "Save & discover"}
@@ -161,7 +150,7 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
       </div>
 
       <div className="zernio-capacity-strip">
-        <span><strong>{remoteConnections.length}</strong> API connections</span>
+        <span><strong>{remoteConnections.length} / 5</strong> configured connections</span>
         <span><strong>{connectedCount}</strong> connected accounts</span>
         <span><strong>{postingCount}</strong> enabled for posting</span>
       </div>
@@ -189,7 +178,7 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
                     {isSaved && !savedConnection?.identity_verified ? <span className="zernio-identity-state is-unverified">API user unverified</span> : null}
                   </div>
                 </div>
-                <button type="button" className="zernio-remove" onClick={() => removeConnection(draft)} aria-label={`Remove ${draft.label}`}><Trash2 size={14} /></button>
+                {draft.saved || draft.apiKey ? <button type="button" className="zernio-remove" onClick={() => removeConnection(draft)} aria-label={`Disconnect ${draft.label}`}><Trash2 size={14} /></button> : null}
               </div>
 
               <label className="zernio-field">

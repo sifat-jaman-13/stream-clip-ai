@@ -254,9 +254,10 @@ class ZernioMultiPublisher:
 
     def __init__(self, log, connections, on_success=None, on_account_success=None,
                  on_account_error=None, on_account_resume=None, enabled=True,
-                 visibility="public", schedule_minutes=0, idempotency_path=None):
+                 visibility="public", schedule_minutes=0, idempotency_path=None, on_scheduled=None):
         self.log = log
         self.on_success = on_success
+        self.on_scheduled = on_scheduled
         self.on_account_success = on_account_success
         self.on_account_error = on_account_error
         self.on_account_resume = on_account_resume
@@ -472,15 +473,18 @@ class ZernioMultiPublisher:
             f"Zernio multi-account result: {len(successes)} succeeded, "
             f"{len(failures)} failed."
         )
-        if successes and not schedule_minutes and callable(self.on_success):
-            try:
-                destinations = sorted({
-                    f"{item.get('platform')}:{item.get('id')}"
-                    for item in successes if item.get("platform") and item.get("id")
-                })
-                self.on_success(Path(path), destinations)
-            except Exception as callback_error:
-                self.log(f"Could not update the local published registry: {callback_error}")
+        if successes:
+            destinations = sorted({
+                f"{item.get('platform')}:{item.get('id')}"
+                for item in successes if item.get("platform") and item.get("id")
+            })
+            callback = self.on_scheduled if schedule_minutes else self.on_success
+            if callable(callback):
+                try:
+                    callback(Path(path), destinations)
+                except Exception as callback_error:
+                    label = "scheduled" if schedule_minutes else "published"
+                    self.log(f"Could not update the local {label} registry: {callback_error}")
         if failures and not successes and not workspace_throttled:
             details = "; ".join(
                 f"{item.get('platform')} {item.get('username') or item.get('id')}: {error}"

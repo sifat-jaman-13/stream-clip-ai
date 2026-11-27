@@ -23,12 +23,14 @@ public sealed partial class MainPage
     private Button? _activityProblemsButton;
     private TextBlock? _activityVisibleCount;
     private StackPanel? _activityRowsHost;
-    private PasswordBox? _zernioKey;
     private TextBlock? _publishingStatusText;
     private readonly Dictionary<string, CheckBox> _accountChecks = new(StringComparer.OrdinalIgnoreCase);
-    private List<JsonObject> _publishingAccounts = [];
+    private readonly Dictionary<string, PasswordBox> _zernioKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, StackPanel> _zernioAccountPanels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TextBlock> _zernioSlotStatuses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _publishingSlotIds = [];
+    private readonly Dictionary<string, string> _publishingSlotLabels = new(StringComparer.OrdinalIgnoreCase);
     private JsonObject _publishingStatus = new();
-    private readonly Dictionary<string, string> _savedPublishingAccounts = new(StringComparer.OrdinalIgnoreCase);
     private bool _publishingOptionsDirty;
     private bool _publishingAccountsDirty;
     private bool _applyingPublishingStatus;
@@ -195,88 +197,164 @@ public sealed partial class MainPage
 
     private async void RenderPublishingPage()
     {
-        AddPageHeading("Publishing", "Connect social accounts and queue clips through your configured Zernio account.");
+        AddPageHeading("Publisher", "Connect up to five Zernio API keys and choose the social accounts that can receive your clips.");
 
-        var connection = new StackPanel { Spacing = 10 };
         _publishingStatus = new JsonObject();
-        _publishingStatusText = Txt("Loading publishing connection…", 10, false, "#9CDEF2");
-        _zernioKey = new PasswordBox
+        try
         {
-            PlaceholderText = "Paste Zernio API key",
-            MinHeight = 36,
-            FontFamily = CurrentFont
-        };
-        AddLabeled(connection, "Zernio API key", _zernioKey,
-            "A saved key remains local. Leave the field empty to continue using it.");
+            _publishingStatus = await GetAsync("/api/publishing/status");
+        }
+        catch (Exception ex)
+        {
+            _publishingStatusText = Txt(ex.Message, 10, false, "#F08A83");
+        }
+
+        var zernio = GetZernioPublishingStatus();
+        var savedConnections = (zernio["connections"] as JsonArray ?? new JsonArray())
+            .Select(item => item as JsonObject)
+            .Where(item => item is not null)
+            .Cast<JsonObject>()
+            .Take(5)
+            .ToList();
+
+        _accountChecks.Clear();
+        _zernioKeys.Clear();
+        _zernioAccountPanels.Clear();
+        _zernioSlotStatuses.Clear();
+        _publishingSlotIds.Clear();
+        _publishingSlotLabels.Clear();
+        _publishingAccountsDirty = false;
+        _publishingOptionsDirty = false;
+
+        var page = new StackPanel { Spacing = 14 };
+        var defaults = new StackPanel { Spacing = 10 };
         var autoPost = new CheckBox
         {
             Content = "Automatically queue rendered clips",
-            IsChecked = false,
+            IsChecked = zernio["auto_post"]?.GetValue<bool>() ?? false,
             FontFamily = CurrentFont
         };
         _publishingAutoPost = autoPost;
         var schedule = new ComboBox { MinWidth = 180 };
         schedule.ItemsSource = new[] { "0", "5", "10", "15", "30", "60", "120", "240", "1440" };
-        schedule.SelectedItem = "0";
+        schedule.SelectedItem = zernio["schedule_minutes"]?.ToString() ?? "0";
         _publishingSchedule = schedule;
         var visibility = new ComboBox { MinWidth = 180 };
         visibility.ItemsSource = new[] { "public", "unlisted", "private" };
-        visibility.SelectedItem = "public";
+        visibility.SelectedItem = zernio["visibility"]?.ToString() ?? "public";
         _publishingVisibility = visibility;
+
         autoPost.Checked += (_, _) => { if (!_applyingPublishingStatus) _publishingOptionsDirty = true; };
         autoPost.Unchecked += (_, _) => { if (!_applyingPublishingStatus) _publishingOptionsDirty = true; };
         schedule.SelectionChanged += (_, _) => { if (!_applyingPublishingStatus) _publishingOptionsDirty = true; };
         visibility.SelectionChanged += (_, _) => { if (!_applyingPublishingStatus) _publishingOptionsDirty = true; };
-        _publishingOptionsDirty = false;
-        _publishingAccountsDirty = false;
-        _savedPublishingAccounts.Clear();
-        AddLabeled(connection, "Schedule delay (minutes)", schedule);
-        AddLabeled(connection, "Default visibility", visibility);
-        _publishingStatusText = Txt("Checking connection…", 10, false, "#9CDEF2");
-        connection.Children.Add(_publishingStatusText);
 
-        var accountsPanel = new StackPanel { Spacing = 8 };
-        _accountChecks.Clear();
-        accountsPanel.Children.Add(Txt("Connected accounts are loaded on demand.", 10, false, "#9CDEF2"));
-        connection.Children.Add(accountsPanel);
+        defaults.Children.Add(autoPost);
+        AddLabeled(defaults, "Default spacing between scheduled posts (minutes)", schedule,
+            "Auto schedule uses this interval for each next clip. A 0-minute setting defaults to 5 minutes when you use Auto schedule.");
+        AddLabeled(defaults, "Default visibility", visibility);
+        _publishingStatusText ??= Txt("Checking Zernio status…", 10, false, "#9CDEF2");
+        defaults.Children.Add(_publishingStatusText);
 
-        var actions = ActionRow(
-            CreateButton("Load accounts", async () => await LoadPublishingAccountsAsync(accountsPanel)),
-            CreateButton("Save connection", async () =>
+        var connectionCards = new StackPanel { Spacing = 10 };
+        for (var index = 0; index < 5; index++)
+        {
+            var saved = index < savedConnections.Count ? savedConnections[index] : null;
+            var id = saved?["id"]?.ToString();
+            if (string.IsNullOrWhiteSpace(id))
+                id = $"streamsnip-zernio-slot-{index + 1}";
+            var label = saved?["label"]?.ToString();
+            if (string.IsNullOrWhiteSpace(label))
+                label = $"Zernio connection {index + 1}";
+            _publishingSlotIds.Add(id);
+            _publishingSlotLabels[id] = label;
+
+            var slot = new StackPanel { Spacing = 8 };
+            var header = new Grid { ColumnSpacing = 8 };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var heading = Txt($"{index + 1}. {label}", 12, true);
+            header.Children.Add(heading);
+            var slotStatus = Txt(
+                saved?["api_key_set"]?.GetValue<bool>() == true ? "Connected" : "Not connected",
+                9, false,
+                saved?["api_key_set"]?.GetValue<bool>() == true ? "#70C9A3" : "#9CDEF2");
+            slotStatus.HorizontalAlignment = HorizontalAlignment.Right;
+            Grid.SetColumn(slotStatus, 1);
+            header.Children.Add(slotStatus);
+            slot.Children.Add(header);
+            _zernioSlotStatuses[id] = slotStatus;
+
+            var key = new PasswordBox
             {
-                try
+                PlaceholderText = saved?["api_key_set"]?.GetValue<bool>() == true
+                    ? "Leave empty to keep the saved API key, or enter a replacement"
+                    : "Paste Zernio API key",
+                MinHeight = 36,
+                FontFamily = CurrentFont
+            };
+            _zernioKeys[id] = key;
+            AddLabeled(slot, "API key", key, "The key stays on this PC and is never returned by the local API.");
+
+            var accounts = new StackPanel { Spacing = 5 };
+            _zernioAccountPanels[id] = accounts;
+            if (saved?["accounts"] is JsonArray existingAccounts)
+                RenderConnectionAccounts(id, accounts, existingAccounts);
+            else
+                accounts.Children.Add(ThemeText("Save this key to discover its connected accounts.", 9, false, "MutedTextBrush"));
+            slot.Children.Add(accounts);
+
+            slot.Children.Add(ActionRow(
+                CreateButton("Save & verify", async () => await SavePublishingConnectionsAsync(), primary: true),
+                CreateButton("Refresh accounts", async () => await LoadPublishingAccountsAsync(id, accounts))));
+            var card = new Border
+            {
+                Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+                BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(12),
+                Child = slot
+            };
+            connectionCards.Children.Add(card);
+        }
+
+        defaults.Children.Add(ActionRow(
+            CreateButton("Save all connections", async () => await SavePublishingConnectionsAsync(), primary: true),
+            CreateButton("Refresh all accounts", async () =>
+            {
+                foreach (var id in _publishingSlotIds)
                 {
-                    var body = new JsonObject
+                    var saved = FindPublishingConnection(id);
+                    if (saved?["api_key_set"]?.GetValue<bool>() == true
+                        && _zernioAccountPanels.TryGetValue(id, out var target))
                     {
-                        ["api_key"] = _zernioKey.Password,
-                        ["auto_post"] = autoPost.IsChecked == true,
-                        ["schedule_minutes"] = int.TryParse(schedule.SelectedItem?.ToString(), out var delay) ? delay : 0,
-                        ["visibility"] = visibility.SelectedItem?.ToString() ?? "public",
-                        ["account_ids"] = BuildPublishingAccountPayload()
-                    };
-                    await PostAsync("/api/publishing", body);
-                    _zernioKey.Password = "";
-                    await LoadPublishingStatusAsync();
-                    _publishingStatusText.Text = "Publishing settings saved.";
+                        await LoadPublishingAccountsAsync(id, target);
+                    }
                 }
-                catch (Exception ex) { await ShowErrorAsync("Could not save publishing settings", ex.Message); }
-            }, primary: true));
-        connection.Children.Add(actions);
-        PageHost.Children.Add(CreatePanel("Zernio connection", "Use your API key to load connected social accounts and set default publishing options.", connection));
+            })));
+        page.Children.Add(CreatePanel(
+            "Publisher defaults",
+            "These options apply across all five connection slots.",
+            defaults));
+        page.Children.Add(CreatePanel(
+            "Zernio connections",
+            "Five independent API-key slots. Every slot can load and enable the same supported social destinations.",
+            connectionCards));
 
         if (_bulkClipNames.Count > 0)
         {
             var bulkPanel = new StackPanel { Spacing = 10 };
             bulkPanel.Children.Add(Txt($"{_bulkClipNames.Count:N0} clips selected for publishing", 12, true));
-            bulkPanel.Children.Add(Txt("Each clip is queued using its saved title, description and caption metadata. The selected Zernio accounts receive the batch.", 10, false, "#9CDEF2"));
+            bulkPanel.Children.Add(Txt("Each clip uses its saved title, description and caption metadata. All selected Zernio account destinations receive the batch.", 10, false, "#9CDEF2"));
             var selectedList = new StackPanel { Spacing = 4 };
             foreach (var name in _bulkClipNames.Take(12))
                 selectedList.Children.Add(Txt(name, 9, false, "#9CDEF2"));
             if (_bulkClipNames.Count > 12)
-                selectedList.Children.Add(Txt($"and {_bulkClipNames.Count - 12:N0} moreâ€¦", 9, false, "#9CDEF2"));
+                selectedList.Children.Add(Txt($"and {_bulkClipNames.Count - 12:N0} more…", 9, false, "#9CDEF2"));
             bulkPanel.Children.Add(selectedList);
             bulkPanel.Children.Add(ActionRow(
-                CreateButton("Queue selected clips", async () =>
+                CreateButton("Publish selected clips", async () =>
                 {
                     try
                     {
@@ -287,16 +365,16 @@ public sealed partial class MainPage
                             ["names"] = names,
                             ["account_ids"] = BuildSelectedAccountMap()
                         });
-                        await DialogResultAsync("Batch queued", result.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                        await DialogResultAsync("Publishing started", result.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
                         _bulkClipNames.Clear();
                         _selectedClipNames.Clear();
                         await RefreshStateAsync(forceRender: false);
                     }
-                    catch (Exception ex) { await ShowErrorAsync("Could not queue selected clips", ex.Message); }
+                    catch (Exception ex) { await ShowErrorAsync("Could not publish selected clips", ex.Message); }
                 }, primary: true),
                 CreateButton("Back to clip library", () => NavigateTo("clips"))));
             _bulkPublishingPanel = bulkPanel;
-            PageHost.Children.Add(CreatePanel("Publish selected clips", "Queue a batch using the same accounts and each clip's saved post copy.", bulkPanel));
+            page.Children.Add(CreatePanel("Publish selected clips", "Send the selected batch to the enabled Zernio destinations.", bulkPanel));
         }
         else if (_selectedClip is not null)
         {
@@ -309,7 +387,7 @@ public sealed partial class MainPage
             var description = Input(_selectedClip.Description, "Post description", multiline: true);
             AddLabeled(publishPanel, "Post title", title);
             AddLabeled(publishPanel, "Post description", description);
-            publishPanel.Children.Add(CreateButton("Queue selected clip", async () =>
+            publishPanel.Children.Add(CreateButton("Post via Zernio", async () =>
             {
                 try
                 {
@@ -320,29 +398,42 @@ public sealed partial class MainPage
                         ["description"] = description.Text.Trim(),
                         ["account_ids"] = BuildSelectedAccountMap()
                     });
-                    await DialogResultAsync("Clip queued", result.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    await DialogResultAsync("Publishing started", result.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
                     _selectedClip = null;
                     await RefreshStateAsync(forceRender: false);
                 }
-                catch (Exception ex) { await ShowErrorAsync("Could not queue clip", ex.Message); }
+                catch (Exception ex) { await ShowErrorAsync("Could not publish clip", ex.Message); }
             }, primary: true));
-            PageHost.Children.Add(CreatePanel("Publish clip", "The final per-platform result is reported by the engine in Activity.", publishPanel));
+            page.Children.Add(CreatePanel("Publish clip", "The engine reports the per-account provider result in Activity.", publishPanel));
         }
-        _ = LoadPublishingStatusAsync();
+
+        PageHost.Children.Add(page);
+        await LoadPublishingStatusAsync();
     }
 
+    private JsonObject GetZernioPublishingStatus()
+    {
+        var providers = _publishingStatus["providers"] as JsonObject;
+        return providers?["zernio"] as JsonObject ?? _publishingStatus;
+    }
 
+    private JsonObject? FindPublishingConnection(string connectionId)
+    {
+        var connections = GetZernioPublishingStatus()["connections"] as JsonArray;
+        return connections?
+            .Select(item => item as JsonObject)
+            .FirstOrDefault(item => string.Equals(item?["id"]?.ToString(), connectionId, StringComparison.OrdinalIgnoreCase));
+    }
 
     private async Task LoadPublishingStatusAsync()
     {
         if (_engine is null) return;
         try
         {
-            var result = await GetAsync("/api/publishing/status");
-            _publishingStatus = result;
-            var providers = result["providers"] as JsonObject;
-            var zernio = providers?["zernio"] as JsonObject ?? result;
-            var configured = zernio["api_key_set"]?.GetValue<bool>() ?? zernio["configured"]?.GetValue<bool>() ?? false;
+            _publishingStatus = await GetAsync("/api/publishing/status");
+            var zernio = GetZernioPublishingStatus();
+            var configured = zernio["api_key_set"]?.GetValue<bool>()
+                ?? zernio["configured"]?.GetValue<bool>() ?? false;
             _applyingPublishingStatus = true;
             try
             {
@@ -351,36 +442,39 @@ public sealed partial class MainPage
                     if (_publishingAutoPost is not null)
                         _publishingAutoPost.IsChecked = zernio["auto_post"]?.GetValue<bool>() ?? false;
                     if (_publishingSchedule is not null)
-                    {
-                        var delay = zernio["schedule_minutes"]?.ToString() ?? "0";
-                        _publishingSchedule.SelectedItem = delay;
-                    }
+                        _publishingSchedule.SelectedItem = zernio["schedule_minutes"]?.ToString() ?? "0";
                     if (_publishingVisibility is not null)
                         _publishingVisibility.SelectedItem = zernio["visibility"]?.ToString() ?? "public";
                 }
-                if (zernio["accounts"] is JsonObject accounts)
+
+                foreach (var id in _publishingSlotIds)
                 {
-                    _savedPublishingAccounts.Clear();
-                    foreach (var pair in accounts)
-                        if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value?.ToString()))
-                            _savedPublishingAccounts[pair.Key] = pair.Value!.ToString();
-                    if (!_publishingAccountsDirty)
+                    var connection = FindPublishingConnection(id);
+                    if (_zernioSlotStatuses.TryGetValue(id, out var status))
                     {
-                        foreach (var (platform, check) in _accountChecks)
-                        {
-                            var savedId = _savedPublishingAccounts.GetValueOrDefault(platform);
-                            var selection = check.Tag as AccountSelection;
-                            check.IsChecked = selection is not null && !string.IsNullOrWhiteSpace(savedId)
-                                && string.Equals(savedId, selection.Id, StringComparison.Ordinal);
-                        }
+                        var isConnected = connection?["api_key_set"]?.GetValue<bool>() == true;
+                        status.Text = isConnected ? "Connected" : "Not connected";
+                        status.Foreground = Application.Current.Resources[
+                            isConnected ? "SuccessBrush" : "MutedTextBrush"] as Brush;
+                    }
+                    if (!_publishingAccountsDirty
+                        && _zernioAccountPanels.TryGetValue(id, out var target))
+                    {
+                        RenderConnectionAccounts(id, target, connection?["accounts"] as JsonArray ?? new JsonArray());
                     }
                 }
             }
             finally { _applyingPublishingStatus = false; }
+
             if (_publishingStatusText is not null)
-                _publishingStatusText.Text = configured
-                    ? "Zernio key saved · credentials stay on this PC."
-                    : "Not configured · add a Zernio API key to load accounts.";
+            {
+                var savedCount = (zernio["connections"] as JsonArray)?.Count ?? 0;
+                _publishingStatusText.Text = savedCount > 0
+                    ? $"{savedCount}/5 Zernio connection(s) saved · credentials stay on this PC."
+                    : configured
+                        ? "A Zernio key is configured."
+                        : "No Zernio API keys connected yet.";
+            }
         }
         catch (Exception ex)
         {
@@ -388,66 +482,156 @@ public sealed partial class MainPage
         }
     }
 
-    private async Task LoadPublishingAccountsAsync(StackPanel target)
+    private void RenderConnectionAccounts(string connectionId, StackPanel target, JsonArray accounts)
+    {
+        target.Children.Clear();
+        if (accounts.Count == 0)
+        {
+            target.Children.Add(ThemeText("No connected accounts found for this key yet.", 9, false, "MutedTextBrush"));
+            return;
+        }
+
+        target.Children.Add(Txt("Enabled destinations", 10, true));
+        foreach (var node in accounts)
+        {
+            if (node is not JsonObject account) continue;
+            var id = account["id"]?.ToString() ?? "";
+            var platform = account["platform"]?.ToString() ?? "";
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(platform)) continue;
+            var name = account["name"]?.ToString() ?? platform;
+            var username = account["username"]?.ToString() ?? "";
+            var active = account["is_active"]?.GetValue<bool>() ?? true;
+            var providerEnabled = account["provider_enabled"]?.GetValue<bool>() ?? true;
+            var rateLimited = account["rate_limited"]?.GetValue<bool>() ?? false;
+            var check = new CheckBox
+            {
+                Content = string.IsNullOrWhiteSpace(username)
+                    ? $"{name} · {platform}"
+                    : $"{name}  @{username}  ·  {platform}",
+                Tag = new AccountSelection(connectionId, id, platform),
+                IsChecked = account["posting_enabled"]?.GetValue<bool>()
+                    ?? account["enabled"]?.GetValue<bool>() ?? (active && providerEnabled),
+                IsEnabled = active && providerEnabled && !rateLimited,
+                FontFamily = CurrentFont
+            };
+            check.Checked += (_, _) => { if (!_applyingPublishingStatus) _publishingAccountsDirty = true; };
+            check.Unchecked += (_, _) => { if (!_applyingPublishingStatus) _publishingAccountsDirty = true; };
+            _accountChecks[connectionId + "::" + id] = check;
+            target.Children.Add(check);
+
+            var error = account["last_error"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(error))
+                target.Children.Add(ThemeText(error, 9, false, "MutedTextBrush"));
+        }
+    }
+
+    private async Task LoadPublishingAccountsAsync(string connectionId, StackPanel target)
     {
         try
         {
-            var result = await PostAsync("/api/publishing/accounts", new JsonObject { ["provider"] = "zernio" });
-            _publishingAccounts = result["accounts"]?.AsArray()
-                .Select(x => x as JsonObject ?? new JsonObject()).ToList() ?? [];
-            target.Children.Clear();
-            if (_publishingAccounts.Count == 0)
+            if (FindPublishingConnection(connectionId)?["api_key_set"]?.GetValue<bool>() != true)
+                throw new InvalidOperationException("Save and verify this connection before loading its accounts.");
+            var result = await PostAsync("/api/publishing/accounts", new JsonObject
             {
-                target.Children.Add(Txt("No accounts were returned. Check the API key and Zernio connection.", 10, false, "#9CDEF2"));
-                return;
-            }
-            target.Children.Add(Txt("Choose the accounts to receive queued clips.", 10, false, "#9CDEF2"));
-            foreach (var account in _publishingAccounts)
-            {
-                var id = account["id"]?.ToString() ?? "";
-                var platform = account["platform"]?.ToString() ?? "";
-                var name = account["name"]?.ToString() ?? platform;
-                var username = account["username"]?.ToString() ?? "";
-                var check = new CheckBox
-                {
-                    Content = string.IsNullOrWhiteSpace(username) ? $"{name} · {platform}" : $"{name}  @{username}  ·  {platform}",
-                    Tag = new AccountSelection(id, platform),
-                    IsChecked = _savedPublishingAccounts.TryGetValue(platform, out var savedId)
-                        && string.Equals(savedId, id, StringComparison.Ordinal),
-                    FontFamily = CurrentFont
-                };
-                check.Checked += (_, _) => { if (!_applyingPublishingStatus) _publishingAccountsDirty = true; };
-                check.Unchecked += (_, _) => { if (!_applyingPublishingStatus) _publishingAccountsDirty = true; };
-                _accountChecks[platform] = check;
-                target.Children.Add(check);
-            }
+                ["provider"] = "zernio",
+                ["connection_id"] = connectionId
+            });
+            var accounts = result["accounts"] as JsonArray ?? new JsonArray();
+            var selected = new JsonArray();
+            foreach (var item in accounts)
+                if (item is JsonObject account)
+                    selected.Add(account.DeepClone());
+            RenderConnectionAccounts(connectionId, target, selected);
+            _publishingAccountsDirty = false;
+            await LoadPublishingStatusAsync();
         }
-        catch (Exception ex) { await ShowErrorAsync("Could not load accounts", ex.Message); }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not load Zernio accounts", ex.Message);
+        }
     }
 
-    private JsonObject BuildPublishingAccountPayload()
+    private async Task SavePublishingConnectionsAsync()
     {
-        if (_publishingAccountsDirty || _accountChecks.Count > 0)
-            return BuildSelectedAccountMap();
+        try
+        {
+            var connections = new JsonArray();
+            foreach (var id in _publishingSlotIds)
+            {
+                var saved = FindPublishingConnection(id);
+                var key = _zernioKeys.TryGetValue(id, out var password)
+                    ? password.Password.Trim()
+                    : "";
+                var hasSavedKey = saved?["api_key_set"]?.GetValue<bool>() == true;
+                if (string.IsNullOrWhiteSpace(key) && !hasSavedKey) continue;
 
-        var existing = new JsonObject();
-        foreach (var pair in _savedPublishingAccounts)
-            existing[pair.Key] = pair.Value;
-        return existing;
+                var connection = new JsonObject
+                {
+                    ["id"] = id,
+                    ["label"] = _publishingSlotLabels.GetValueOrDefault(id, id)
+                };
+                if (!string.IsNullOrWhiteSpace(key))
+                    connection["api_key"] = key;
+
+                var accountRows = new JsonArray();
+                foreach (var check in _accountChecks.Values)
+                {
+                    if (check.Tag is not AccountSelection selected
+                        || !string.Equals(selected.ConnectionId, id, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    accountRows.Add(new JsonObject
+                    {
+                        ["id"] = selected.Id,
+                        ["posting_enabled"] = check.IsChecked == true
+                    });
+                }
+                if (accountRows.Count > 0)
+                    connection["accounts"] = accountRows;
+                connections.Add(connection);
+            }
+
+            if (connections.Count == 0)
+                throw new InvalidOperationException("Enter at least one Zernio API key before saving.");
+
+            var result = await PostAsync("/api/publishing", new JsonObject
+            {
+                ["provider"] = "zernio",
+                ["connections"] = connections,
+                ["auto_post"] = _publishingAutoPost?.IsChecked == true,
+                ["schedule_minutes"] = int.TryParse(_publishingSchedule?.SelectedItem?.ToString(), out var delay) ? delay : 0,
+                ["visibility"] = _publishingVisibility?.SelectedItem?.ToString() ?? "public"
+            });
+
+            foreach (var key in _zernioKeys.Values) key.Password = "";
+            _publishingAccountsDirty = false;
+            _publishingOptionsDirty = false;
+            _publishingStatus = result;
+            await LoadPublishingStatusAsync();
+            if (_publishingStatusText is not null)
+                _publishingStatusText.Text = "Publisher connections and defaults saved.";
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not save Publisher settings", ex.Message);
+        }
     }
 
-    private JsonObject BuildSelectedAccountMap()
+    private JsonArray BuildSelectedAccountMap()
     {
-        var result = new JsonObject();
-        foreach (var (platform, check) in _accountChecks)
+        var result = new JsonArray();
+        foreach (var check in _accountChecks.Values)
         {
             if (check.IsChecked != true || check.Tag is not AccountSelection selection) continue;
-            result[selection.Platform] = selection.Id;
+            result.Add(new JsonObject
+            {
+                ["connection_id"] = selection.ConnectionId,
+                ["account_id"] = selection.Id
+            });
         }
         return result;
     }
 
-    private sealed record AccountSelection(string Id, string Platform);
+    private sealed record AccountSelection(string ConnectionId, string Id, string Platform);
 
     private void RenderHypeWordsPage()
     {
@@ -782,7 +966,7 @@ public sealed partial class MainPage
         brand.Children.Add(Txt("StreamSnip AI", 20, true));
         brand.Children.Add(Txt("Creator Studio  ·  Native Windows desktop interface", 10, false, "#9CDEF2"));
         brand.Children.Add(Txt("The WinUI desktop app owns the windows and native controls. The Python engine handles Streamlink capture, FFmpeg media processing, Faster-Whisper transcription, AI highlight analysis, and clip rendering.", 11));
-        brand.Children.Add(Txt("Application version 4.0.7", 10, false, "#9CDEF2"));
+        brand.Children.Add(Txt("Application version 4.0.8", 10, false, "#9CDEF2"));
         brand.Children.Add(ActionRow(
             CreateButton("GitHub source", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai")),
             CreateButton("Latest releases", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"))));

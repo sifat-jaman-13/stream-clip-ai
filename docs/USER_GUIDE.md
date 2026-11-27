@@ -38,8 +38,8 @@ Screenshots below are from the **4.0.7 native Windows Release build**.
         <img src="assets/product/clip-library.png" width="100%" alt="Clip Library with review filters and video inspector">
       </td>
       <td width="50%">
-        <p align="center"><strong>Publishing</strong></p>
-        <img src="assets/product/publishing.png" width="100%" alt="Publishing workspace with Zernio connection and destination settings">
+        <p align="center"><strong>Publisher</strong></p>
+        <img src="assets/product/publishing.png" width="100%" alt="Publisher workspace with Zernio connection and destination settings">
       </td>
     </tr>
   </table>
@@ -202,28 +202,30 @@ Use **Creators** when you want to keep multiple channels organized independently
 
 Creator monitoring, VOD folder watching, and Live Studio capture are separate controls. Starting a creator monitor does not start the current Live Studio capture. Removing a creator profile removes the monitor profile only; existing recordings and clips are kept.
 
-## Clip Library and Published
+## Clip Library and Scheduled
 
-**Clip Library** is for generated clips that are still being reviewed. Use the list filters and clip inspector to find a clip, preview it, and review its metadata.
+**Clip Library** is for generated clips that are ready for review. Use the filters and clip inspector to preview a video and correct its title and description. Every ready clip has a **Post** action that submits it through Zernio immediately.
 
-**Published** is a separate registry for confirmed publishing results. A destination is marked published only after the integration confirms success. Failed or pending posts should not be treated as published.
+**Scheduled** is the combined publishing-history view. Clips accepted by Zernio for future publishing appear with a **Scheduled** status; clips that have already been published appear with a **Posted** status. A clip leaves Clip Library only after Zernio confirms at least one destination. Failed requests are not marked as scheduled or posted.
+
+Use **Auto schedule** at the top of Clip Library to submit every ready clip to the enabled Zernio accounts. StreamSnip spaces the posts using the saved interval in Publisher. When that interval is zero, Auto schedule uses a five-minute spacing. You can review the destination result in Activity.
 
 Keep the source recording until you have reviewed and backed up the clips you need.
 
-## Publishing through Zernio
+## Publisher and Zernio
 
-Publishing is optional and requires your own Zernio connection and supported social account access.
+Publishing is optional and requires your own Zernio API access and supported social account access.
 
-1. Open **Publishing**.
-2. Connect or configure your Zernio integration.
-3. Refresh/discover the accounts returned by Zernio.
-4. Enable posting for the accounts you want to use.
-5. When preparing a post, choose the intended connected destination and review the video and post details.
-6. Submit the post and check the destination result in the app and Activity.
+1. Open **Publisher**.
+2. Enter up to five Zernio API keys in the five connection slots. Each slot has the same controls and retains its own key and discovered accounts.
+3. Select **Save & verify** or **Save all connections** to check the keys and discover connected accounts.
+4. Enable posting for the accounts you want to use. Refresh accounts after changing the connected accounts at Zernio.
+5. Return to Clip Library and use **Post** for immediate publishing or **Auto schedule** for the full ready queue.
+6. Check the destination result in the app and Activity.
 
-The current Zernio integration supports **Facebook, Instagram, and YouTube**. **TikTok is not a supported destination in the current Zernio integration.** Account availability, upload limits, API quotas, and posting errors are controlled by Zernio and the connected platforms. Multiple API keys may still belong to the same Zernio workspace and share its usage allowance.
+The current Zernio integration supports **Facebook, Instagram, and YouTube**. **TikTok is not a supported destination in the current Zernio integration.** Account availability, upload limits, API quotas, and posting errors are controlled by Zernio and the connected platforms. Multiple API keys may still belong to the same Zernio workspace and share its usage allowance; five connection slots do not create five independent quotas.
 
-StreamSnip AI records a destination as published only after confirmed success. Review every clip, title, description, and destination before submitting.
+StreamSnip AI records a destination as scheduled or published only after Zernio confirms the corresponding state. Review every clip, title, description, and destination before submitting.
 
 ## Other workspaces
 
@@ -233,9 +235,9 @@ StreamSnip AI records a destination as published only after confirmed success. R
 | Live Studio | Source, capture, AI provider, transcription, and caption setup |
 | Creators | Independent channel monitors and recorded-VOD folder watching |
 | Clip Library | Find, preview, and review rendered clips and metadata |
-| Published | Confirmed publishing records |
+| Scheduled | Zernio-confirmed scheduled posts and completed publishing history |
 | Hype words | Manage local highlight phrases used by the Hook Words scoring option |
-| Publishing | Zernio connection, account discovery, and destination controls |
+| Publisher | Five Zernio API-key slots, account discovery, and destination controls |
 | Settings | Application-wide appearance and storage options |
 | Activity | Engine and workflow event history |
 | Help & how-to | In-app quick start and troubleshooting |

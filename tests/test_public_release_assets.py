@@ -78,7 +78,7 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertIn("docs/USER_GUIDE.md", readme)
         for heading in (
             "## Install StreamSnip AI", "## First launch: make your first clip",
-            "## Creator monitoring", "## Publishing through Zernio",
+            "## Creator monitoring", "## Publisher and Zernio",
             "## Files, storage, and privacy", "## Troubleshooting",
             "## Update, repair, backup, and uninstall",
         ):
@@ -127,10 +127,10 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertIn("custom_words.txt", gitignore)
 
     def test_release_version_is_consistent(self):
-        self.assertIn('APP_VERSION = "4.0.7"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
-        self.assertIn('version = "4.0.7"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('#define MyAppVersion "4.0.7"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
-        self.assertIn('Version="4.0.7.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
+        self.assertIn('APP_VERSION = "4.0.8"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
+        self.assertIn('version = "4.0.8"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('#define MyAppVersion "4.0.8"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
+        self.assertIn('Version="4.0.8.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

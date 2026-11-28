@@ -3633,6 +3633,41 @@ class RegressionTests(unittest.TestCase):
 
 
 
+    def test_post_description_drops_quote_paragraph_made_unreadable_by_profanity_filter(self):
+        description = "What the fucking hell should we do? We are going now." + "\n\n" + (
+            "The streamer changes course after the plan becomes too risky."
+        )
+        result = autoclip.sanitize_post_description(description)
+        self.assertNotIn("****", result)
+        self.assertNotIn("fucking", result)
+        self.assertIn("The streamer changes course", result)
+
+    def test_post_description_uses_review_copy_when_every_paragraph_is_heavily_censored(self):
+        description = "That was fucking shit." + "\n\n" + "This is bullshit."
+        result = autoclip.sanitize_post_description(description)
+        self.assertEqual(
+            result,
+            "Review the clip and edit this description to keep its spoken context clear before publishing.",
+        )
+        self.assertNotIn("****", result)
+
+    def test_post_description_preserves_a_single_word_redaction(self):
+        description = "That was a shit moment and the game kept going."
+        result = autoclip.sanitize_post_description(description)
+        self.assertEqual(result, "That was a **** moment and the game kept going.")
+
+    def test_post_description_removes_quotes_already_masked_in_the_transcript(self):
+        description = (
+            "**** Right You Should **** **** **** **** We are Going **** **** Oh Wow, Lou, in You Get."
+            + "\n\n"
+            + "The speech transcript is fragmented, so the actual context cannot be confirmed."
+        )
+        result = autoclip.sanitize_post_description(description)
+        self.assertNotIn("****", result)
+        self.assertNotIn("Right You Should", result)
+        self.assertIn("The speech transcript is fragmented", result)
+
+
     def test_renderer_beeps_profanity_and_sanitizes_ai_generated_metadata(self):
         cfg = autoclip.clean_cfg({})
         engine = autoclip.Engine(cfg, lambda *_: None)
@@ -3654,9 +3689,10 @@ class RegressionTests(unittest.TestCase):
                  patch.object(autoclip, "run", side_effect=fake_run) as render_run, \
                  patch.object(autoclip, "has_nvenc", return_value=False), \
                  patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"), \
+                 patch.object(autoclip, "ffmpeg_cuda_decode_args", return_value=[]), \
                  patch.object(autoclip, "generate_social_copy", return_value={
                      "title": "This fucking worked!",
-                     "description": "That was a shit moment.",
+                     "description": "That was a fucking shit moment.",
                      "hashtags": ["#gaming", "#bullshit"],
                  }) as copy:
                 engine.render("source_recording.mp4", 10, 18, words, "filtered_clip")
@@ -3670,7 +3706,11 @@ class RegressionTests(unittest.TestCase):
             self.assertIn("between(t,0.580,1.220)", audio_filter)
 
             metadata = (output / "filtered_clip.txt").read_text(encoding="utf-8").lower()
-            self.assertIn("****", metadata)
+            metadata_lines = metadata.splitlines()
+            self.assertIn("****", metadata_lines[0])
+            public_description = "\n".join(metadata_lines[2:])
+            self.assertNotIn("****", public_description)
+            self.assertIn("review the clip and edit this description", public_description)
             self.assertNotIn("fucking", metadata)
             self.assertNotIn("bullshit", metadata)
 

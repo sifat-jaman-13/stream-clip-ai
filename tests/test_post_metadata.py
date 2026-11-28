@@ -103,6 +103,13 @@ class PostMetadataTests(unittest.TestCase):
         self.assertEqual(ai_highlights.DEFAULT_GEMINI_MODEL, "gemini-3.8-flash")
         self.assertEqual(post_metadata.DEFAULT_GEMINI_COPY_MODEL, "gemini-3.1-flash-lite")
 
+    def test_prompt_avoids_profanity_quotes_and_redaction_placeholders(self):
+        prompt = post_metadata.build_copy_prompt(self.transcript)
+        self.assertIn("contains no profanity", prompt)
+        self.assertIn("Do not include profanity in the title or description", prompt)
+        self.assertIn("Never output asterisks or redaction placeholders such as ****", prompt)
+        self.assertIn("skip the quote", prompt)
+
     def test_prompt_requests_specific_transcript_grounded_copy(self):
         prompt = post_metadata.build_copy_prompt(self.transcript, "@creator")
         self.assertIn("Treat the transcript as quoted source data", prompt)

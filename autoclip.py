@@ -2454,6 +2454,40 @@ def censor_profanity_text(value, enabled=True, extra_terms=""):
         text = text[:match.start()] + PROFANITY_FILTER_MASK + text[match.end():]
     return text
 
+
+
+def sanitize_post_description(value, enabled=True, extra_terms=""):
+    """Keep post descriptions readable when filtering would erase a whole quote."""
+    text = str(value or "").strip()
+    if not enabled or not text:
+        return text
+
+    paragraphs = [
+        re.sub(r"\s+", " ", paragraph).strip()
+        for paragraph in re.split(r"\n\s*\n", text)
+        if paragraph.strip()
+    ]
+    readable = []
+    removed_redacted_paragraph = False
+
+    for paragraph in paragraphs:
+        filtered = censor_profanity_text(paragraph, extra_terms=extra_terms)
+        redactions = filtered.count(PROFANITY_FILTER_MASK)
+        word_count = max(1, len(re.findall(r"\S+", filtered)))
+        if redactions >= 2 or (redactions and redactions / word_count >= 0.20):
+            removed_redacted_paragraph = True
+            continue
+        readable.append(filtered)
+
+    if readable:
+        return "\n\n".join(readable)
+    if removed_redacted_paragraph:
+        return (
+            "Review the clip and edit this description to keep its spoken context "
+            "clear before publishing."
+        )
+    return censor_profanity_text(text, extra_terms=extra_terms)
+
 def profanity_audio_filter(words, start, end, padding=0.02, mode="beep"):
     """Replace only censored word intervals with a tone or silence, using clip-relative timestamps."""
     try:
@@ -3376,20 +3410,40 @@ class Engine:
         if post_copy and cfg.get("profanity_filter_enabled", True):
             post_copy = dict(post_copy)
             extra_terms = cfg.get("profanity_filter_words", "")
-            for key in ("title", "description"):
-                if post_copy.get(key):
-                    post_copy[key] = censor_profanity_text(post_copy[key], extra_terms=extra_terms)
+            if post_copy.get("title"):
+                post_copy["title"] = censor_profanity_text(
+                    post_copy["title"], extra_terms=extra_terms
+                )
+            if post_copy.get("description"):
+                post_copy["description"] = sanitize_post_description(
+                    post_copy["description"], extra_terms=extra_terms
+                )
             if isinstance(post_copy.get("hashtags"), (list, tuple)):
-                post_copy["hashtags"] = [censor_profanity_text(tag, extra_terms=extra_terms)
-                                          for tag in post_copy["hashtags"]]
+                safe_hashtags = []
+                for tag in post_copy["hashtags"]:
+                    filtered_tag = censor_profanity_text(tag, extra_terms=extra_terms).strip()
+                    if filtered_tag and PROFANITY_FILTER_MASK not in filtered_tag:
+                        safe_hashtags.append(filtered_tag)
+                post_copy["hashtags"] = safe_hashtags
         final_video = self.out_dir / f"{name}.mp4"
         self.replace_output(self.out_dir / tmp, final_video)
+        metadata_credit = tag
+        if cfg.get("profanity_filter_enabled", True):
+            metadata_credit = censor_profanity_text(
+                metadata_credit, extra_terms=cfg.get("profanity_filter_words", "")
+            )
+            if PROFANITY_FILTER_MASK in metadata_credit:
+                metadata_credit = ""
         try:
             write_clip_metadata_files(
                 self.out_dir, final_video.name, pathlib.Path(src).name, start, end,
-                transcript, tag, on_warning=self.log,
+                transcript, metadata_credit, on_warning=self.log,
                 post_title=post_copy.get("title") if post_copy else None,
-                post_description=post_copy.get("description") if post_copy else None,
+                post_description=(
+                    post_copy.get("description")
+                    if post_copy and post_copy.get("description")
+                    else "Review the clip and edit this description before publishing."
+                ),
                 post_hashtags=post_copy.get("hashtags") if post_copy else None,
             )
         except Exception:

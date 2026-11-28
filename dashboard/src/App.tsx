@@ -271,20 +271,22 @@ export default function App() {
   useEffect(() => {
     const root = document.documentElement;
     const inline = root.style;
-    const tokens = ["--ink", "--body", "--muted", "--sidebar-ink", "--sidebar-body", "--sidebar-muted", "--sidebar-line", "--accent-text", "--sidebar-accent-text", "--sidebar-accent-border", "--success-text", "--warning-text", "--danger-text"];
+    const tokens = ["--ink", "--body", "--muted", "--quiet", "--sidebar-ink", "--sidebar-body", "--sidebar-muted", "--sidebar-line", "--accent-text", "--sidebar-accent-text", "--sidebar-accent-border", "--success-text", "--warning-text", "--danger-text"];
     tokens.forEach((token) => inline.removeProperty(token));
     const palette = window.getComputedStyle(root);
     const color = (token: string) => palette.getPropertyValue(token).trim();
     const surfaces = ["--app-bg", "--surface", "--surface-soft", "--surface-hover"].map(color);
     const sidebar = [color("--sidebar-bg"), color("--sidebar-surface")];
     const effectiveAccent = /^#[0-9a-f]{6}$/i.test(customAccent) ? customAccent : color("--accent");
+    const smallTextFloor = theme === "studio-light" ? 7 : 4.5;
     const corrected: Array<[string, string, string[], number]> = [
       ["--ink", color("--ink"), surfaces, 7],
       ["--body", color("--body"), surfaces, 4.5],
-      ["--muted", color("--muted"), surfaces, 4.5],
+      ["--muted", color("--muted"), surfaces, smallTextFloor],
+      ["--quiet", color("--quiet"), surfaces, smallTextFloor],
       ["--sidebar-ink", color("--sidebar-ink"), sidebar, 7],
       ["--sidebar-body", color("--sidebar-body"), sidebar, 4.5],
-      ["--sidebar-muted", color("--sidebar-muted"), sidebar, 4.5],
+      ["--sidebar-muted", color("--sidebar-muted"), sidebar, smallTextFloor],
       ["--sidebar-line", color("--sidebar-line"), sidebar, 3],
       ["--sidebar-accent-text", effectiveAccent, sidebar, 4.5],
       ["--sidebar-accent-border", effectiveAccent, sidebar, 3],

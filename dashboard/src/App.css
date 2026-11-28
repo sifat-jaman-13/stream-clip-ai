@@ -64,11 +64,11 @@
 html[data-theme="studio-light"] {
   color-scheme: light;
   --app-bg:#EDF2F7; --surface:#FFFFFF; --surface-soft:#E8EEF5; --surface-hover:#DDE6F0; --sidebar-bg:#F7F9FC;
-  --ink:#172433; --body:#3C5063; --muted:#4E6274; --quiet:#4E6274; --line:#CFD9E4; --line-strong:#B9C7D6;
+  --ink:#172433; --body:#3C5063; --muted:#364B60; --quiet:#364B60; --line:#CFD9E4; --line-strong:#B9C7D6;
   --accent:#AE352C; --accent-hover:#963027; --accent-soft:#F8E9E5; --accent-ink:#FFFFFF;
   --success:#1D6A4C; --success-soft:#E7F4EC; --warning:#805000; --warning-soft:#FFF5DD; --danger:#A53026; --danger-soft:#F8E9E7;
   --info:#235F91; --info-soft:#EAF2FA; --shadow-soft:0 1px 2px rgba(24,38,55,.05), 0 5px 18px rgba(24,38,55,.045);
-  --sidebar-ink:#111923; --sidebar-body:#344252; --sidebar-muted:#4D5D6D; --sidebar-line:#D3DCE6; --sidebar-surface:#EEF2F6;
+  --sidebar-ink:#111923; --sidebar-body:#344252; --sidebar-muted:#364B60; --sidebar-line:#D3DCE6; --sidebar-surface:#EEF2F6;
 }
 html[data-theme="studio-dark"] {
   color-scheme: dark;
@@ -1350,11 +1350,11 @@ html[data-theme="odysseus-dark"] {
 html[data-theme="studio-light"] {
   color-scheme: light;
   --app-bg:#F3F5F8; --surface:#FFFFFF; --surface-soft:#E8EDF3; --surface-hover:#DDE5EE; --sidebar-bg:#E9EEF4;
-  --ink:#172A3B; --body:#40576C; --muted:#4E657A; --quiet:#4E657A; --line:#CAD5E0; --line-strong:#B4C2CF;
+  --ink:#172A3B; --body:#40576C; --muted:#364B60; --quiet:#364B60; --line:#CAD5E0; --line-strong:#B4C2CF;
   --accent:#B42318; --accent-hover:#992018; --accent-soft:#F8E9E6; --accent-ink:#FFFFFF;
   --success:#176747; --success-soft:#E5F2EB; --warning:#794D00; --warning-soft:#FFF3D8; --danger:#A52B24; --danger-soft:#F7E8E6;
   --info:#235F91; --info-soft:#EAF2FA; --shadow-soft:0 1px 2px rgba(24,38,55,.05), 0 5px 18px rgba(24,38,55,.045);
-  --sidebar-ink:#172A3B; --sidebar-body:#40576C; --sidebar-muted:#4E657A; --sidebar-line:#B4C2CF; --sidebar-surface:#E8EDF3;
+  --sidebar-ink:#172A3B; --sidebar-body:#40576C; --sidebar-muted:#364B60; --sidebar-line:#B4C2CF; --sidebar-surface:#E8EDF3;
 }
 html[data-theme="github"] {
   color-scheme: dark;
@@ -1507,3 +1507,21 @@ html[data-theme] .text-warning { color:var(--warning-text); }
 .button-warning:hover:not(:disabled) { border-color:var(--warning); background:color-mix(in srgb,var(--warning-soft) 78%,var(--surface)); }
 .clip-row { flex-wrap:wrap; }
 .clip-row-publish { flex:0 0 auto; }
+
+
+/* Studio Light gives secondary instructions the same comfortable reading weight as body copy. */
+html[data-theme="studio-light"] .field-hint,
+html[data-theme="studio-light"] .creator-identity small,
+html[data-theme="studio-light"] .creator-status-cell small,
+html[data-theme="studio-light"] .workspace-copy small,
+html[data-theme="studio-light"] .sidebar-engine small,
+html[data-theme="studio-light"] .summary-stat small,
+html[data-theme="studio-light"] .capture-copy small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+html[data-theme="studio-light"] .app-footer {
+  color: var(--muted);
+  font-size: 11px;
+}

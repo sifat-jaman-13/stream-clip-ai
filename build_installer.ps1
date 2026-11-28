@@ -42,8 +42,17 @@ if (Test-Path -LiteralPath $shellDist) { Remove-Item -LiteralPath $shellDist -Re
 New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
 
 Write-Host "Packaging the pywebview desktop shell..." -ForegroundColor Cyan
-& $python -m PyInstaller --noconfirm --clean --distpath $dist --workpath (Join-Path $PSScriptRoot "build\pyinstaller") (Join-Path $PSScriptRoot "StreamSnipShell.spec")
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller could not build the pywebview shell." }
+# PyInstaller logs normally to stderr; PowerShell 5.1 treats native stderr as errors.
+# Keep the real process exit code as the packaging success signal.
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = "Continue"
+    & $python -m PyInstaller --noconfirm --clean --distpath $dist --workpath (Join-Path $PSScriptRoot "build\pyinstaller") (Join-Path $PSScriptRoot "StreamSnipShell.spec")
+    $pyInstallerExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
+if ($pyInstallerExitCode -ne 0) { throw "PyInstaller could not build the pywebview shell (exit code $pyInstallerExitCode)." }
 
 $shellExe = Join-Path $shellDist "StreamSnipAI.exe"
 if (-not (Test-Path -LiteralPath $shellExe)) { throw "The pywebview application executable was not produced." }

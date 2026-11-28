@@ -12,8 +12,8 @@ nvidia-cudnn-cu12>=9,<10; platform_system == "Windows"
 fastapi>=0.115,<1.0
 uvicorn>=0.34,<1.0
 annotated-doc>=0.0.6
-anyio>=4.1
-attrs>=23.2
+anyio>=4.16.0
+attrs>=26.1.0
 annotated-types>=0.8.0
 
 opencv-contrib-python-headless>=4.10,<5

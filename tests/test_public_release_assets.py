@@ -138,7 +138,10 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertFalse((ROOT / "tools" / "FacecamInference").exists())
 
     def test_secret_store_is_packaged_and_version_is_consistent(self):
-        import tomllib
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # Python 3.10 uses the backport.
+            import tomli as tomllib
         project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         installer = (ROOT / "installer" / "StreamSnipAI.iss").read_text(encoding="utf-8")
         self.assertIn("secret_store", project["tool"]["setuptools"]["py-modules"])

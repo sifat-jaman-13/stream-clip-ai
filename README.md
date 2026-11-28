@@ -30,7 +30,7 @@ The installed desktop app uses FastAPI + React/TypeScript + pywebview. FastAPI i
 Screenshots below show the React Creator Studio interface.
 
 <p align="center">
-  <img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.10 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
+  <img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
 </p>
 
 <details>
@@ -40,21 +40,21 @@ Screenshots below show the React Creator Studio interface.
     <tr>
       <td width="50%">
         <p align="center"><strong>Live Studio</strong></p>
-        <img src="docs/assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.10 Live Studio in Studio Dark with source selection and pre-capture configuration">
+        <img src="docs/assets/product/live-studio.png" width="100%" alt="StreamSnip AI Live Studio in Studio Dark with source selection and pre-capture configuration">
       </td>
       <td width="50%">
         <p align="center"><strong>Creator monitoring</strong></p>
-        <img src="docs/assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.10 Creators page in Studio Dark showing independent live and recorded VOD monitors">
+        <img src="docs/assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI Creators page in Studio Dark showing independent live and recorded VOD monitors">
       </td>
     </tr>
     <tr>
       <td width="50%">
         <p align="center"><strong>Clip Library</strong></p>
-        <img src="docs/assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.10 Clip Library in Studio Dark with Ready to review and Scheduled tabs">
+        <img src="docs/assets/product/clip-library.png" width="100%" alt="StreamSnip AI Clip Library in Studio Dark with Ready to review and Scheduled tabs">
       </td>
       <td width="50%">
         <p align="center"><strong>Publisher</strong></p>
-        <img src="docs/assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.10 Publisher in Studio Dark with five Zernio connection slots">
+        <img src="docs/assets/product/publishing.png" width="100%" alt="StreamSnip AI Publisher in Studio Dark with five Zernio connection slots">
       </td>
     </tr>
   </table>
@@ -127,7 +127,7 @@ Each creator keeps independent facecam/game regions, video layout, output ratio,
 
 ## Appearance and typography
 
-JetBrains Mono remains the default UI font. The font picker also offers Manrope, DM Sans, Inter, Open Sans, IBM Plex Sans, Nunito Sans, Roboto, Source Sans 3, Poppins, Lato, Fira Code, and Windows/system and serif alternatives. Theme text colors are contrast-corrected so labels remain readable across the available palettes.
+JetBrains Mono remains the default UI font. The other bundled fonts are Manrope and Inter. The picker also offers Windows/system families including Segoe UI, Aptos, Arial, Tahoma, Verdana, Trebuchet MS, Consolas, Georgia, and Times New Roman. Theme text colors are contrast-corrected so labels remain readable across the available palettes.
 
 ## Workspaces
 
@@ -182,7 +182,7 @@ The [complete user guide](docs/USER_GUIDE.md) has step-by-step recovery instruct
 
 ## Build from source
 
-**Prerequisites:** Windows 10/11 x64, Python 3.10+, Node.js 22 with npm, .NET 10 SDK, Inno Setup 6, and FFmpeg.
+**Prerequisites:** Windows 10/11 x64, Python 3.10+, Node.js 22 with npm, and Inno Setup 6. FFmpeg is provisioned by the packaged runtime; have FFmpeg on PATH only when running the Python application directly.
 
 ```powershell
 git clone https://github.com/sifat-jaman-13/stream-clip-ai.git

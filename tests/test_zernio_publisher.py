@@ -600,3 +600,77 @@ def test_scheduled_post_requires_a_matching_destination_status(tmp_path):
         )
 
     assert posted == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "http://zernio.com/api/v1/posts",
+        "https://user:password@zernio.com/api/v1/posts",
+        "https://zernio.com.attacker.example/api/v1/posts",
+        "https://127.0.0.1/api/v1/posts",
+    ],
+)
+def test_json_request_rejects_non_zernio_or_unsafe_urls_before_network_io(monkeypatch, url):
+    publisher = ZernioPublisher(lambda _message: None, {"enabled": True, "api_key": "test-key"})
+    monkeypatch.setattr(
+        "zernio_poster.urllib.request.urlopen",
+        lambda *_args, **_kwargs: pytest.fail("unsafe URL reached the network layer"),
+    )
+
+    with pytest.raises(ValueError, match="Zernio"):
+        publisher._json_request("GET", url)
+
+
+@pytest.mark.parametrize(
+    "upload_url",
+    [
+        "file:///tmp/attacker",
+        "http://storage.example/upload",
+        "https://127.0.0.1/upload",
+        "https://user:password@storage.example/upload",
+    ],
+)
+def test_upload_rejects_unsafe_presigned_urls_before_sending_video(tmp_path, monkeypatch, upload_url):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video")
+    publisher = ZernioPublisher(lambda _message: None, {"enabled": True, "api_key": "test-key"})
+    publisher._json_request = lambda *_args, **_kwargs: {
+        "uploadUrl": upload_url,
+        "publicUrl": "https://media.example/clip.mp4",
+    }
+    monkeypatch.setattr(
+        "zernio_poster.urllib.request.urlopen",
+        lambda *_args, **_kwargs: pytest.fail("unsafe upload URL reached the network layer"),
+    )
+
+    with pytest.raises(ValueError, match="presigned upload URL"):
+        publisher._upload(video)
+
+
+def test_upload_accepts_https_presigned_url_from_external_storage_host(tmp_path, monkeypatch):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video")
+    publisher = ZernioPublisher(lambda _message: None, {"enabled": True, "api_key": "test-key"})
+    publisher._json_request = lambda *_args, **_kwargs: {
+        "uploadUrl": "https://storage.example/upload?signature=opaque",
+        "publicUrl": "https://media.example/clip.mp4",
+    }
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    captured = []
+    monkeypatch.setattr(
+        "zernio_poster.urllib.request.urlopen",
+        lambda request, timeout: captured.append((request, timeout)) or Response(),
+    )
+
+    assert publisher._upload(video) == "https://media.example/clip.mp4"
+    assert len(captured) == 1
+    assert captured[0][0].full_url.startswith("https://storage.example/")

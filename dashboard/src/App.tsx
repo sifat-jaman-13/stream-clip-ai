@@ -16,7 +16,7 @@ import "./App.css";
 
 type PageId = "overview" | "live" | "creators" | "clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
 type ThemeId = "odysseus-dark" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseus-paper" | "ocean" | "forest" | "solarized" | "rose-graphite" | "ember" | "slate";
-type FontId = "manrope" | "dm-sans" | "inter" | "open-sans" | "ibm-plex-sans" | "nunito-sans" | "roboto" | "source-sans-3" | "poppins" | "lato" | "jetbrains-mono" | "fira-code" | "segoe-ui" | "consolas" | "aptos" | "arial" | "tahoma" | "verdana" | "georgia" | "trebuchet-ms" | "times-new-roman";
+type FontId = "jetbrains-mono" | "manrope" | "inter" | "segoe-ui" | "aptos" | "arial" | "tahoma" | "verdana" | "trebuchet-ms" | "consolas" | "georgia" | "times-new-roman";
 type StudioSetupTab = "capture" | "framing" | "ai" | "speech" | "captions";
 type RecordLike = Record<string, any>;
 type ToastDetail = { tone: "success" | "error" | "info"; title: string; message?: string };

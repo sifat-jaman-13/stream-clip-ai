@@ -39,7 +39,7 @@ StreamSnip AI is an operational creator workspace, not a marketing dashboard. It
 
 The default visual direction is Studio Dark: near-black ground, restrained charcoal surfaces, vivid red actions, neutral high-contrast text, and semantic green/amber states. Preserve this exact user-selected palette. The native workspace should feel like a considered broadcast workstation: clear source context, a readable processing rundown, and obvious next actions. Avoid costume UI, dashboard vanity metrics, and decorative card grids.
 
-JetBrains Mono is the default UI family across themes and surfaces, as requested for the creator workstation. Keep Manrope and the other bundled sans-serif and serif options available, and use tabular numerals for operational data. Use the role scale, line height, and spacing to keep dense operational text comfortable to scan.
+JetBrains Mono is the default UI family across themes and surfaces, as requested for the creator workstation. Keep Manrope and Inter as bundled alternatives; the picker also exposes common Windows sans-serif, monospace, and serif families. Use tabular numerals for operational data. Use the role scale, line height, and spacing to keep dense operational text comfortable to scan.
 
 ## Colors
 
@@ -80,7 +80,7 @@ The user may switch themes without changing layout or behavior:
 
 The full selector contains at least 12 curated palettes. Users may override the accent color with a six-digit hex value from either the topbar appearance menu or Settings > Appearance, and reset it to the active theme default. The custom accent changes primary actions and active selections only; success, warning, error, and informational colors remain semantically distinct.
 
-Each theme must define the same semantic tokens, with matching app background, surface, border, and accent values in React, CSS, and WinUI. Components must use semantic variables rather than hard-coded palette values. Status must remain understandable through text or icon as well as color.
+Each theme must define the same semantic tokens in the React theme registry and CSS. Components must use semantic variables rather than hard-coded palette values. The pywebview shell hosts this same React interface; there is no separate native UI theme registry. Status must remain understandable through text or icon as well as color.
 
 ### Contrast and custom color
 
@@ -91,7 +91,7 @@ Each theme must define the same semantic tokens, with matching app background, s
 
 ## Typography
 
-JetBrains Mono is the application-wide default, including WinUI shell controls, dynamically generated text, inputs, buttons, dialogs, and tabs. The bundled variable font is used directly. The font selector retains the bundled sans-serif, serif, and monospace alternatives plus common Windows system families. The selected family must apply consistently across navigation, workspace surfaces, dropdowns, and dialogs. Keep the 14-DIP medium body baseline and restrained line spacing so the monospaced family remains readable in dense workflows.
+JetBrains Mono is the application-wide default across the React interface hosted by pywebview, including navigation, workspace surfaces, inputs, buttons, menus, and dialogs. The bundled variable font is used directly. The only bundled UI font families are JetBrains Mono, Manrope, and Inter; the selector also offers common Windows system families. The selected family must apply consistently across the entire interface. Keep the 14-DIP medium body baseline and restrained line spacing so the monospaced family remains readable in dense workflows.
 
 Use a role-based native desktop scale with a 14-DIP body baseline: Small 13, Medium 14 (default), Large 16, proportionally scaling labels and headings. Preserve heading hierarchy and do not use tiny interface copy. Interactive controls are at least 48px high. Keep line height near 1.45 for explanatory text. Use tabular numerals for durations, counts, sizes, and progress. Subtitle output typography is configured separately from the application interface font.
 

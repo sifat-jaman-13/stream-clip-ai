@@ -1327,7 +1327,7 @@ html[data-theme="slate"] {
 }
 
 
-/* Canonical palette tokens mirrored by the native WinUI ThemePalette registry.
+/* Canonical palette tokens for the React application theme registry.
    Keep every semantic role defined in every theme so no palette inherits another theme's colors. */
 html[data-theme="studio-dark"] {
   color-scheme: dark;

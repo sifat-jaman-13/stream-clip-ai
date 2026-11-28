@@ -94,16 +94,6 @@ coverage.xml
 **/node_modules/
 **/.vite/
 
-# .NET / WinUI build output
-.vs/
-**/bin/
-**/obj/
-**/AppPackages/
-**/TestResults/
-*.user
-*.suo
-*.msix
-*.appx
 
 # Local snapshots, test data, and one-off recovery copies
 backups/

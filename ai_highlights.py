@@ -30,14 +30,37 @@ class AIAnalysisCancelled(RuntimeError):
     pass
 
 
+def _validated_provider_url(url):
+    """Require HTTPS for remote providers; allow plain HTTP only for local AI services."""
+    try:
+        parsed = urllib.parse.urlsplit(str(url or "").strip())
+        hostname = (parsed.hostname or "").rstrip(".").lower()
+        port = parsed.port
+    except ValueError as exc:
+        raise AIProviderError("AI provider endpoint URL is invalid.") from exc
+
+    local_hosts = {"localhost", "127.0.0.1", "::1"}
+    if (
+        not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or parsed.scheme.lower() not in {"https", "http"}
+        or parsed.scheme.lower() == "http" and hostname not in local_hosts
+    ):
+        raise AIProviderError("Remote AI provider endpoints must use HTTPS; HTTP is allowed only for local services.")
+    return str(url).strip()
+
+
 def _json_request(url, payload=None, headers=None, timeout=90):
+    url = _validated_provider_url(url)
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request_headers = {"Content-Type": "application/json"} if data is not None else {}
     request_headers.update(headers or {})
     request = urllib.request.Request(url, data=data, headers=request_headers,
                                      method="GET" if data is None else "POST")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:1200]
@@ -55,8 +78,8 @@ def _json_request(url, payload=None, headers=None, timeout=90):
 def ollama_models(base_url="http://127.0.0.1:11434"):
     base = base_url.rstrip("/")
     parsed = urllib.parse.urlparse(base)
-    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1", "host.docker.internal"}:
-        raise AIProviderError("Ollama URL must point to this computer (localhost or host.docker.internal in Docker).")
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise AIProviderError("Ollama URL must point to this computer (localhost or loopback IP).")
     data = _json_request(base + "/api/tags", timeout=5)
     return [str(model.get("name", "")) for model in data.get("models", []) if model.get("name")]
 

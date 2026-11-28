@@ -1,44 +1,48 @@
-# StreamSnip AI — UI engineering rules
+# StreamSnip AI — engineering rules
 
-Before changing any UI, read `DESIGN.md` and inspect the current rendered or native interface. This is an **Operate** product: creators need to configure capture, monitor processing, review clips, and publish with confidence. Prioritize scanability, predictable controls, readable states, and useful content density over decorative effects.
+## Current application architecture
 
-## Required design references
+StreamSnip AI 4.1.0 is a Windows desktop application built from one React/TypeScript interface, one FastAPI/Python processing backend, and a pywebview shell hosted by WebView2. The installer is built with PyInstaller and Inno Setup.
 
-Use these three user-provided design skill repositories as the design and review standard:
+- React/Vite in `dashboard/` is the only application UI.
+- FastAPI in `api_server.py` adapts the existing Python application services; it is not a second processing engine.
+- Python modules own capture, creator monitoring, transcription, AI analysis, framing, rendering, storage, and publishing.
+- `desktop_shell.py` hosts the React build in the native desktop window.
+- `build_installer.ps1` and `installer/StreamSnipAI.iss` produce the Windows installer.
+- There is no WinUI/C# application or .NET build in the current product.
 
-- Taste Skill: https://github.com/sifat-jaman-13/taste-skill
-  - Use its disciplined system for palette selection, typography, spacing, contrast, restrained color, copy, and cohesive component families.
-  - Adapt the principles to an operational desktop application; do not import marketing-page effects that distract from capture and clip review.
-- Emil Kowalski Skills: https://github.com/sifat-jaman-13/skills
-  - Use purposeful micro-interactions, immediate feedback, clear pressed/focus states, and reduced-motion support.
-  - Animate `transform` and `opacity` by default; never use `transition: all`; avoid layout-shifting motion and JS-driven per-frame React state.
-  - Turn explicit user design corrections into durable project rules.
-- Impeccable: https://github.com/sifat-jaman-13/impeccable
-  - Inspect the incumbent product before changing it. Preserve product behavior and existing visual identity during refinement.
-  - Review hierarchy, responsive behavior, accessibility, empty/error/loading states, and visual consistency.
-  - Run `npx --yes impeccable@4.10.0 detect dashboard/src --json` after React UI changes and resolve findings or document a justified false positive.
+Do not reintroduce a second UI, backend, installer path, or platform-specific duplicate of existing application behavior without an explicit product requirement.
 
-## Color and appearance
+## UI design and review
 
-- Keep at least 12 complete palettes available in both React and WinUI. The palette IDs and key colors must match across `App.tsx`, `App.css`, and `MainPage.xaml.cs`.
-- Keep the appearance selector and Settings > Appearance synchronized. Custom accent selection must persist and reset to the selected theme's accent.
-- The user accent changes primary actions and current selections only. It must not replace success, warning, error, or informational status colors.
-- Pick button foreground text using WCAG relative-luminance contrast, not a simple brightness threshold.
-- Keep primary text at 7:1 or better and body, muted, quiet, and button text at 4.5:1 or better against the surfaces where they are used.
-- Run `python dashboard/tools/audit-theme-contrast.py` and `python dashboard/tools/audit-theme-parity.py` after palette changes.
+Before changing UI, read `DESIGN.md`, inspect the current source, and inspect the rendered application. Use the user's design reference: https://github.com/sifat-jaman-13/chatgpt-design-skills
 
-## Component craft
+StreamSnip is an operational media workstation. Prioritize readable controls, reliable states, clear hierarchy, preview quality, and efficient clip review over decorative panels or marketing effects.
 
-- Keep labels, hints, controls, and page headings readable. Metadata may be secondary, but never shrink essential instructions to tiny text.
-- Prefer spacing, clear alignment, and one restrained surface level over nested decorative panels, accent rails, heavy shadows, or glow.
-- Use semantic theme tokens rather than hard-coded palette values in shared components.
-- Give every interactive control a keyboard-visible focus state and a useful disabled, loading, success, or error state.
-- Respect `prefers-reduced-motion`.
-- Do not alter capture, transcription, AI, rendering, creator monitoring, storage, or publishing behavior during a visual-only change.
+- Preserve the current product identity and working behavior.
+- Use semantic theme tokens; keep status colors independent of the user-selected accent.
+- Choose text colors using WCAG relative luminance. Target at least 7:1 for primary text and 4.5:1 for body, muted, and button text on their actual surfaces.
+- Keep labels and essential instructions readable at normal desktop scale.
+- Use purposeful motion; animate transform and opacity where practical, avoid layout shifts and `transition: all`, and respect `prefers-reduced-motion`.
+- Provide keyboard-visible focus, accessible labels, and useful loading, disabled, success, and error states.
+- Do not change capture, transcription, AI, rendering, creator monitoring, storage, or publishing behavior during visual-only work.
+- After palette changes, run `python dashboard/tools/audit-theme-contrast.py`.
+
+## Build and verification
+
+Run the checks relevant to the change:
+
+- React: `npm ci`, `npm run lint`, and `npm run build` from `dashboard/`.
+- Python: `python -m pytest -q` from the repository root.
+- Installer: `./build_installer.ps1` on Windows with Python 3.10+, Node.js 22, and Inno Setup 6 available.
+
+The Windows installer workflow should build on pushes and pull requests to `master`, not only when a release tag is created.
 
 ## Safe collaboration
 
-- Inspect `git status` and file timestamps before editing; the working tree may contain another contributor's changes.
-- Make focused edits to separate components or sections. Re-read before writing and use hash-checked edits when the file may be changing concurrently.
-- Never reset, clean, overwrite, or stop another contributor's process to make a UI change.
-- Run the React production build/lint and the WinUI build after shared component changes.
+- Inspect `git status` before editing and preserve all unrelated working-tree changes.
+- Make focused edits and re-read changed files before testing.
+- Never reset, clean, overwrite, or stop another contributor's process to make a change.
+- Never delete user data, local recordings, clips, creator folders, settings, credentials, or local databases as repository cleanup.
+- Never commit API keys, social tokens, cookies, private browser profiles, or machine-specific runtime data.
+- Do not run real publishing tests unless a real public or scheduled post is explicitly intended.

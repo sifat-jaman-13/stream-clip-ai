@@ -30,7 +30,7 @@ body:
       label: External-service impact
       options:
         - label: This may require a new hosted service, API key, paid quota, or non-local data transfer.
-        - label: This changes installer, Docker, GPU, or platform requirements.
+        - label: This changes installer, Python runtime, GPU, or platform requirements.
 
   - type: checkboxes
     id: privacy

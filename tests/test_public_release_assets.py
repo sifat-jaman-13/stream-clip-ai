@@ -160,6 +160,60 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertNotIn("dotnet publish", build)
         self.assertNotIn("setup-dotnet", workflow)
         self.assertIn("StreamSnipAI-Setup.exe", build)
+        self.assertIn("pull_request:", workflow)
+        self.assertIn('branches: ["master"]', workflow)
+        self.assertIn("publish-release:", workflow)
+        self.assertRegex(workflow, r"actions/download-artifact@[0-9a-f]{40}")
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertEqual(workflow.count("contents: write"), 1)
+
+    def test_repository_tracks_only_current_desktop_delivery_and_dependency_manifests(self):
+        for retired_path in ("Dockerfile", "docker-compose.yml", ".dockerignore", "uv.lock"):
+            self.assertFalse((ROOT / retired_path).exists(), f"Retired or unused file remains: {retired_path}")
+
+        dependabot = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        for ecosystem in ("pip", "npm", "github-actions"):
+            self.assertIn(f"package-ecosystem: {ecosystem}", dependabot)
+
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
+        self.assertIn("pywebview", agents)
+        self.assertNotIn("MainPage.xaml.cs", agents)
+        self.assertIn("There is no WinUI/C# application", agents)
+        self.assertNotIn("WinUI", design)
+
+    def test_source_build_docs_do_not_require_retired_dotnet_toolchain(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        guide = (ROOT / "docs" / "USER_GUIDE.md").read_text(encoding="utf-8")
+        self.assertNotIn(".NET 10 SDK", readme)
+        self.assertNotIn(".NET 10 SDK", guide)
+
+    def test_dashboard_uses_only_current_bundled_and_system_font_options(self):
+        html = (ROOT / "dashboard" / "index.html").read_text(encoding="utf-8")
+        app = (ROOT / "dashboard" / "src" / "App.tsx").read_text(encoding="utf-8")
+        self.assertNotIn("fonts.googleapis.com", html)
+        self.assertNotIn("fonts.gstatic.com", html)
+        self.assertIn('type FontId = "jetbrains-mono" | "manrope" | "inter"', app)
+        self.assertNotIn('"dm-sans"', app)
+        self.assertNotIn('"fira-code"', app)
+
+    def test_current_issue_and_security_guidance_does_not_advertise_docker_deployment(self):
+        security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        bug = (ROOT / ".github" / "ISSUE_TEMPLATE" / "bug_report.yml").read_text(encoding="utf-8")
+        feature = (ROOT / ".github" / "ISSUE_TEMPLATE" / "feature_request.yml").read_text(encoding="utf-8")
+        self.assertNotIn("Docker", security)
+        self.assertNotIn("Docker", bug)
+        self.assertNotIn("Docker", feature)
+
+    def test_codeql_scans_current_languages_with_minimal_write_permissions(self):
+        workflow = (ROOT / ".github" / "workflows" / "codeql.yml").read_text(encoding="utf-8")
+        self.assertIn("language: javascript-typescript", workflow)
+        self.assertIn("language: python", workflow)
+        self.assertIn("build-mode: none", workflow)
+        self.assertIn("security-events: write", workflow)
+        self.assertIn("security-extended", workflow)
+        self.assertIn("github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934", workflow)
+        self.assertIn("github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934", workflow)
 
 
 if __name__ == "__main__":

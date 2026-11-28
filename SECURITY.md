@@ -27,9 +27,8 @@ Never include real API keys, tokens, private videos, account IDs, or complete lo
 
 StreamSnip AI is designed as a single-user local application.
 
-- The web server binds to loopback by default.
+- The native desktop engine forcibly binds its API to `127.0.0.1`, `localhost`, or `::1`.
 - State-changing requests require a per-process token.
-- Docker Compose publishes the UI to `127.0.0.1` only.
 - The app is not designed to be exposed directly to the public internet or an untrusted LAN.
 - Hosted AI and Zernio send data to third-party services only when those features are selected/configured.
 

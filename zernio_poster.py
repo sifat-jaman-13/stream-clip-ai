@@ -6,6 +6,7 @@ settings or environment variables. They must never be logged or committed.
 import datetime as _dt
 import hashlib
 import inspect
+import ipaddress
 import json
 import os
 import pathlib
@@ -16,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from urllib.parse import urlsplit
 
 
 _IDEMPOTENCY_LOCK = threading.RLock()
@@ -40,6 +42,52 @@ class ZernioAPIError(RuntimeError):
 
 def _truthy(value):
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _validated_https_url(value, *, label):
+    """Accept HTTPS URLs only; reject credentials, local IPs, and local hostnames."""
+    text = str(value or "").strip()
+    try:
+        parsed = urlsplit(text)
+        port = parsed.port
+        hostname = (parsed.hostname or "").rstrip(".").lower()
+    except ValueError as exc:
+        raise ValueError(f"Invalid {label}.") from exc
+
+    if (
+        parsed.scheme.lower() != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or port not in (None, 443)
+        or hostname == "localhost"
+        or hostname.endswith((".localhost", ".local", ".internal"))
+    ):
+        raise ValueError(f"The {label} must be a public HTTPS URL.")
+
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise ValueError(f"The {label} must not point to a local or private address.")
+
+    return text
+
+
+def _validated_zernio_api_url(value):
+    """Keep API-key-bearing requests on the official Zernio HTTPS API origin."""
+    text = _validated_https_url(value, label="Zernio HTTPS API endpoint")
+    parsed = urlsplit(text)
+    root = urlsplit(API_ROOT)
+    root_path = root.path.rstrip("/")
+    if (
+        parsed.hostname.rstrip(".").lower() != root.hostname
+        or parsed.path != root_path and not parsed.path.startswith(root_path + "/")
+    ):
+        raise ValueError("Zernio API requests must target the official Zernio API endpoint.")
+    return text
 
 
 def _zernio_account_id(value):
@@ -117,6 +165,7 @@ class ZernioPublisher:
 
     def _json_request(self, method, url, body=None, headers=None):
         method = str(method).upper()
+        url = _validated_zernio_api_url(url)
         data = None if body is None else json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         request_headers = self._headers()
         request_headers.update({str(key): str(value) for key, value in (headers or {}).items()})
@@ -125,7 +174,7 @@ class ZernioPublisher:
         endpoint = url.split(API_ROOT, 1)[-1].split("?", 1)[0] or "/"
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(req, timeout=60) as res:
+                with urllib.request.urlopen(req, timeout=60) as res:  # nosec B310
                     raw = res.read()
                 break
             except urllib.error.HTTPError as e:
@@ -234,17 +283,19 @@ class ZernioPublisher:
             "contentType": "video/mp4",
             "size": size,
         })
-        upload_url = presigned.get("uploadUrl")
-        public_url = presigned.get("publicUrl")
-        if not upload_url or not public_url:
-            raise RuntimeError("Zernio did not return upload URLs.")
+        upload_url = _validated_https_url(
+            presigned.get("uploadUrl"), label="Zernio presigned upload URL"
+        )
+        public_url = _validated_https_url(
+            presigned.get("publicUrl"), label="Zernio public media URL"
+        )
         video = path.open("rb")
         try:
             req = urllib.request.Request(upload_url, data=video, method="PUT",
                                          headers={"Content-Type": "video/mp4",
                                                   "Content-Length": str(size)})
             try:
-                with urllib.request.urlopen(req, timeout=300):
+                with urllib.request.urlopen(req, timeout=300):  # nosec B310
                     pass
             except urllib.error.HTTPError as e:
                 raise RuntimeError(f"Zernio media upload failed ({e.code}).") from e

@@ -1932,7 +1932,7 @@ class RegressionTests(unittest.TestCase):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = b""
         with patch("zernio_poster.urllib.request.urlopen", return_value=response):
-            result = publisher._json_request("POST", "https://example.invalid")
+            result = publisher._json_request("POST", "https://zernio.com/api/v1/posts")
         self.assertEqual(result, {})
 
     def test_zernio_transient_dns_failure_is_retried(self):
@@ -3004,7 +3004,7 @@ class RegressionTests(unittest.TestCase):
             "html_url": "https://github.com/sifat-jaman-13/stream-clip-ai/releases/tag/v4.0.10",
             "assets": [{
                 "name": "StreamSnipAI-Setup.exe",
-                "browser_download_url": "https://example.invalid/StreamSnipAI-Setup.exe",
+                "browser_download_url": "https://github.com/sifat-jaman-13/stream-clip-ai/releases/download/v4.0.10/StreamSnipAI-Setup.exe",
                 "digest": "sha256:" + digest,
                 "size": 12345,
             }],
@@ -3040,7 +3040,7 @@ class RegressionTests(unittest.TestCase):
                 "current": "4.0.6",
                 "latest": "4.0.10",
                 "update": True,
-                "installer_url": "https://example.invalid/setup.exe",
+                "installer_url": "https://github.com/sifat-jaman-13/stream-clip-ai/releases/download/v4.0.10/StreamSnipAI-Setup.exe",
                 "installer_name": "StreamSnipAI-Setup.exe",
                 "installer_sha256": digest,
                 "installer_size": len(payload),
@@ -3083,7 +3083,7 @@ class RegressionTests(unittest.TestCase):
                 "current": "4.0.6",
                 "latest": "4.0.10",
                 "update": True,
-                "installer_url": "https://example.invalid/setup.exe",
+                "installer_url": "https://github.com/sifat-jaman-13/stream-clip-ai/releases/download/v4.0.10/StreamSnipAI-Setup.exe",
                 "installer_name": "StreamSnipAI-Setup.exe",
                 "installer_sha256": "0" * 64,
                 "installer_size": len(payload),
@@ -3099,6 +3099,26 @@ class RegressionTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "SHA-256"):
                     autoclip.install_app_update(parent_pid=4321)
             launch_helper.assert_not_called()
+    def test_app_update_refuses_installer_assets_outside_official_github_release(self):
+        release = {
+            "tag_name": "v4.0.10",
+            "assets": [{
+                "name": "StreamSnipAI-Setup.exe",
+                "browser_download_url": "https://attacker.example/setup.exe",
+                "digest": "sha256:" + ("a" * 64),
+            }],
+        }
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(release).encode("utf-8")
+        with patch.object(autoclip, "_installed_app_info", return_value={"version": "4.0.6"}), \
+             patch.object(autoclip.urllib.request, "urlopen", return_value=response):
+            result = autoclip.check_app_update()
+
+        self.assertTrue(result["update"])
+        self.assertFalse(result["can_install"])
+        self.assertEqual(result["installer_url"], "")
+        self.assertEqual(result["installer_sha256"], "")
+
     def test_newer_installed_version_is_not_reported_as_outdated(self):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = b'{"tag_name":"v1.1.5"}'
@@ -3554,6 +3574,48 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Python 3.15", readme)
         self.assertIn("ONNX Runtime-backed VAD dependency", readme)
         self.assertIn("Python 3.14.10 runtime", readme)
+
+
+    def test_local_api_bind_host_never_exposes_the_desktop_engine_on_network_interfaces(self):
+        for requested in ("0.0.0.0", "::", "192.168.1.20", "*", ""):
+            with self.subTest(requested=requested):
+                self.assertEqual(autoclip.resolve_bind_host(requested), "127.0.0.1")
+        self.assertEqual(autoclip.resolve_bind_host("localhost"), "localhost")
+        self.assertEqual(autoclip.resolve_bind_host("::1"), "::1")
+
+    def test_ai_provider_requests_reject_local_file_and_remote_plaintext_schemes(self):
+        unsafe_urls = (
+            "file:///C:/Windows/win.ini",
+            "ftp://api.example/v1/chat",
+            "http://api.example/v1/chat",
+            "http://host.docker.internal:11434/api/tags",
+        )
+        for url in unsafe_urls:
+            with self.subTest(url=url):
+                with patch("ai_highlights.urllib.request.urlopen") as opener:
+                    with self.assertRaisesRegex(ai_highlights.AIProviderError, "HTTPS"):
+                        ai_highlights._json_request(url)
+                    opener.assert_not_called()
+
+    def test_ollama_rejects_retired_container_host_alias(self):
+        with self.assertRaisesRegex(ai_highlights.AIProviderError, "loopback"):
+            ai_highlights.ollama_models("http://host.docker.internal:11434")
+
+    def test_ai_provider_requests_allow_local_ollama_http(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"models": []}'
+
+        with patch("ai_highlights.urllib.request.urlopen", return_value=Response()) as opener:
+            result = ai_highlights._json_request("http://127.0.0.1:11434/api/tags")
+        self.assertEqual(result, {"models": []})
+        opener.assert_called_once()
 
 
 if __name__ == "__main__":

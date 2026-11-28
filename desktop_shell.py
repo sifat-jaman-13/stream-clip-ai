@@ -136,7 +136,7 @@ class DesktopShell:
         last_error = ""
         while time.monotonic() < deadline:
             try:
-                with urllib.request.urlopen(self.base_url + "api/health", timeout=2) as response:
+                with urllib.request.urlopen(self.base_url + "api/health", timeout=2) as response:  # nosec B310
                     payload = json.loads(response.read().decode("utf-8"))
                 if response.status == 200 and payload.get("status") == "ok":
                     return
@@ -149,7 +149,7 @@ class DesktopShell:
         if not self.base_url:
             return
         try:
-            with urllib.request.urlopen(self.base_url + "api/session", timeout=3) as response:
+            with urllib.request.urlopen(self.base_url + "api/session", timeout=3) as response:  # nosec B310
                 token = json.loads(response.read().decode("utf-8")).get("token", "")
             if not token:
                 return
@@ -159,7 +159,7 @@ class DesktopShell:
                 headers={"Content-Type": "application/json", "X-Token": str(token)},
                 method="POST",
             )
-            with urllib.request.urlopen(request, timeout=5) as response:
+            with urllib.request.urlopen(request, timeout=5) as response:  # nosec B310
                 response.read()
         except (OSError, ValueError, urllib.error.URLError):
             # The React Quit button may already have stopped the backend.

@@ -15,7 +15,7 @@ The installed desktop app uses FastAPI + React/TypeScript + pywebview. FastAPI i
 Screenshots below show the React Creator Studio interface.
 
 <p align="center">
-  <img src="assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.10 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
+  <img src="assets/product/dashboard.png" width="100%" alt="StreamSnip AI Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
 </p>
 
 <details>
@@ -25,21 +25,21 @@ Screenshots below show the React Creator Studio interface.
     <tr>
       <td width="50%">
         <p align="center"><strong>Live Studio</strong></p>
-        <img src="assets/product/live-studio.png" width="100%" alt="StreamSnip AI 4.0.10 Live Studio in Studio Dark with source selection and pre-capture configuration">
+        <img src="assets/product/live-studio.png" width="100%" alt="StreamSnip AI Live Studio in Studio Dark with source selection and pre-capture configuration">
       </td>
       <td width="50%">
         <p align="center"><strong>Creator monitoring</strong></p>
-        <img src="assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI 4.0.10 Creators page in Studio Dark showing independent live and recorded VOD monitors">
+        <img src="assets/product/creator-monitoring.png" width="100%" alt="StreamSnip AI Creators page in Studio Dark showing independent live and recorded VOD monitors">
       </td>
     </tr>
     <tr>
       <td width="50%">
         <p align="center"><strong>Clip Library</strong></p>
-        <img src="assets/product/clip-library.png" width="100%" alt="StreamSnip AI 4.0.10 Clip Library in Studio Dark with Ready to review and Scheduled tabs">
+        <img src="assets/product/clip-library.png" width="100%" alt="StreamSnip AI Clip Library in Studio Dark with Ready to review and Scheduled tabs">
       </td>
       <td width="50%">
         <p align="center"><strong>Publisher</strong></p>
-        <img src="assets/product/publishing.png" width="100%" alt="StreamSnip AI 4.0.10 Publisher in Studio Dark with five Zernio connection slots">
+        <img src="assets/product/publishing.png" width="100%" alt="StreamSnip AI Publisher in Studio Dark with five Zernio connection slots">
       </td>
     </tr>
   </table>
@@ -251,7 +251,7 @@ Studio Dark is the default appearance for new installs. You can switch to any of
 
 Use the topbar appearance selector or **Settings > Appearance** to choose a theme. Where available, you can set a custom six-digit hex accent and reset it to the active theme's default. The accent changes primary actions and current selections; semantic success, warning, and error colors remain distinct.
 
-In the native app, **Application font** offers JetBrains Mono by default, plus the bundled Inter, Open Sans, IBM Plex Sans, Roboto, and Source Sans 3 families, Windows Segoe UI, and Consolas. The selected family applies across the entire desktop interface and can be changed at any time. **Application text size** offers Small (13 DIP body), Medium (14 DIP body, default), and Large (16 DIP body). Headings and supporting text scale proportionally. Both settings are saved locally and affect the desktop UI only; rendered video captions keep their separate typography.
+In the native app, **Application font** offers JetBrains Mono by default, plus the bundled Manrope and Inter families. The picker also offers Windows/system families including Segoe UI, Aptos, Arial, Tahoma, Verdana, Trebuchet MS, Consolas, Georgia, and Times New Roman. The selected family applies across the entire desktop interface and can be changed at any time. **Application text size** offers Small (13 DIP body), Medium (14 DIP body, default), and Large (16 DIP body). Headings and supporting text scale proportionally. Both settings are saved locally and affect the desktop UI only; rendered video captions keep their separate typography.
 
 Settings are saved locally. AI credentials are managed separately in Live Studio's AI provider tab and require the explicit **Save AI settings** action.
 
@@ -361,9 +361,8 @@ Do not delete `out\`, `rec\`, or creator folders until you have verified that yo
 - Windows 10/11 x64
 - Python 3.10 or newer
 - Node.js 22 with npm
-- .NET 10 SDK
 - Inno Setup 6
-- FFmpeg
+- FFmpeg on PATH when running the Python application directly from source. The packaged installer provisions its own FFmpeg runtime.
 
 ### Development setup
 

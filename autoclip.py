@@ -352,7 +352,7 @@ def check_updates():
         latest = ""
         try:
             req = urllib.request.Request(f"https://pypi.org/pypi/{package}/json", headers={"User-Agent": "StreamSnip AI updater"})
-            with urllib.request.urlopen(req, timeout=8) as response:
+            with urllib.request.urlopen(req, timeout=8) as response:  # nosec B310
                 latest = str(json.loads(response.read()).get("info", {}).get("version", ""))
         except Exception: pass
         add(package, current, latest)
@@ -425,13 +425,34 @@ def _installed_app_info():
     return fallback
 
 
+def _official_github_release_asset_url(value):
+    """Accept only direct HTTPS assets from this repository's GitHub Releases."""
+    text = str(value or "").strip()
+    try:
+        parsed = urllib.parse.urlsplit(text)
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.lower() != "https"
+        or (parsed.hostname or "").rstrip(".").lower() != "github.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or port not in (None, 443)
+        or not parsed.path.startswith("/sifat-jaman-13/stream-clip-ai/releases/download/")
+    ):
+        return ""
+    return text
+
+
 def check_app_update():
     """Check the installed native app against the latest GitHub Release."""
     request = urllib.request.Request(
         "https://api.github.com/repos/sifat-jaman-13/stream-clip-ai/releases/latest",
         headers={"User-Agent": "StreamSnip AI version checker", "Accept": "application/vnd.github+json"},
     )
-    with urllib.request.urlopen(request, timeout=12) as response:
+    with urllib.request.urlopen(request, timeout=12) as response:  # nosec B310
         release = json.loads(response.read())
     installed = _installed_app_info()
     current = str(installed.get("version") or APP_VERSION)
@@ -445,18 +466,23 @@ def check_app_update():
         and "setup" in str(asset.get("name", "")).lower()
         and asset.get("browser_download_url")
     ), None)
-    installer_name = str(installer.get("name", "")) if installer else ""
-    installer_url = str(installer.get("browser_download_url", "")) if installer else ""
-    digest = str(installer.get("digest", "")) if installer else ""
+    installer_url = _official_github_release_asset_url(
+        installer.get("browser_download_url") if installer else ""
+    )
+    installer_name = str(installer.get("name", "")) if installer and installer_url else ""
+    digest = str(installer.get("digest", "")) if installer and installer_url else ""
     digest = digest.removeprefix("sha256:").lower()
     if not re.fullmatch(r"[0-9a-f]{64}", digest):
         digest = ""
     checksum = next((
         asset for asset in assets
-        if str(asset.get("name", "")).lower() == (installer_name + ".sha256").lower()
+        if installer_name
+        and str(asset.get("name", "")).lower() == (installer_name + ".sha256").lower()
         and asset.get("browser_download_url")
     ), None)
-    checksum_url = str(checksum.get("browser_download_url", "")) if checksum else ""
+    checksum_url = _official_github_release_asset_url(
+        checksum.get("browser_download_url") if checksum else ""
+    )
     return {
         "current": current,
         "latest": latest,
@@ -518,8 +544,10 @@ def install_app_update(parent_pid=None):
     release = check_app_update()
     if not release.get("update"):
         raise RuntimeError("This installation is already up to date (v" + str(release.get("current") or APP_VERSION) + ").")
-    if not release.get("can_install") or not release.get("installer_url"):
-        raise RuntimeError("The latest release does not contain a verifiable Windows installer.")
+    installer_url = _official_github_release_asset_url(release.get("installer_url"))
+    checksum_url = _official_github_release_asset_url(release.get("checksum_url"))
+    if not release.get("can_install") or not installer_url:
+        raise RuntimeError("The latest release does not contain an official, verifiable Windows installer.")
     expected_parent = os.getppid()
     parent_pid = expected_parent if parent_pid is None else int(parent_pid)
     if parent_pid <= 1 or parent_pid != expected_parent:
@@ -529,13 +557,12 @@ def install_app_update(parent_pid=None):
         raise RuntimeError("The published installer filename is invalid.")
     expected_hash = str(release.get("installer_sha256") or "").lower()
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
-        checksum_url = str(release.get("checksum_url") or "")
         if not checksum_url:
-            raise RuntimeError("GitHub did not publish an installer SHA-256 checksum.")
+            raise RuntimeError("GitHub did not publish an official installer SHA-256 checksum.")
         with urllib.request.urlopen(
             urllib.request.Request(checksum_url, headers={"User-Agent": "StreamSnip AI updater"}),
             timeout=20,
-        ) as response:
+        ) as response:  # nosec B310
             checksum_text = response.read().decode("utf-8", errors="replace")
         match = re.search(r"\b([0-9a-fA-F]{64})\b", checksum_text)
         if not match:
@@ -555,10 +582,10 @@ def install_app_update(parent_pid=None):
     log_path = pathlib.Path(tempfile.gettempdir()) / "StreamSnipAI-update.log"
     try:
         request = urllib.request.Request(
-            str(release["installer_url"]),
+            installer_url,
             headers={"User-Agent": "StreamSnip AI updater"},
         )
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with urllib.request.urlopen(request, timeout=180) as response:  # nosec B310
             payload = response.read()
         if not payload:
             raise RuntimeError("The GitHub installer download was empty.")
@@ -1906,13 +1933,15 @@ def forget_posted_clips(names):
         return
     placeholders = ",".join("?" for _ in normalized)
     with _database_connection() as db:
+        # Only the number of bound placeholders is interpolated; clip names remain parameters.
         db.execute(
             f"""UPDATE clip_deliveries SET state='removed',updated_at=?
-                WHERE clip_name IN ({placeholders}) AND state IN ('posted','scheduled')""",
+                WHERE clip_name IN ({placeholders}) AND state IN ('posted','scheduled')""",  # nosec B608
             [now, *normalized],
         )
+        # Keep values parameterized; the generated string contains only '?' placeholders.
         db.execute(
-            f"DELETE FROM clip_metadata WHERE clip_name IN ({placeholders})",
+            f"DELETE FROM clip_metadata WHERE clip_name IN ({placeholders})",  # nosec B608
             normalized,
         )
     invalidate_clip_cache()
@@ -5238,7 +5267,7 @@ def _clip_thumbnail_target(clip_path):
         raise FileNotFoundError("Rendered clip not found.")
     stat = path.stat()
     identity = f"{path}|{stat.st_size}|{stat.st_mtime_ns}"
-    key = hashlib.sha1(identity.encode("utf-8")).hexdigest()
+    key = hashlib.sha1(identity.encode("utf-8"), usedforsecurity=False).hexdigest()
     folder = _data_root / "cache" / "clip-thumbnails"
     return path, folder / f"{key}.jpg", key
 
@@ -5302,8 +5331,9 @@ def get_clip_metadata_many(clip_paths):
     placeholders = ",".join("?" for _ in paths)
     keys = [str(path) for path in paths]
     with _database_connection() as db:
+        # The IN list interpolates only generated '?' placeholders; every path is bound.
         rows = db.execute(
-            f"SELECT clip_path,title,description,caption FROM clip_metadata WHERE clip_path IN ({placeholders})",
+            f"SELECT clip_path,title,description,caption FROM clip_metadata WHERE clip_path IN ({placeholders})",  # nosec B608
             keys,
         ).fetchall()
 
@@ -6294,6 +6324,12 @@ def open_window(url):
     webbrowser.open(url)
 
 
+def resolve_bind_host(requested_host):
+    """Keep the local desktop API bound to loopback, even if the environment is overridden."""
+    candidate = str(requested_host or "").strip().lower()
+    return candidate if candidate in {"127.0.0.1", "localhost", "::1"} else "127.0.0.1"
+
+
 def should_open_browser_window(bind_host):
     """Keep browser windows out of native desktop-host launches."""
     if os.environ.get("STREAMSNIP_NATIVE_HOST", "").strip() == "1":
@@ -6330,7 +6366,7 @@ def main():
     except ImportError as exc:
         print(f"FastAPI server dependencies are missing: {exc}. Run: python -m pip install -r requirements.txt", file=sys.stderr)
         return
-    bind_host = os.environ.get("STREAMSNIP_BIND_HOST", "127.0.0.1")
+    bind_host = resolve_bind_host(os.environ.get("STREAMSNIP_BIND_HOST", "127.0.0.1"))
     bind_port = int(os.environ.get("STREAMSNIP_PORT", "0"))
     app = create_app(
         AppRoutes,
@@ -6369,7 +6405,7 @@ def main():
         server.should_exit = True
         server_thread.join(timeout=5)
         raise RuntimeError("The local FastAPI server started but its bound port could not be read.") from exc
-    public_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
+    public_host = bind_host
     if ":" in public_host and not public_host.startswith("["):
         public_host = f"[{public_host}]"
     url = f"http://{public_host}:{bound_port}/"

@@ -1046,7 +1046,8 @@ class RegressionTests(unittest.TestCase):
 
         self.assertNotIn(secret, stored)
         self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", stored)
-        self.assertIn("[REDACTED]", stored)
+        self.assertIn("[diagnostic event]", stored)
+        self.assertNotIn("request failed", stored)
 
         engine = object.__new__(autoclip.Core)
         engine.lock = threading.RLock()
@@ -1059,13 +1060,18 @@ class RegressionTests(unittest.TestCase):
                 self.assertNotIn(secret, engine.logs[0][2])
                 self.assertNotIn(secret, autoclip.RUNTIME_LOG.read_text(encoding="utf-8"))
 
-    def test_gemini_cache_identifier_is_hmac_keyed_and_process_local(self):
+    def test_gemini_cache_identifier_is_random_and_not_derived_from_the_api_key(self):
         secret = "gemini-provider-private-key"
-        first = ai_highlights._gemini_cache_id(secret)
-        with patch.object(ai_highlights, "_GEMINI_CACHE_HMAC_KEY", b"x" * 32):
+        with patch.dict(ai_highlights._GEMINI_CACHE_IDS, clear=True):
+            first = ai_highlights._gemini_cache_id(secret)
             second = ai_highlights._gemini_cache_id(secret)
-        self.assertNotEqual(first, second)
-        self.assertNotEqual(first, __import__("hashlib").sha256(secret.encode("utf-8")).hexdigest())
+            self.assertEqual(first, second)
+            self.assertEqual(len(first), 64)
+            self.assertTrue(all(char in "0123456789abcdef" for char in first))
+            ai_highlights._GEMINI_CACHE_IDS.clear()
+            rotated = ai_highlights._gemini_cache_id(secret)
+        self.assertNotEqual(first, rotated)
+        self.assertNotIn(secret, first)
 
     def test_ai_settings_migrate_legacy_hook_scoring_to_gemini(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2933,7 +2939,9 @@ class RegressionTests(unittest.TestCase):
             log_path = Path(directory) / "streamsnip.log"
             with patch.object(autoclip, "RUNTIME_LOG", log_path):
                 autoclip.append_runtime_log("12:34:56", "GPU load failed")
-            self.assertEqual(log_path.read_text(encoding="utf-8"), "12:34:56 GPU load failed\n")
+            stored_log = log_path.read_text(encoding="utf-8")
+            self.assertEqual(stored_log, "12:34:56 [diagnostic event]\n")
+            self.assertNotIn("GPU load failed", stored_log)
 
     def test_ai_moment_without_explicit_score_is_rejected(self):
         self.assertEqual(ai_highlights._parse_moments(

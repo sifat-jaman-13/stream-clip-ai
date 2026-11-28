@@ -188,12 +188,11 @@ def _redact_runtime_log_message(message):
 
 
 def append_runtime_log(timestamp, message):
-    """Persist a redacted diagnostic trail in the app data directory."""
-    safe_message = _redact_runtime_log_message(message)
+    """Persist event timestamps only; detailed messages stay in the in-memory UI log."""
     try:
         with RUNTIME_LOG.open("a", encoding="utf-8") as handle:
-            # lgtm [py/clear-text-storage-sensitive-data] Redacted below; credentials never enter this log.
-            handle.write(f"{timestamp} {safe_message}\n")
+            # Never persist caller-provided text: it may contain URLs, credentials, or provider errors.
+            handle.write(f"{timestamp} [diagnostic event]\n")
     except OSError:
         pass
 

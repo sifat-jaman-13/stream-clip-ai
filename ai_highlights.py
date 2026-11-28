@@ -6,23 +6,28 @@ import urllib.parse
 import urllib.request
 import queue
 import threading
-import hashlib
-import hmac
 import secrets
 import time
 
 _GEMINI_MODEL_CACHE = {}
 _GEMINI_ACTIVE_CACHE = {}
-_GEMINI_CACHE_HMAC_KEY = secrets.token_bytes(32)
+_GEMINI_CACHE_IDS = {}
+_GEMINI_CACHE_IDS_LOCK = threading.RLock()
 
 
 def _gemini_cache_id(secret):
-    """Derive a process-local opaque cache key without storing a raw secret hash."""
-    return hmac.new(
-        _GEMINI_CACHE_HMAC_KEY,
-        str(secret).encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    """Return a random process-local cache alias without deriving it from the key."""
+    value = str(secret)
+    with _GEMINI_CACHE_IDS_LOCK:
+        alias = _GEMINI_CACHE_IDS.get(value)
+        if alias is None:
+            if len(_GEMINI_CACHE_IDS) >= 8:
+                _old_secret, old_alias = _GEMINI_CACHE_IDS.pop(next(iter(_GEMINI_CACHE_IDS)))
+                _GEMINI_MODEL_CACHE.pop(old_alias, None)
+                _GEMINI_ACTIVE_CACHE.pop(old_alias, None)
+            alias = secrets.token_hex(32)
+            _GEMINI_CACHE_IDS[value] = alias
+        return alias
 
 
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"

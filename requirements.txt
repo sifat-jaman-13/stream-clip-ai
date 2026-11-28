@@ -16,4 +16,4 @@ anyio>=4.1
 attrs>=23.2
 annotated-types>=0.6
 
-opencv-contrib-python-headless>=4.10,<5
+opencv-contrib-python-headless>=4.10,<6

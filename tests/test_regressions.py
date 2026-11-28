@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import tempfile
 import threading
 import time
@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import autoclip
 import json
 import ai_highlights
+import post_metadata
 from zernio_poster import ZernioPublisher
 
 
@@ -25,6 +26,30 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(autoclip.split_clip_post_copy("Just a title"), ("Just a title", ""))
         self.assertEqual(autoclip.split_clip_post_copy(""), ("", ""))
 
+    def test_transcript_fallback_never_publishes_long_asr_dump(self):
+        transcript = (
+            "Right you should and we're going oh wow Lou in you get "
+            "right you should we're going oh wow Lou in you get"
+        )
+        result = post_metadata.build_transcript_fallback(transcript, "@behzinga")
+        self.assertEqual(result["title"], "A Stream Moment Needs Review")
+        self.assertIn("too fragmented", result["description"])
+        self.assertNotIn(transcript.lower(), result["description"].lower())
+        self.assertTrue(result["needs_review"])
+
+    def test_ai_description_rejects_transcript_dump_quote(self):
+        description = (
+            "“right you should we're going oh wow Lou in you get and then "
+            "we continue walking around the entire room”\\n\\n"
+            "The transcript includes several speech fragments but lacks reliable context."
+        )
+        with self.assertRaisesRegex(post_metadata.AIProviderError, "transcript dump"):
+            post_metadata._validate_description_structure(description)
+
+    def test_delete_live_source_after_clip_generation_defaults_to_on(self):
+        self.assertTrue(autoclip.DEFAULTS["delete_rec"])
+        self.assertTrue(autoclip.clean_cfg({})["delete_rec"])
+
     def test_live_recording_is_deleted_after_rendered_clip(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -32,22 +57,25 @@ class RegressionTests(unittest.TestCase):
             out = root / "out"
             rec.mkdir()
             out.mkdir()
-            recording = rec / "live_chunk.ts"
+            recording = rec / "seg_live_chunk.ts"
             recording.write_bytes(b"temporary capture")
             engine = object.__new__(autoclip.Engine)
-            engine.cfg = {"mode": "live", "min_score": 70, "pre": 2, "post": 2, "delete_rec": False}
+            engine.cfg = {"mode": "live", "min_score": 70, "pre": 2, "post": 2, "delete_rec": True}
             engine.rec_dir, engine.out_dir = rec, out
             engine.transcribe = lambda _path: [(4.0, 5.0, "hello")]
             engine.find_peaks = lambda *_args: ([(5, 90.0)], 12)
             engine.status = lambda *_args: None
             engine.log = lambda *_args: None
             engine.check = lambda: None
-            engine.render = lambda *_args: None
+            def render(_source, _start, _end, _words, name, _metadata_words=None):
+                (out / f"{name}.mp4").write_bytes(b"complete rendered video")
+            engine.render = render
             engine.emit = lambda *_args: None
             engine._process(str(recording))
             self.assertFalse(recording.exists())
+            self.assertTrue(list(out.glob("*.mp4")))
 
-    def test_live_recording_is_deleted_when_no_clip_is_worthwhile(self):
+    def test_live_recording_is_kept_when_no_clip_is_worthwhile(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             rec, out = root / "rec", root / "out"
@@ -65,7 +93,53 @@ class RegressionTests(unittest.TestCase):
             engine.check = lambda: None
             engine.emit = lambda *_args: None
             engine._process(str(recording))
-            self.assertFalse(recording.exists())
+            self.assertTrue(recording.exists())
+
+    def test_live_recording_is_kept_when_delete_recording_is_disabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rec, out = root / "rec", root / "out"
+            rec.mkdir()
+            out.mkdir()
+            recording = rec / "seg_123_chunk.ts"
+            recording.write_bytes(b"temporary capture")
+            engine = object.__new__(autoclip.Engine)
+            engine.cfg = {"mode": "live", "min_score": 70, "pre": 2, "post": 2, "delete_rec": False}
+            engine.rec_dir, engine.out_dir = rec, out
+            engine.transcribe = lambda _path: [(4.0, 5.0, "hello")]
+            engine.find_peaks = lambda *_args: ([(5, 90.0)], 12)
+            engine.status = lambda *_args: None
+            engine.log = lambda *_args: None
+            engine.check = lambda: None
+            def render(_source, _start, _end, _words, name, _metadata_words=None):
+                (out / f"{name}.mp4").write_bytes(b"complete rendered video")
+            engine.render = render
+            engine.emit = lambda *_args: None
+            engine._process(str(recording))
+            self.assertTrue(recording.exists())
+
+    def test_only_streamlink_ts_segments_are_auto_deleted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rec, out = root / "rec", root / "out"
+            rec.mkdir()
+            out.mkdir()
+            recording = rec / "uploaded_vod.ts"
+            recording.write_bytes(b"user-owned VOD")
+            engine = object.__new__(autoclip.Engine)
+            engine.cfg = {"mode": "live", "min_score": 70, "pre": 2, "post": 2, "delete_rec": True}
+            engine.rec_dir, engine.out_dir = rec, out
+            engine.transcribe = lambda _path: [(4.0, 5.0, "hello")]
+            engine.find_peaks = lambda *_args: ([(5, 90.0)], 12)
+            engine.status = lambda *_args: None
+            engine.log = lambda *_args: None
+            engine.check = lambda: None
+            def render(_source, _start, _end, _words, name, _metadata_words=None):
+                (out / f"{name}.mp4").write_bytes(b"complete rendered video")
+            engine.render = render
+            engine.emit = lambda *_args: None
+            engine._process(str(recording))
+            self.assertTrue(recording.exists())
 
     def test_live_recording_is_kept_if_every_clip_render_fails(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -210,6 +284,123 @@ class RegressionTests(unittest.TestCase):
                 self.assertTrue(item["scheduled"])
                 self.assertTrue(item["posted"])
 
+    def test_unconfirmed_zernio_callbacks_never_create_posted_or_scheduled_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "out"
+            output.mkdir()
+            clip = output / "unconfirmed_clip.mp4"
+            clip.write_bytes(b"rendered mp4")
+            with patch.multiple(
+                autoclip, _data_root=root, DATABASE_FILE=root / "streamsnip.db",
+                OUT=output, POSTED_FILE=root / "posted.json",
+                SCHEDULED_FILE=root / "scheduled.json", CORE=None,
+            ):
+                autoclip.invalidate_clip_cache()
+                with self.assertRaisesRegex(ValueError, "did not confirm"):
+                    autoclip.record_zernio_posted(clip.name, records=[])
+                with self.assertRaisesRegex(ValueError, "did not confirm"):
+                    autoclip.record_zernio_posted(
+                        clip.name, records=[{"status": "missing", "platform": "youtube"}]
+                    )
+                with self.assertRaisesRegex(ValueError, "did not confirm"):
+                    autoclip.record_zernio_scheduled(
+                        clip.name, records=[{"status": "failed", "platform": "instagram"}]
+                    )
+                with autoclip._database_connection() as db:
+                    self.assertEqual(
+                        db.execute("SELECT COUNT(*) FROM clip_deliveries").fetchone()[0],
+                        0,
+                    )
+                self.assertFalse(autoclip.load_posted_registry())
+                self.assertFalse(autoclip.load_scheduled_registry())
+
+    def test_scheduled_history_remains_visible_after_local_video_is_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "out"
+            output.mkdir()
+            clip = output / "scheduled_without_media.mp4"
+            clip.write_bytes(b"rendered mp4")
+            when = "2026-11-28T09:45:00Z"
+            with patch.multiple(
+                autoclip, _data_root=root, DATABASE_FILE=root / "streamsnip.db",
+                OUT=output, POSTED_FILE=root / "posted.json",
+                SCHEDULED_FILE=root / "scheduled.json", CORE=None,
+            ):
+                autoclip.invalidate_clip_cache()
+                autoclip.save_clip_metadata(
+                    clip, "Scheduled archive title", "The SQL copy stays after media removal."
+                )
+                autoclip.record_zernio_scheduled(
+                    clip.name,
+                    records=[{
+                        "connection_id": "slot-1",
+                        "account_id": "yt-1",
+                        "platform": "youtube",
+                        "post_id": "scheduled-post-1",
+                        "scheduled_for": when,
+                        "status": "pending",
+                    }],
+                )
+                autoclip.delete_clip_local_media(clip.name, preserve_delivery_history=True)
+                self.assertFalse(clip.exists())
+                self.assertFalse(clip.with_suffix(".txt").exists())
+                item = autoclip.list_clips(clip_tab="scheduled")[0]
+                self.assertEqual(item["name"], clip.name)
+                self.assertEqual(item["title"], "Scheduled archive title")
+                self.assertEqual(item["description"], "The SQL copy stays after media removal.")
+                self.assertEqual(item["scheduled_for"], when)
+                self.assertFalse(item["local_exists"])
+                self.assertEqual(item["delivery_state"], "scheduled")
+                self.assertEqual(autoclip.load_scheduled_registry()[clip.name]["accounts"], ["youtube:yt-1"])
+                latest = autoclip.list_clips(clip_tab="all")
+                self.assertEqual([row["name"] for row in latest], [clip.name])
+                self.assertFalse(latest[0]["local_exists"])
+
+    def test_publishable_clip_requires_a_completed_mp4_and_nonempty_metadata_sidecar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            clip = root / "rendered.mp4"
+            clip.write_bytes(b"rendered video bytes")
+            self.assertFalse(autoclip.is_fully_rendered_clip(clip))
+            sidecar = clip.with_suffix(".txt")
+            sidecar.write_text("", encoding="utf-8")
+            self.assertFalse(autoclip.is_fully_rendered_clip(clip))
+            sidecar.write_text("Generated title\n\nGenerated description", encoding="utf-8")
+            self.assertTrue(autoclip.is_fully_rendered_clip(clip))
+            temporary_output = root / "rendered.tmp.mp4"
+            temporary_output.write_bytes(b"partial video")
+            temporary_output.with_suffix(".txt").write_text("copy", encoding="utf-8")
+            self.assertFalse(autoclip.is_fully_rendered_clip(temporary_output))
+
+    def test_state_totals_include_delivery_history_without_local_mp4_files(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.session = {"started": None, "ended": None, "clips": 0, "chunks": 0}
+        core.engine = None
+        core.running = False
+        core.phase = "idle"
+        core.status = "Idle"
+        core.progress = 0
+        core.posting = {}
+        core.logs = []
+        core.log_id = 0
+
+        with patch.object(autoclip, "_clip_index", return_value=[{"name": "ready.mp4"}]):
+            with patch.object(autoclip, "load_posted_registry", return_value={
+                "posted_media_removed.mp4": {},
+                "posted_local.mp4": {},
+            }):
+                with patch.object(autoclip, "load_scheduled_registry", return_value={
+                    "scheduled_media_removed.mp4": {},
+                    "posted_local.mp4": {},
+                }):
+                    state = core.state(0, clip_tab="scheduled", include_clips=False)
+        self.assertEqual(state["clip_total"], 3)
+        self.assertEqual(state["posted_total"], 2)
+        self.assertEqual(state["scheduled_total"], 3)
+
     def test_state_totals_use_file_index_without_loading_all_clip_metadata(self):
         core = object.__new__(autoclip.Core)
         core.lock = threading.RLock()
@@ -237,6 +428,8 @@ class RegressionTests(unittest.TestCase):
                     with patch.object(autoclip, "list_clips") as list_clips:
                         state = core.state(0, clip_tab="scheduled", include_clips=False)
                         self.assertEqual(state["clip_total"], 3)
+                        latest = core.state(0, clip_tab="all", include_clips=False)
+                        self.assertEqual(latest["clip_total"], 4)
                         self.assertEqual(state["posted_total"], 2)
                         self.assertEqual(state["scheduled_total"], 3)
                         self.assertEqual(state["clips"], [])
@@ -1474,7 +1667,7 @@ class RegressionTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=0, stderr="")
 
             with patch.object(autoclip, "OUT", output), \
-                 patch.object(autoclip, "make_ass"), \
+                 patch.object(autoclip, "make_ass") as make_ass_mock, \
                  patch.object(autoclip, "run", side_effect=fake_run) as render_run, \
                  patch.object(autoclip, "has_nvenc", return_value=False), \
                  patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"), \
@@ -1487,17 +1680,26 @@ class RegressionTests(unittest.TestCase):
                      "hashtags": ["#Shorts", "#Gaming"],
                  }) as copy:
                 engine.out_dir = output
+                caption_words = [
+                    (10.1, 10.5, autoclip.PROFANITY_FILTER_MASK),
+                    (10.5, 11.0, "was"),
+                    (11.0, 11.5, "unbelievable!"),
+                ]
+                raw_words = [
+                    (10.1, 10.5, "That"), (10.5, 11.0, "was"),
+                    (11.0, 11.5, "unbelievable!"),
+                ]
                 engine.render(
-                    "source_recording.mp4", 10, 18,
-                    [(10.1, 10.5, "That"), (10.5, 11.0, "was"),
-                     (11.0, 11.5, "unbelievable!")],
-                    "rendered_clip"
+                    "source_recording.mp4", 10, 18, caption_words,
+                    "rendered_clip", metadata_words=raw_words
                 )
 
             self.assertTrue((output / "rendered_clip.mp4").is_file())
             self.assertEqual(render_run.call_count, 1, "Rendering must not run a separate CTA audio-mix pass.")
             self.assertFalse((output / "rendered_clip.cta.wav").exists())
             self.assertEqual(copy.call_args.args[2]["provider"], "gemini")
+            self.assertEqual(copy.call_args.args[0], "That was unbelievable!")
+            self.assertEqual(make_ass_mock.call_args.args[0], caption_words)
             sidecar = (output / "rendered_clip.txt").read_text(encoding="utf-8")
             manifest = (output / "clips_metadata.txt").read_text(encoding="utf-8")
             self.assertEqual(sidecar.splitlines()[0], "The chat could not believe what happened")
@@ -1543,6 +1745,7 @@ class RegressionTests(unittest.TestCase):
             with patch.object(autoclip, "OUT", output), \
                  patch.object(autoclip, "make_ass"), \
                  patch.object(autoclip, "run", side_effect=fake_run), \
+                 patch.object(autoclip, "ffmpeg_cuda_decode_args", return_value=[]), \
                  patch.object(autoclip, "has_nvenc", return_value=False), \
                  patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg"), \
                  patch.object(autoclip, "load_ai_settings", return_value={
@@ -1671,6 +1874,12 @@ class RegressionTests(unittest.TestCase):
                 paths = core._ensure_creator_paths("creator_publish")
                 clip = paths["live_clips"] / "creator_p_live_clip1.mp4"
                 clip.write_bytes(b"video")
+                with self.assertRaisesRegex(ValueError, "fully rendered"):
+                    core.publish_clips(
+                        [clip.name], account_ids={"instagram": "ig-account"}
+                    )
+                publisher.publish_one.assert_not_called()
+                clip.with_suffix(".txt").write_text("Completed title\n\nCompleted description", encoding="utf-8")
                 autoclip.invalidate_clip_cache()
                 result = core.publish_clips(
                     [clip.name],
@@ -2301,8 +2510,9 @@ class RegressionTests(unittest.TestCase):
             self.assertFalse(ass_path.exists())
             self.assertEqual(len(commands), 2)
             self.assertIn("0:a?", commands[0])
-            self.assertIn("-an", commands[1])
-            self.assertNotIn("0:a?", commands[1])
+            self.assertIn("0:a?", commands[1])
+            self.assertNotIn("-an", commands[1])
+            self.assertLess(commands[1].index("-i"), commands[1].index("-ss"))
             self.assertTrue((output / "audio-empty-fallback.mp4").is_file())
 
     def test_render_uses_frame_accurate_input_seeking_for_captions(self):
@@ -2327,6 +2537,8 @@ class RegressionTests(unittest.TestCase):
             filter_graph = command[command.index("-filter_complex") + 1]
             self.assertIn("setpts=PTS-STARTPTS", filter_graph)
             self.assertIn("asetpts=PTS-STARTPTS", command[command.index("-af") + 1])
+            self.assertEqual(command[command.index("-ac") + 1], "2")
+            self.assertEqual(command[command.index("-ar") + 1], "48000")
 
     def test_live_capture_bitrate_defaults_and_clamps_to_8000_kbps(self):
         self.assertEqual(autoclip.clean_cfg({})["capture_bitrate_kbps"], 8000)
@@ -2425,7 +2637,7 @@ class RegressionTests(unittest.TestCase):
             self.assertLess(sum(value > 220 for value in absent.stdout), 100)
 
     @unittest.skipUnless(autoclip.shutil.which("ffmpeg") or autoclip.ffmpeg_exe() != "ffmpeg", "FFmpeg is not installed")
-    def test_render_audio_eof_fallback_keeps_subtitles_and_outputs_video(self):
+    def test_render_audio_eof_does_not_emit_silent_clip_when_audio_is_missing(self):
         ffmpeg = autoclip.ffmpeg_exe()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2453,30 +2665,31 @@ class RegressionTests(unittest.TestCase):
                 engine = autoclip.Engine(cfg, lambda kind, payload: logs.append((kind, payload)))
                 real_run = autoclip.run
 
-                def fail_first_audio_attempt(command, **kwargs):
+                def fail_audio_attempts(command, **kwargs):
                     # Let has_nvenc() run its independent FFmpeg probe normally.
                     if "cwd" not in kwargs:
                         return real_run(command, **kwargs)
                     attempts.append(command)
-                    if "-an" not in command:
-                        return types.SimpleNamespace(
-                            returncode=1,
-                            stderr="[aac] Could not open encoder before EOF; Nothing was written into output file, because at least one of its streams received no packets.",
-                        )
                     self.assertTrue((output / "audio-eof-recovery.ass").is_file())
-                    return real_run(command, **kwargs)
+                    return types.SimpleNamespace(
+                        returncode=1,
+                        stderr="[aac] Could not open encoder before EOF; Nothing was written into output file, because at least one of its streams received no packets.",
+                    )
 
-                with patch.object(autoclip, "run", side_effect=fail_first_audio_attempt):
-                    engine.render(source, 5, 8, [(5.1, 6.8, "CAPTION VISIBLE")], "audio-eof-recovery")
+                with patch.object(autoclip, "run", side_effect=fail_audio_attempts):
+                    with self.assertRaisesRegex(RuntimeError, "No audio packets were available"):
+                        engine.render(source, 5, 8, [(5.1, 6.8, "CAPTION VISIBLE")], "audio-eof-recovery")
 
             rendered = output / "audio-eof-recovery.mp4"
-            self.assertTrue(rendered.is_file())
-            self.assertGreater(rendered.stat().st_size, 1000)
+            self.assertFalse(rendered.exists(), "Do not save a silent clip when the source has an audio stream.")
+            self.assertFalse((output / "audio-eof-recovery.tmp.mp4").exists())
             self.assertFalse((output / "audio-eof-recovery.ass").exists())
             self.assertEqual(len(attempts), 2)
             self.assertIn("0:a?", attempts[0])
-            self.assertIn("-an", attempts[1])
-            self.assertTrue(any("Retrying the render without an audio stream" in str(payload)
+            self.assertIn("0:a?", attempts[1])
+            self.assertNotIn("-an", attempts[1])
+            self.assertLess(attempts[1].index("-i"), attempts[1].index("-ss"))
+            self.assertTrue(any("Retrying audio with accurate output seeking" in str(payload)
                                 for _kind, payload in logs))
 
     def test_gemini_quota_exhaustion_falls_back_to_ollama(self):
@@ -2573,7 +2786,7 @@ class RegressionTests(unittest.TestCase):
         engine.process("clip.ts")
         engine.log.assert_any_call("Transcript words (2): HELLO WORLD!")
 
-    def test_rejected_recording_chunk_is_deleted_immediately(self):
+    def test_recording_chunk_without_a_successful_clip_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
             recording = Path(directory).resolve() / "segment.ts"
             recording.touch()
@@ -2587,7 +2800,7 @@ class RegressionTests(unittest.TestCase):
             engine.emit = MagicMock()
             with patch.object(autoclip, "REC", Path(directory)):
                 engine.process(recording)
-            self.assertFalse(recording.exists())
+            self.assertTrue(recording.exists())
 
     def test_runtime_log_is_persisted_for_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2676,18 +2889,18 @@ class RegressionTests(unittest.TestCase):
             self.assertIn("secret", stored)
             self.assertIn("custom-secret", stored)
 
-    def test_native_installer_tracks_owned_dependencies_and_keeps_user_python(self):
+    def test_pywebview_installer_tracks_owned_dependencies_and_keeps_user_python(self):
         root = Path(__file__).resolve().parents[1]
         setup_script = (root / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
         uninstall_script = (root / "installer" / "uninstall_windows.ps1").read_text(encoding="utf-8")
-        installer_script = (root / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
+        installer_script = (root / "installer" / "StreamSnipAI.iss").read_text(encoding="utf-8")
         self.assertIn("api_server.py", setup_script)
-        self.assertIn("[switch]$NativeDesktop", setup_script)
-        self.assertIn("native-engine.json", setup_script)
+        self.assertIn("[switch]$DesktopShell", setup_script)
+        self.assertIn("desktop-shell.json", setup_script)
         self.assertIn("source_root = $source", setup_script)
         self.assertIn("python_executable = $runtimePython", setup_script)
         self.assertIn("data_root = $dataRoot", setup_script)
-        self.assertIn("-NativeDesktop", installer_script)
+        self.assertIn("-DesktopShell", installer_script)
         self.assertIn("CurStepChanged(CurStep: TSetupStep)", installer_script)
         self.assertIn("ewWaitUntilTerminated", installer_script)
         self.assertIn("ResultCode <> 0", installer_script)
@@ -2698,7 +2911,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("function InitializeUninstall(): Boolean;", installer_script)
         self.assertIn("procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);", installer_script)
         self.assertIn("zernio_connections.py", installer_script)
-        self.assertIn("StreamSnip.Desktop.exe", installer_script)
+        self.assertIn("StreamSnipAI.exe", installer_script)
+        self.assertNotIn("StreamSnip.Desktop", installer_script)
         self.assertNotIn("custom_words.txt", installer_script)
         self.assertNotIn('Mark-DependencyInstalled "python"', setup_script)
         self.assertIn('Mark-DependencyInstalled "ffmpeg"', setup_script)
@@ -2789,8 +3003,8 @@ class RegressionTests(unittest.TestCase):
             "name": "StreamSnip AI 4.0.10",
             "html_url": "https://github.com/sifat-jaman-13/stream-clip-ai/releases/tag/v4.0.10",
             "assets": [{
-                "name": "StreamSnipAI-Native-Setup.exe",
-                "browser_download_url": "https://example.invalid/StreamSnipAI-Native-Setup.exe",
+                "name": "StreamSnipAI-Setup.exe",
+                "browser_download_url": "https://example.invalid/StreamSnipAI-Setup.exe",
                 "digest": "sha256:" + digest,
                 "size": 12345,
             }],
@@ -2801,7 +3015,7 @@ class RegressionTests(unittest.TestCase):
             "version": "4.0.6",
             "installed": True,
             "install_dir": r"C:\Apps\StreamSnip AI Native",
-            "app_executable": r"C:\Apps\StreamSnip AI Native\desktop\StreamSnip.Desktop.exe",
+            "app_executable": r"C:\Apps\StreamSnip AI Native\shell\StreamSnipAI.exe",
         }
         with patch.object(autoclip, "_installed_app_info", return_value=installed, create=True), \
              patch.object(autoclip.urllib.request, "urlopen", return_value=response):
@@ -2827,7 +3041,7 @@ class RegressionTests(unittest.TestCase):
                 "latest": "4.0.10",
                 "update": True,
                 "installer_url": "https://example.invalid/setup.exe",
-                "installer_name": "StreamSnipAI-Native-Setup.exe",
+                "installer_name": "StreamSnipAI-Setup.exe",
                 "installer_sha256": digest,
                 "installer_size": len(payload),
                 "can_install": True,
@@ -2836,7 +3050,7 @@ class RegressionTests(unittest.TestCase):
                 "version": "4.0.6",
                 "installed": True,
                 "install_dir": directory,
-                "app_executable": str(Path(directory) / "desktop" / "StreamSnip.Desktop.exe"),
+                "app_executable": str(Path(directory) / "shell" / "StreamSnipAI.exe"),
             }
             with patch.object(autoclip, "check_app_update", return_value=release), \
                  patch.object(autoclip, "_installed_app_info", return_value=installed, create=True), \
@@ -2849,7 +3063,7 @@ class RegressionTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertTrue(result["pending_restart"])
             self.assertEqual(result["latest"], "4.0.10")
-            downloaded = Path(directory) / "StreamSnipAI-Native-Setup.exe"
+            downloaded = Path(directory) / "StreamSnipAI-Setup.exe"
             self.assertEqual(downloaded.read_bytes(), payload)
             helper = Path(directory) / "install-update.ps1"
             self.assertTrue(helper.is_file())
@@ -2870,14 +3084,14 @@ class RegressionTests(unittest.TestCase):
                 "latest": "4.0.10",
                 "update": True,
                 "installer_url": "https://example.invalid/setup.exe",
-                "installer_name": "StreamSnipAI-Native-Setup.exe",
+                "installer_name": "StreamSnipAI-Setup.exe",
                 "installer_sha256": "0" * 64,
                 "installer_size": len(payload),
                 "can_install": True,
             }
             with patch.object(autoclip, "check_app_update", return_value=release), \
                  patch.object(autoclip, "_installed_app_info", return_value={"version": "4.0.6", "installed": True, "install_dir": directory,
-                     "app_executable": str(Path(directory) / "desktop" / "StreamSnip.Desktop.exe")}, create=True), \
+                     "app_executable": str(Path(directory) / "shell" / "StreamSnipAI.exe")}, create=True), \
                  patch.object(autoclip.urllib.request, "urlopen", return_value=response), \
                  patch.object(autoclip.tempfile, "mkdtemp", return_value=directory), \
                  patch.object(autoclip.os, "getppid", return_value=4321), \
@@ -3034,16 +3248,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("/api/window/closing?id=", api_source)
 
     def test_window_close_quits_but_page_reload_can_reconnect(self):
-        self.assertIn('window.addEventListener("pagehide"', autoclip.HTML)
-        self.assertIn('api("/api/window/open")', autoclip.HTML)
-        self.assertIn('windowLeaseId', autoclip.HTML)
-        self.assertIn('/api/window/lease?id=', autoclip.HTML)
-        self.assertIn('/api/window/closing?id=', autoclip.HTML)
-        self.assertIn('api("/api/quit")', autoclip.HTML)
-        self.assertIn('const center=h("button",{class:"btn ghost"},"Center segment")', autoclip.HTML)
-        self.assertIn('id="ai-test-provider"', autoclip.HTML)
-        self.assertIn('id="gemini-key-clear"', autoclip.HTML)
-        self.assertIn('id="hf-token-clear"', autoclip.HTML)
+        dashboard_api = (Path(__file__).resolve().parents[1] / "dashboard" / "src" / "api.ts").read_text(encoding="utf-8")
+        self.assertIn('window.addEventListener("pagehide"', dashboard_api)
+        self.assertIn('window.addEventListener("pageshow"', dashboard_api)
+        self.assertIn("/api/window/lease", dashboard_api)
 
     def test_pagehide_releases_its_named_lease_without_waiting_for_sse_disconnect(self):
         timer = MagicMock()
@@ -3237,6 +3445,7 @@ class RegressionTests(unittest.TestCase):
         ]
         audio_filter = autoclip.profanity_audio_filter(words, 10.0, 18.0, mode="beep")
         self.assertIn("aeval=exprs=", audio_filter)
+        self.assertIn(":channel_layout=stereo", audio_filter)
         self.assertIn("sin(2*PI*1000*t)", audio_filter)
         self.assertIn("between(t,2.080,2.820)", audio_filter)
         self.assertIn("between(t,4.980,5.320)", audio_filter)
@@ -3349,39 +3558,3 @@ class RegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-class SharedCreatorSettingsApiTests(unittest.TestCase):
-    def test_api_config_returns_shared_defaults_not_last_creator_runtime_snapshot(self):
-        import http.client
-        import http.server
-        import json
-        import threading
-
-        previous_runtime = autoclip.CORE.settings
-        previous_defaults = autoclip.CORE.default_settings
-        server = None
-        worker = None
-        try:
-            runtime = {"layout": "Creator A layout", "output_format": "9:16", "min_score": 92}
-            shared = {"layout": "Local default layout", "output_format": "16:9", "min_score": 75}
-            autoclip.CORE.settings = runtime
-            autoclip.CORE.default_settings = shared
-            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), autoclip.Handler)
-            worker = threading.Thread(target=server.serve_forever, daemon=True)
-            worker.start()
-            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
-            connection.request("GET", "/api/config")
-            response = connection.getresponse()
-            payload = json.loads(response.read().decode("utf-8"))
-            connection.close()
-            self.assertEqual(response.status, 200)
-            self.assertEqual(payload["settings"], shared)
-            self.assertNotEqual(payload["settings"], runtime)
-        finally:
-            if server is not None:
-                server.shutdown()
-                server.server_close()
-            if worker is not None:
-                worker.join(timeout=2)
-            autoclip.CORE.settings = previous_runtime
-            autoclip.CORE.default_settings = previous_defaults

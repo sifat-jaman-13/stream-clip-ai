@@ -312,12 +312,13 @@ class PostMetadataTests(unittest.TestCase):
         self.assertIn("coffee", result["description"].lower())
         self.assertIn("garage", result["description"].lower())
 
-    def test_unclear_asr_fallback_uses_safe_topic_title_and_marks_review(self):
+    def test_unclear_asr_fallback_uses_review_copy_instead_of_guessing_topic(self):
         transcript = "I can fit more than thanks to the bike bro. Is it like what matter?"
         result = post_metadata.build_transcript_fallback(transcript, "@zerkaa")
-        self.assertEqual(result["title"], "A Conversation About the Bike")
+        self.assertEqual(result["title"], "A Stream Moment Needs Review")
         self.assertTrue(result["needs_review"])
-        self.assertIn("wording is unclear", result["description"])
+        self.assertIn("too fragmented", result["description"])
+        self.assertNotIn("A Conversation About", result["title"])
 
     def test_stream_intro_and_call_to_action_do_not_become_post_copy(self):
         transcript = (

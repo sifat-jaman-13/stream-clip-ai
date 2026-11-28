@@ -26,6 +26,18 @@ async function getToken(): Promise<string> {
   return tokenPromise;
 }
 
+function invalidateSessionToken(staleToken: string) {
+  if (window.__STREAMSNIP_TOKEN__ === staleToken) {
+    delete window.__STREAMSNIP_TOKEN__;
+  }
+  tokenPromise = null;
+}
+
+async function refreshSessionToken(staleToken: string): Promise<string> {
+  invalidateSessionToken(staleToken);
+  return getToken();
+}
+
 const makeWindowLeaseId = () =>
   typeof window.crypto?.randomUUID === "function"
     ? window.crypto.randomUUID()
@@ -72,7 +84,7 @@ export function installWindowLeaseLifecycle(): () => void {
         sessionToken = sessionToken || await getToken();
         while (active && !disposed && controller === streamController) {
           try {
-            const response = await fetch(
+            let response = await fetch(
               "/api/window/lease?id=" + encodeURIComponent(leaseId),
               {
                 headers: { "X-Token": sessionToken },
@@ -80,6 +92,17 @@ export function installWindowLeaseLifecycle(): () => void {
                 signal: streamController.signal,
               },
             );
+            if (response.status === 403) {
+              sessionToken = await refreshSessionToken(sessionToken);
+              response = await fetch(
+                "/api/window/lease?id=" + encodeURIComponent(leaseId),
+                {
+                  headers: { "X-Token": sessionToken },
+                  cache: "no-store",
+                  signal: streamController.signal,
+                },
+              );
+            }
             if (!response.ok || !response.body) {
               throw new Error("The app window lease could not be established.");
             }
@@ -204,12 +227,19 @@ export async function apiPost<T>(path: string, body: unknown = {}): Promise<T> {
   }
 
   let response: Response;
+  const send = (sessionToken: string) => fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Token": sessionToken },
+    body: JSON.stringify(body),
+  });
   try {
-    response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Token": token },
-      body: JSON.stringify(body),
-    });
+    response = await send(token);
+    // A 403 means this process token expired after an engine restart. The API
+    // rejects it before dispatching the action, so one fresh-token retry is safe.
+    if (response.status === 403) {
+      token = await refreshSessionToken(token);
+      response = await send(token);
+    }
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : "The local app server could not be reached.";
     notifyApp("error", label + " failed", message);

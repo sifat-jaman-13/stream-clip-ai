@@ -36,6 +36,7 @@ export interface LogEntry {
   id: number;
   t: string;
   m: string;
+  level?: string;
   file_lock?: unknown;
 }
 

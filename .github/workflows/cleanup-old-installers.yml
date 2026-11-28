@@ -26,8 +26,6 @@ jobs:
             const installerNames = new Set([
               "StreamSnipAI-Setup.exe",
               "StreamSnipAI-Setup.exe.sha256",
-              "StreamSnipAI-Native-Setup.exe",
-              "StreamSnipAI-Native-Setup.exe.sha256",
             ]);
             let keepReleaseId = context.payload.release?.id;
 

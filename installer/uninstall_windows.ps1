@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory = $true)]
     [string]$AppDir,
     [string]$DependencyStatePath = "",
@@ -53,7 +53,11 @@ function Save-DependencyOwnership {
 }
 
 function Invoke-OwnedDependencyCleanup {
-    if ($SkipGlobalDependencyRemoval -or $null -eq $ownership) { return }
+    if ($SkipGlobalDependencyRemoval) { return }
+    if ($null -eq $ownership) {
+        Write-CleanupLog "Dependency ownership state is missing; shared global Python/FFmpeg packages were left untouched to avoid removing user-owned tools."
+        return
+    }
     $needsPython = [bool]$ownership.python_installed_by_streamsnip
     $needsFfmpeg = [bool]$ownership.ffmpeg_installed_by_streamsnip
     if (-not ($needsPython -or $needsFfmpeg)) { return }
@@ -90,7 +94,7 @@ $appPrefix = $AppDir.TrimEnd('\') + '\'
 $ownedProcesses = @(Get-CimInstance Win32_Process | Where-Object {
     ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($appPrefix, [StringComparison]::OrdinalIgnoreCase)) -or
     ($_.CommandLine -and $_.CommandLine.IndexOf($appPrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-        ($_.Name -match '^(python|pythonw|StreamSnip\.Desktop)\.exe$'))
+        ($_.Name -match '^(python|pythonw|StreamSnipAI)\.exe$'))
 })
 foreach ($processInfo in $ownedProcesses) {
     try {
@@ -124,7 +128,7 @@ if ($KeepConfig -and $localRoot) {
     $backupRoot = Join-Path $env:TEMP "StreamSnipAI-config-$backupKey"
     New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
 
-    # native-engine.json, streamsnip.db recordings, clips and dependency ownership are deliberately not preserved.
+    # desktop-shell.json, streamsnip.db recordings, clips and dependency ownership are deliberately not preserved.
 # A pre-existing backup is authoritative after an interrupted uninstall. Never overwrite it.
     foreach ($entry in $configFiles) {
         $sourcePath = Join-Path $localRoot $entry.Relative

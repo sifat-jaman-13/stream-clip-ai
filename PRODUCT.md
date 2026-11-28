@@ -2,11 +2,12 @@
 
 ## Platform
 
-adaptive
+Windows 10/11 desktop application using a single local-first application stack:
 
-- **Native desktop design language:** Windows Fluent, implemented with WinUI 3 for Windows 10/11 x64.
-- **Browser design language:** The React and TypeScript dashboard is a separate browser-oriented surface with its own responsive web system.
-- **Shared product model:** Both surfaces present the same local-first creator workflow; the installed native Windows shell remains the primary desktop experience and owns the local Python media engine.
+- Backend: FastAPI (Python), bound to loopback.
+- Frontend: React + TypeScript + Vite. This is the only application interface.
+- Desktop shell: pywebview hosting the same production React build in Edge WebView2.
+- Processing: faster-whisper, FFmpeg, OpenCV/YuNet, and existing Python media services.
 
 ## Users
 
@@ -22,15 +23,15 @@ A desktop media workstation that connects stream capture and creator monitoring 
 
 ## Operating architecture
 
-- **Native shell:** WinUI 3 owns the installed Windows desktop interface, navigation, native controls, and application lifecycle.
-- **Local engine:** Python owns capture, creator monitoring, transcription orchestration, AI analysis, FFmpeg rendering, file operations, and publishing integration.
-- **Local transport:** FastAPI exposes engine services over loopback only. The native shell starts and supervises the Python process and uses the per-process session token for state-changing requests.
-- **Browser interface:** The React/Vite dashboard remains a separate browser-oriented frontend and developer workflow; it is not the installed WinUI 3 shell.
-- **Storage:** Installed application settings, engine configuration, and the clip library live under the user's local application data. User data must not be included in source-control or installer build artefacts unless explicitly intended.
+- Desktop shell: pywebview creates the Windows window, supervises the Python process, and shuts it down when the user quits.
+- Local engine: Python owns capture, creator monitoring, transcription orchestration, AI analysis, FFmpeg rendering, file operations, and publishing integration.
+- Local transport: FastAPI exposes engine services over loopback only. The shell starts the service and uses the per-process session token for state-changing requests.
+- Application interface: dashboard/ contains the only React/Vite UI. Browser development and the installed Windows app use the same frontend build.
+- Storage: settings, engine configuration, and the clip library live under the user's local application data. User data must not be included in source-control or installer build artifacts unless explicitly intended.
 
 ## Publishing and external services
 
-Publishing is handled exclusively through the configured Zernio integration and its connected **Facebook, Instagram, and YouTube** accounts. TikTok is not supported by this integration.
+Publishing is handled exclusively through the configured Zernio integration and its connected Facebook, Instagram, and YouTube accounts. TikTok is not supported by this integration.
 
 StreamSnip discovers all supported accounts returned by Zernio and provides an individual posting-enabled control for each account. It does not impose its own API-key connection count, per-platform account slots, or posting quota. Zernio and the connected social platforms determine account availability and posting limits. Different keys can belong to the same Zernio billing workspace and therefore share its request allowance; a distinct key does not prove an independent budget.
 
@@ -38,7 +39,7 @@ Workspace request throttling, account-specific posting caps, and upstream platfo
 
 ## Capabilities and constraints
 
-- The native application includes Dashboard, Live Studio, Creators, Clip library, Published, Hype words, Publishing, Settings, Activity, Help, and About.
+- The desktop application includes Dashboard, Live Studio, Creators, Clip library, Scheduled, Hype words, Publisher, Settings, Activity, Help, and About.
 - Live Studio groups Source, Capture, AI provider, Transcription, Framing, and Captions into pre-capture setup.
 - Capture never begins automatically when a page opens; it requires an explicit user action.
 - Creator profiles support independent live monitoring and recorded-VOD folder watching. Each profile owns its facecam/game regions, video layout/aspect ratio, and caption appearance; AI/caption providers, clipping thresholds, and profanity filtering remain shared defaults.
@@ -46,26 +47,12 @@ Workspace request throttling, account-specific posting caps, and upstream platfo
 - Hosted AI providers receive transcript text when selected; local Hook Words and a local Ollama instance are alternatives.
 - Provider availability, connected social accounts, and publishing outcomes depend on external configuration and responses.
 - The local API must remain bound to loopback and must not be exposed to an untrusted LAN or the public internet.
-- Preserve API contracts, user data, credentials, and operational behavior when changing the frontend or native host.
+- Preserve API contracts, user data, credentials, and operational behavior when changing the application.
 - Do not invent engine state, processing progress, clip content, provider success, or posting status.
 
 ## Brand and appearance
 
 - Product name: StreamSnip AI.
-- Default visual system: Studio Dark, with near-black work surfaces, vivid red actions, neutral high-contrast text, and semantic green/amber status colors.
-- The React interface has multiple curated themes and font choices; JetBrains Mono is the default in every theme, with bundled sans-serif and monospace fonts plus Windows system and serif alternatives.
-- The native interface uses the same default palette and JetBrains Mono across shell, content, menus, inputs, and native controls; the font family is user-selectable and persists across themes.
-- The interface is an original creator workspace informed by familiar creator-studio patterns, not a pixel copy of another product.
-
-## Product principles
-
-- Keep capture state and destructive actions explicit and understandable.
-- Make the journey from source to reviewed clip direct and predictable.
-- Preserve user control over monitoring, recording, and publishing.
-- Surface real engine state and actionable errors rather than decorative metrics.
-- Keep the workspace responsive and usable during long-running local processing.
-- Explain when transcript text is sent to a hosted AI provider.
-
-## Accessibility
-
-Use semantic controls, visible keyboard focus, sufficient contrast, labelled inputs, keyboard-operable tabs, and reduced-motion support. Status must be conveyed through text or icons as well as color.
+- Default visual system: Studio Dark.
+- Studio Light and Solarized Paper are the primary alternate palettes; additional palettes remain in the advanced appearance list.
+- The appearance system is implemented once in React/CSS, not mirrored in XAML.

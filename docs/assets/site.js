@@ -5,14 +5,14 @@
   const themeName = document.getElementById("active-theme-name");
   const metaTheme = document.getElementById("theme-color-meta");
   const names = {
-    system:"System",odysseus:"Odysseus","studio-light":"Studio Light","studio-dark":"Studio Dark",
-    github:"GitHub Dark",nord:"Nord",odysseas:"Odysseus Paper",ocean:"Ocean Depths",
+    system:"System","odysseus-dark":"Odysseus","studio-light":"Studio Light","studio-dark":"Studio Dark",
+    github:"GitHub Dark",nord:"Nord","odysseus-paper":"Odysseus Paper",ocean:"Ocean Depths",
     forest:"Forest Night",solarized:"Solarized Paper","rose-graphite":"Rose Graphite",
     ember:"Ember Studio",slate:"Slate Studio"
   };
   const themeColors = {
-    odysseus:"#282c34","studio-light":"#f9f9f9","studio-dark":"#0f0f0f",github:"#0d1117",
-    nord:"#2e3440",odysseas:"#edf0ec",ocean:"#101c27",forest:"#111b17",
+    "odysseus-dark":"#282c34","studio-light":"#f9f9f9","studio-dark":"#0f0f0f",github:"#0d1117",
+    nord:"#2e3440","odysseus-paper":"#edf0ec",ocean:"#101c27",forest:"#111b17",
     solarized:"#f6f2e8","rose-graphite":"#211c20",ember:"#1d1a16",slate:"#20262d"
   };
   const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -20,7 +20,7 @@
   if (!names[choice]) choice = "studio-dark";
 
   const renderTheme = () => {
-    const actual = choice === "system" ? (media.matches ? "odysseus" : "studio-light") : choice;
+    const actual = choice === "system" ? (media.matches ? "studio-dark" : "studio-light") : choice;
     root.dataset.themeChoice = choice;
     root.dataset.theme = actual;
     if (themeName) themeName.textContent = names[choice];

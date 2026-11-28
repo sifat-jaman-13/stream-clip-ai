@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
   <img src="assets/streamsnipai-banner.svg" width="100%" alt="StreamSnip AI, a native Windows studio for turning live streams into shareable clips">
   <p><strong>Capture the moment. Shape the clip. Review it. Publish when you are ready.</strong></p>
   <p>
@@ -6,7 +6,7 @@
     <a href="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/sifat-jaman-13/stream-clip-ai/tests.yml?branch=master&style=flat-square&label=tests" alt="Test workflow"></a>
     <a href="https://github.com/sifat-jaman-13/stream-clip-ai/actions/workflows/build-installer.yml"><img src="https://img.shields.io/github/actions/workflow/status/sifat-jaman-13/stream-clip-ai/build-installer.yml?branch=master&style=flat-square&label=Windows%20installer" alt="Windows installer workflow"></a>
     <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-2878d0?style=flat-square&logo=windows" alt="Windows 10 and 11">
-    <img src="https://img.shields.io/badge/interface-WinUI%203-236b78?style=flat-square" alt="WinUI 3">
+    <img src="https://img.shields.io/badge/interface-React%20%2B%20pywebview-236b78?style=flat-square" alt="React and pywebview">
     <img src="https://img.shields.io/badge/licence-proprietary%20non--commercial-c47d46?style=flat-square" alt="Proprietary non-commercial licence">
   </p>
   <p>
@@ -21,13 +21,13 @@
 
 StreamSnip AI is a **native Windows creator studio** for turning supported Twitch and YouTube live streams, recorded VODs, and local videos into short-form clips. It brings capture, creator monitoring, local transcription, AI-assisted highlight selection, facecam-aware framing, animated captions, clip review, metadata, and controlled publishing into one workflow.
 
-The installed desktop app uses **WinUI 3** with a supervised local Python media engine. The React/Vite dashboard in `dashboard/` is a separate browser-oriented frontend; it is not the installed native shell.
+The installed desktop app uses FastAPI + React/TypeScript + pywebview. FastAPI is the only local backend, React/Vite is the only application interface, and pywebview opens that same React build in a Windows desktop window using WebView2. Capture, transcription, rendering, and publishing orchestration remain in Python.
 
 **Capture and publishing are always explicit actions.** Opening Live Studio does not start recording, and StreamSnip does not publish clips automatically.
 
 ## See the app
 
-Screenshots below are from the **4.0.10 native Windows Release build**.
+Screenshots below show the React Creator Studio interface.
 
 <p align="center">
   <img src="docs/assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.10 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
@@ -63,11 +63,11 @@ Screenshots below are from the **4.0.10 native Windows Release build**.
 ## Install on Windows
 
 1. Open [GitHub Releases](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest).
-2. Download `StreamSnipAI-Native-Setup.exe` and its matching `.sha256` file into the same folder.
+2. Download `StreamSnipAI-Setup.exe` and its matching `.sha256` file into the same folder.
 3. Open PowerShell in that folder and verify the installer:
 
 ```powershell
-$installer = '.\StreamSnipAI-Native-Setup.exe'
+$installer = '.\StreamSnipAI-Setup.exe'
 $checksum = "$installer.sha256"
 $expected = ((Get-Content -LiteralPath $checksum -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
 $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -199,11 +199,11 @@ npm run lint
 npm run build
 cd ..
 
-.\build_native_installer.ps1
+.\build_installer.ps1
 python -m pytest -q
 ```
 
-The build script creates the dashboard bundle, publishes the self-contained `win-x64` WinUI 3 app, compiles the Inno Setup installer, and writes the installer plus SHA-256 sidecar under `dist\installer\`.
+The build script runs React lint and Vite production build, packages the pywebview shell with PyInstaller, compiles the Inno Setup installer, and writes StreamSnipAI-Setup.exe plus its SHA-256 sidecar under dist\installer\. It does not build a second UI or compile a C# desktop shell.
 
 ## Project information
 

@@ -1,9 +1,9 @@
-﻿#ifndef MyAppVersion
-  #define MyAppVersion "4.1.0"
+#ifndef MyAppVersion
+  #error MyAppVersion must be supplied by the build script with /DMyAppVersion
 #endif
 #define MyAppName "StreamSnip AI"
 #define MyAppPublisher "ScarZero"
-#define MyNativeExe "StreamSnip.Desktop.exe"
+#define MyShellExe "StreamSnipAI.exe"
 
 [Setup]
 AppId={{A6F21D5A-9C77-48A7-8B65-F33DE03D2C80}
@@ -13,22 +13,31 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\StreamSnip AI Native
 DefaultGroupName=StreamSnip AI
 OutputDir=..\dist\installer
-OutputBaseFilename=StreamSnipAI-Native-Setup
+OutputBaseFilename=StreamSnipAI-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=..\assets\app-icon.ico
-UninstallDisplayIcon={app}\desktop\{#MyNativeExe}
+UninstallDisplayIcon={app}\shell\{#MyShellExe}
 DisableProgramGroupPage=yes
 
+[InstallDelete]
+; Replace the old WinUI payload without disturbing the shared user Library.
+Type: filesandordirs; Name: "{app}\desktop"
+Type: filesandordirs; Name: "{app}\source\dashboard"
+Type: filesandordirs; Name: "{app}\source\facecam-inference"
+Type: files; Name: "{localappdata}\StreamSnip AI\native-engine.json"
+
 [Files]
-Source: "..\dist\StreamSnipDesktopNative\*"; DestDir: "{app}\desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\StreamSnipAI\*"; DestDir: "{app}\shell"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\assets\product\*.png"; DestDir: "{app}\docs\assets\product"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\licenses\third-party\*"; DestDir: "{app}\licenses\third-party"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; The only backend is FastAPI, served by the local Python processing service.
 Source: "..\autoclip.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\api_server.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\ai_highlights.py"; DestDir: "{app}\source"; Flags: ignoreversion
@@ -37,32 +46,37 @@ Source: "..\zernio_poster.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\zernio_connections.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\facecam_detect.py"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\secret_store.py"; DestDir: "{app}\source"; Flags: ignoreversion
-Source: "..\dist\FacecamInference\*"; DestDir: "{app}\source\facecam-inference"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\requirements.txt"; DestDir: "{app}\source"; Flags: ignoreversion
 Source: "..\assets\*"; DestDir: "{app}\source\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\models\face_detection_yunet_2023mar.onnx"; DestDir: "{app}\source\models"; Flags: ignoreversion
 Source: "..\dashboard\dist\*"; DestDir: "{app}\source\dashboard\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Setup uses a compatible existing Python first and keeps app-owned data under LOCALAPPDATA.
 Source: "setup_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "python315_support.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "uninstall_windows.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\StreamSnip AI"; Filename: "{app}\desktop\{#MyNativeExe}"; WorkingDir: "{app}\desktop"
-Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\desktop\{#MyNativeExe}"; WorkingDir: "{app}\desktop"; Tasks: desktopicon
+Name: "{group}\StreamSnip AI"; Filename: "{app}\shell\{#MyShellExe}"; WorkingDir: "{app}\shell"
+Name: "{autodesktop}\StreamSnip AI"; Filename: "{app}\shell\{#MyShellExe}"; WorkingDir: "{app}\shell"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\desktop\{#MyNativeExe}"; WorkingDir: "{app}\desktop"; Description: "Launch StreamSnip AI"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\shell\{#MyShellExe}"; WorkingDir: "{app}\shell"; Description: "Launch StreamSnip AI"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
-Type: files; Name: "{localappdata}\StreamSnip AI\native-engine.json"
+Type: files; Name: "{localappdata}\StreamSnip AI\desktop-shell.json"
 Type: filesandordirs; Name: "{app}\runtime"
 Type: filesandordirs; Name: "{app}\runtime.previous"
 Type: filesandordirs; Name: "{app}\python-base"
 Type: filesandordirs; Name: "{app}\source"
+Type: filesandordirs; Name: "{app}\shell"
 Type: filesandordirs; Name: "{app}\desktop"
+Type: filesandordirs; Name: "{app}\source\dashboard"
+Type: filesandordirs; Name: "{app}\source\facecam-inference"
+Type: files; Name: "{localappdata}\StreamSnip AI\native-engine.json"
 Type: filesandordirs; Name: "{app}\licenses"
 
 [Code]
@@ -83,7 +97,7 @@ begin
     Parameters := '-NoProfile -ExecutionPolicy Bypass -File "' +
       ExpandConstant('{app}\setup_windows.ps1') +
       '" -AppDir "' + ExpandConstant('{app}') +
-      '" -SkipLaunch -NoPause -NativeDesktop';
+      '" -SkipLaunch -NoPause -DesktopShell';
     SetupLog := ExpandConstant('{localappdata}\StreamSnip AI\setup.log');
     ShowCommand := SW_SHOW;
     if WizardSilent then
@@ -111,11 +125,11 @@ begin
   if not UninstallSilent then
   begin
     Choice := MsgBox(
-      'Keep only settings and configuration?' + #13#10 + #13#10 +
+      'Keep settings and configuration?' + #13#10 + #13#10 +
       'YES: Keep app settings, AI provider settings/API keys, publishing settings, custom words and desktop preferences.' + #13#10 +
       'NO: Remove all app data, clips, recordings, models, runtime and configuration.' + #13#10 +
       'Your personal files outside StreamSnip AI folders are not touched.',
-      mbConfirmation, MB_YESNOCANCEL or MB_DEFBUTTON2);
+      mbConfirmation, MB_YESNOCANCEL or MB_DEFBUTTON1);
     if Choice = IDYES then
       KeepConfigOnUninstall := True
     else if Choice = IDNO then
@@ -141,9 +155,9 @@ begin
       Parameters := Parameters + ' -KeepConfig';
     if not Exec(PowerShellPath, Parameters, ExpandConstant('{app}'),
       SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      RaiseException('Could not start StreamSnip AI cleanup. Check the uninstall cleanup log in your TEMP folder.');
+      Log('StreamSnip AI cleanup could not be started; continuing uninstallation.');
     if ResultCode <> 0 then
-      RaiseException('StreamSnip AI cleanup failed (exit code ' + IntToStr(ResultCode) +
-        '). Check StreamSnipAI-uninstall-*.log in your TEMP folder.');
+      Log('StreamSnip AI cleanup returned exit code ' + IntToStr(ResultCode) +
+        '; continuing uninstallation. See StreamSnipAI-uninstall-*.log in TEMP.');
   end;
 end;

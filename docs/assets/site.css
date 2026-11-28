@@ -1,23 +1,23 @@
 :root {
   color-scheme: dark;
-  --bg: #282c34;
-  --surface: #1b2028;
-  --surface-soft: #232b35;
-  --surface-hover: #2d3743;
-  --sidebar-bg: #171c23;
-  --ink: #e8f0f4;
-  --body: #c8d5dc;
-  --muted: #9cdef2;
-  --border: #355a66;
-  --border-strong: #557582;
-  --accent: #e06c75;
-  --accent-hover: #ef858d;
-  --accent-soft: #3b252c;
+  --bg: #0f0f0f;
+  --surface: #181818;
+  --surface-soft: #212121;
+  --surface-hover: #2b2b2b;
+  --sidebar-bg: #0f0f0f;
+  --ink: #f1f1f1;
+  --body: #d6d6d6;
+  --muted: #7a9aa8;
+  --border: #303030;
+  --border-strong: #505050;
+  --accent: #ff0033;
+  --accent-hover: #e6002e;
+  --accent-soft: #3a171d;
   --accent-ink: #111111;
-  --success: #80c99a;
-  --warning: #e6b96f;
-  --danger: #e06c75;
-  --info: #9cdef2;
+  --success: #81c995;
+  --warning: #f6c26b;
+  --danger: #f28b82;
+  --info: #8ab4f8;
   --display: "IBM Plex Sans", "Segoe UI", sans-serif;
   --text: "IBM Plex Sans", "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", "JetBrains Mono", Consolas, monospace;
@@ -203,7 +203,7 @@ svg { display:block; }
 .product-motion { position:relative; isolation:isolate; }
 .product-motion img {
   transform-origin:50% 50%;
-  animation:product-image-drift 11s cubic-bezier(.65,0,.35,1) infinite;
+  animation: none;
   animation-play-state:paused;
 }
 .product-motion.is-motion-active img { animation-play-state:running; }

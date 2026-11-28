@@ -1,8 +1,7 @@
-"""FastAPI transport for StreamSnip's established local application services.
+"""FastAPI transport for StreamSnip's local application services.
 
-Heavy media and transcription work remains in the existing Core/Engine worker
-layer. Synchronous legacy routes run in Starlette's worker pool, not the ASGI
-event loop. This keeps the migration backward-compatible with the current UI.
+Media and transcription work remains in the Core/Engine worker layer. Synchronous
+service routes run in Starlette's worker pool, never on the ASGI event loop.
 """
 from __future__ import annotations
 
@@ -91,13 +90,13 @@ class _HeaderMap:
         return self._values.get(str(name).lower(), default)
 
 
-class LegacyRequestAdapter:
+class ServiceRequestAdapter:
     """Bridge a Starlette request to the existing handler's small HTTP interface."""
 
-    def __init__(self, request: Request, handler_class: type, body: bytes = b"") -> None:
+    def __init__(self, request: Request, routes_class: type, body: bytes = b"") -> None:
         import io
 
-        self._handler_class = handler_class
+        self._routes_class = routes_class
         self.headers = _HeaderMap(request.headers, len(body))
         self.path = request.url.path + (("?" + request.url.query) if request.url.query else "")
         self.rfile = io.BytesIO(body)
@@ -107,7 +106,7 @@ class LegacyRequestAdapter:
         self.response_headers: dict[str, str] = {}
 
     def __getattr__(self, name: str):
-        attribute = getattr(self._handler_class, name, None)
+        attribute = getattr(self._routes_class, name, None)
         if attribute is None:
             raise AttributeError(name)
         if callable(attribute):
@@ -154,7 +153,7 @@ async def read_request_body_limited(request: Request, limit: int = MAX_REQUEST_B
 
 
 def create_app(
-    legacy_handler: type,
+    routes_class: type,
     *,
     token: str,
     quit_event,
@@ -287,16 +286,16 @@ def create_app(
         )
 
     @app.api_route("/{path:path}", methods=["GET", "POST"], include_in_schema=False)
-    async def dispatch_legacy(path: str, request: Request):
+    async def dispatch_app_route(path: str, request: Request):
         body = b""
         if request.method == "POST":
             body = await read_request_body_limited(request)
             if isinstance(body, JSONResponse):
                 return body
 
-        adapter = LegacyRequestAdapter(request, legacy_handler, body)
-        handler_method = legacy_handler.do_GET if request.method == "GET" else legacy_handler.do_POST
-        await run_in_threadpool(handler_method, adapter)
+        adapter = ServiceRequestAdapter(request, routes_class, body)
+        route_method = routes_class.do_GET if request.method == "GET" else routes_class.do_POST
+        await run_in_threadpool(route_method.__get__(adapter, type(adapter)))
         return Response(
             content=adapter.wfile.getvalue(),
             status_code=adapter.status_code,

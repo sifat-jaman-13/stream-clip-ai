@@ -15,56 +15,45 @@ import type { Clip, Creator, LogEntry } from "./types";
 import "./App.css";
 
 type PageId = "overview" | "live" | "creators" | "clips" | "published" | "publishing" | "words" | "activity" | "settings" | "help" | "about";
-type ThemeId = "odysseus" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseas" | "ocean" | "forest" | "solarized" | "rose-graphite" | "ember" | "slate";
+type ThemeId = "odysseus-dark" | "studio-light" | "studio-dark" | "github" | "nord" | "odysseus-paper" | "ocean" | "forest" | "solarized" | "rose-graphite" | "ember" | "slate";
 type FontId = "manrope" | "dm-sans" | "inter" | "open-sans" | "ibm-plex-sans" | "nunito-sans" | "roboto" | "source-sans-3" | "poppins" | "lato" | "jetbrains-mono" | "fira-code" | "segoe-ui" | "consolas" | "aptos" | "arial" | "tahoma" | "verdana" | "georgia" | "trebuchet-ms" | "times-new-roman";
-type StudioSetupTab = "capture" | "ai" | "speech" | "captions";
+type StudioSetupTab = "capture" | "framing" | "ai" | "speech" | "captions";
 type RecordLike = Record<string, any>;
 type ToastDetail = { tone: "success" | "error" | "info"; title: string; message?: string };
 
 const themes: Array<{ id: ThemeId; name: string; description: string; colors: string[] }> = [
-  { id: "studio-dark", name: "Studio Dark", description: "Default · low-light workspace · vivid red", colors: ["#0f0f0f", "#181818", "#303030", "#ff0033"] },
-  { id: "odysseus", name: "Odysseus", description: "Graphite · arctic cyan · coral", colors: ["#282c34", "#1b2028", "#355a66", "#e06c75"] },
-  { id: "studio-light", name: "Studio Light", description: "Clean porcelain · slate ink · signal red", colors: ["#f3f5f8", "#ffffff", "#cad5e0", "#b42318"] },
+  { id: "studio-dark", name: "Studio Dark", description: "Default · signal red", colors: ["#0f0f0f", "#181818", "#303030", "#ff0033"] },
+  { id: "studio-light", name: "Studio Light", description: "Porcelain surfaces · slate ink", colors: ["#f3f5f8", "#ffffff", "#cad5e0", "#b42318"] },
+  { id: "solarized", name: "Solarized Paper", description: "Warm paper · forest ink · deep teal", colors: ["#f2eedf", "#fffcf3", "#cfc4a7", "#17635e"] },
+  { id: "odysseus-dark", name: "Odysseus", description: "Graphite · arctic cyan · coral", colors: ["#282c34", "#1b2028", "#355a66", "#e06c75"] },
   { id: "github", name: "GitHub Dark", description: "Midnight slate · signal red", colors: ["#0d1117", "#161b22", "#30363d", "#f85149"] },
   { id: "nord", name: "Nord", description: "Blue-gray · frost · soft cyan", colors: ["#2e3440", "#3b4252", "#4c566a", "#88c0d0"] },
-  { id: "odysseas", name: "Odysseus Paper", description: "Navy rail · mist green · burnt coral", colors: ["#eef2ef", "#fafcfa", "#cbd8d0", "#a3452d"] },
+  { id: "odysseus-paper", name: "Odysseus Paper", description: "Navy rail · mist green · coral", colors: ["#eef2ef", "#fafcfa", "#cbd8d0", "#a3452d"] },
   { id: "ocean", name: "Ocean Depths", description: "Deep blue · sea glass · cyan", colors: ["#101c27", "#162635", "#2d4656", "#42b9cc"] },
   { id: "forest", name: "Forest Night", description: "Evergreen · moss · mint", colors: ["#111b17", "#182720", "#2e4737", "#83c99a"] },
-  { id: "solarized", name: "Solarized Paper", description: "Warm parchment · forest ink · deep teal", colors: ["#f2eedf", "#fffcf3", "#cfc4a7", "#17635e"] },
   { id: "rose-graphite", name: "Rose Graphite", description: "Warm charcoal · muted rose", colors: ["#211c20", "#2c242a", "#49353f", "#dd8ea4"] },
   { id: "ember", name: "Ember Studio", description: "Dark umber · copper · amber", colors: ["#1d1a16", "#28231d", "#4a3b2a", "#e8a34b"] },
   { id: "slate", name: "Slate Studio", description: "Cool graphite · steel blue", colors: ["#20262d", "#272f38", "#3c4853", "#8bb9d8"] },
 ];
 
 const fontOptions: Array<{ id: FontId; name: string; family: string; kind: string }> = [
-  { id: "jetbrains-mono", name: "JetBrains Mono", family: '"JetBrains Mono", Consolas, monospace', kind: "Monospace · default" },
-  { id: "manrope", name: "Manrope", family: 'Manrope, "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "dm-sans", name: "DM Sans", family: '"DM Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "inter", name: "Inter", family: 'Inter, "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "open-sans", name: "Open Sans", family: '"Open Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "ibm-plex-sans", name: "IBM Plex Sans", family: '"IBM Plex Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "nunito-sans", name: "Nunito Sans", family: '"Nunito Sans", "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "roboto", name: "Roboto", family: 'Roboto, "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "source-sans-3", name: "Source Sans 3", family: '"Source Sans 3", "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "poppins", name: "Poppins", family: 'Poppins, "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "lato", name: "Lato", family: 'Lato, "Segoe UI", sans-serif', kind: "Sans serif" },
-  { id: "fira-code", name: "Fira Code", family: '"Fira Code", Consolas, monospace', kind: "Monospace" },
+  { id: "jetbrains-mono", name: "JetBrains Mono", family: '"JetBrains Mono", Consolas, monospace', kind: "Bundled monospace · default" },
+  { id: "manrope", name: "Manrope", family: 'Manrope, "Segoe UI", sans-serif', kind: "Bundled sans serif" },
+  { id: "inter", name: "Inter", family: 'Inter, "Segoe UI", sans-serif', kind: "Bundled sans serif" },
   { id: "segoe-ui", name: "Segoe UI", family: '"Segoe UI", Arial, sans-serif', kind: "Windows system" },
-  { id: "consolas", name: "Consolas", family: 'Consolas, "Courier New", monospace', kind: "Monospace" },
   { id: "aptos", name: "Aptos", family: 'Aptos, "Segoe UI", sans-serif', kind: "Windows system" },
   { id: "arial", name: "Arial", family: 'Arial, sans-serif', kind: "Windows system" },
   { id: "tahoma", name: "Tahoma", family: 'Tahoma, sans-serif', kind: "Windows system" },
   { id: "verdana", name: "Verdana", family: 'Verdana, sans-serif', kind: "Windows system" },
-  { id: "georgia", name: "Georgia", family: 'Georgia, serif', kind: "Serif" },
   { id: "trebuchet-ms", name: "Trebuchet MS", family: '"Trebuchet MS", sans-serif', kind: "Windows system" },
-  { id: "times-new-roman", name: "Times New Roman", family: '"Times New Roman", serif', kind: "Serif" },
+  { id: "consolas", name: "Consolas", family: 'Consolas, "Courier New", monospace', kind: "Windows system" },
+  { id: "georgia", name: "Georgia", family: 'Georgia, serif', kind: "Windows system" },
+  { id: "times-new-roman", name: "Times New Roman", family: '"Times New Roman", serif', kind: "Windows system" },
 ];
 
 const fontGroups = [
-  { label: "Sans serif", items: fontOptions.filter((item) => item.kind === "Sans serif") },
-  { label: "Monospace", items: fontOptions.filter((item) => item.kind.startsWith("Monospace")) },
+  { label: "Bundled fonts", items: fontOptions.filter((item) => item.kind.startsWith("Bundled")) },
   { label: "System fonts", items: fontOptions.filter((item) => item.kind === "Windows system") },
-  { label: "Serif", items: fontOptions.filter((item) => item.kind === "Serif") },
 ];
 
 const pageInfo: Record<PageId, { title: string; description: string }> = {
@@ -82,20 +71,24 @@ const pageInfo: Record<PageId, { title: string; description: string }> = {
 };
 
 const navGroups: Array<{ label: string; items: Array<{ id: PageId; label: string; icon: LucideIcon }> }> = [
-  { label: "Studio", items: [
+  { label: "Capture", items: [
     { id: "overview", label: "Dashboard", icon: LayoutDashboard },
     { id: "live", label: "Live Studio", icon: Radio },
     { id: "creators", label: "Creators", icon: Users },
-  ] },
-  { label: "Content", items: [
-    { id: "clips", label: "Clip library", icon: Clapperboard },
-    { id: "published", label: "Scheduled", icon: BadgeCheck },
     { id: "words", label: "Hype words", icon: WandSparkles },
   ] },
-  { label: "Manage", items: [
+  { label: "Library", items: [
+    { id: "clips", label: "Clip library", icon: Clapperboard },
+    { id: "published", label: "Scheduled", icon: BadgeCheck },
+  ] },
+  { label: "Publish", items: [
     { id: "publishing", label: "Publisher", icon: CloudUpload },
+  ] },
+  { label: "System", items: [
     { id: "settings", label: "Settings", icon: Settings },
     { id: "activity", label: "Activity", icon: Activity },
+    { id: "help", label: "Help", icon: CircleHelp },
+    { id: "about", label: "About", icon: Info },
   ] },
 ];
 
@@ -176,7 +169,7 @@ const initialTheme = (): ThemeId => {
     const saved = localStorage.getItem("streamsnip.theme") || "";
     const aliases: Record<string, ThemeId> = {
       light: "studio-light", studio: "studio-light", dark: "studio-dark",
-      midnight: "github", graphite: "github", odyssey: "odysseus", odysseas: "odysseas",
+      midnight: "github", graphite: "github", odyssey: "odysseus-dark", odysseus: "odysseus-dark", odysseas: "odysseus-paper",
     };
     const resolved = aliases[saved] || saved;
     if (themes.some((item) => item.id === resolved)) return resolved as ThemeId;
@@ -193,21 +186,24 @@ const initialAccent = (): string => {
 const initialFont = (): FontId => {
   try {
     const saved = localStorage.getItem("streamsnip.font") || "";
-    const preferenceVersion = localStorage.getItem("streamsnip.font-version") || "";
-    if (preferenceVersion !== "8") {
-      // Restore the requested JetBrains Mono default after the temporary Manrope migration.
-      const migrated = !saved || saved === "manrope" || saved === "jetbrains-mono" || (preferenceVersion === "1" && saved === "inter") ? "jetbrains-mono" : saved;
-      localStorage.setItem("streamsnip.font", migrated);
-      localStorage.setItem("streamsnip.font-version", "8");
-      if (fontOptions.some((item) => item.id === migrated)) return migrated as FontId;
+    const isSupported = fontOptions.some((item) => item.id === saved);
+    if (!isSupported) {
+      localStorage.setItem("streamsnip.font", "jetbrains-mono");
+      localStorage.setItem("streamsnip.font-version", "9");
       return "jetbrains-mono";
     }
-    if (fontOptions.some((item) => item.id === saved)) return saved as FontId;
+    // Version changes must never overwrite a still-supported user preference.
+    localStorage.setItem("streamsnip.font-version", "9");
+    return saved as FontId;
   } catch { /* Local storage may be disabled. */ }
   return "jetbrains-mono";
 };
 function rgbFromHex(value: string): [number, number, number] {
-  const hex = value.replace("#", "");
+  const hex = value.trim().replace(/^#/, "");
+  // Production CSS minifiers shorten colors such as #FFFFFF to #fff.
+  if (/^[0-9a-f]{3}$/i.test(hex)) {
+    return hex.split("").map((channel) => parseInt(channel + channel, 16)) as [number, number, number];
+  }
   if (!/^[0-9a-f]{6}$/i.test(hex)) return [0, 0, 0];
   return [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number];
 }
@@ -251,6 +247,7 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeId>(initialTheme);
   const [customAccent, setCustomAccent] = useState<string>(initialAccent);
   const [font, setFont] = useState<FontId>(initialFont);
+  const [preferredCreatorId, setPreferredCreatorId] = useState("");
   const [themeOpen, setThemeOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
@@ -445,7 +442,11 @@ export default function App() {
             <button className="theme-trigger" aria-label={"Appearance: " + selectedTheme.name} aria-expanded={themeOpen} onClick={() => setThemeOpen((value) => !value)}><Palette size={16} /><span>{selectedTheme.name}</span><ChevronDown size={13} /></button>
             {themeOpen ? <div className="theme-popover" role="dialog" aria-label="Workspace appearance">
               <div className="theme-popover-title"><strong>Appearance</strong><span>Saved on this device</span></div>
-              {themes.map((item) => <ThemeOption key={item.id} item={item} selected={theme === item.id} select={() => { setTheme(item.id); }} />)}
+              {themes.slice(0, 3).map((item) => <ThemeOption key={item.id} item={item} selected={theme === item.id} select={() => { setTheme(item.id); }} />)}
+              <details className="theme-advanced">
+                <summary>Advanced themes ({themes.length - 3})</summary>
+                <div>{themes.slice(3).map((item) => <ThemeOption key={item.id} item={item} selected={theme === item.id} select={() => { setTheme(item.id); }} />)}</div>
+              </details>
               <div className="theme-accent-picker">
                 <div className="theme-accent-copy">
                   <label htmlFor="workspace-accent">Accent color</label>
@@ -467,7 +468,7 @@ export default function App() {
                 <select id="workspace-font" value={font} onChange={(event) => setFont(event.target.value as FontId)}>
                   {fontGroups.map((group) => <optgroup key={group.label} label={group.label}>{group.items.map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "jetbrains-mono" ? " · Default" : ""}</option>)}</optgroup>)}
                 </select>
-                <small>JetBrains Mono is the default. Choose from 10 bundled sans-serif families, other monospace fonts, or system fonts.</small>
+                <small>JetBrains Mono is the default. Choose one of three bundled families or a font installed on Windows.</small>
                 <span className="theme-font-preview" style={{ fontFamily: (fontOptions.find((item) => item.id === font) || fontOptions[0]).family }}>StreamSnip AI · Creator Studio</span>
               </div>
             </div> : null}
@@ -481,8 +482,8 @@ export default function App() {
 
       <main className="page-content">
         {page === "overview" ? <OverviewPage workspace={workspace} navigate={navigate} openClip={(clip) => { setSelectedClip(clip); navigate("clips"); }} /> : null}
-        {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
-        {page === "creators" ? <CreatorsPage workspace={workspace} busy={busy} post={post} navigate={navigate} /> : null}
+        {page === "live" ? <LivePage key={String(workspace.settings?.mode || "") + "|" + String(workspace.settings?.target || "")} workspace={workspace} busy={busy} post={post} navigate={navigate} preferredCreatorId={preferredCreatorId} /> : null}
+        {page === "creators" ? <CreatorsPage workspace={workspace} busy={busy} post={post} navigate={navigate} onCaptureCreator={setPreferredCreatorId} /> : null}
         {page === "clips" || page === "published" ? <ClipLibraryPage key={page + "|" + workspace.clipOffset} workspace={workspace} published={page === "published"} navigate={navigate} query={clipSearch} setQuery={setClipSearch} selectedClip={selectedClip} setSelectedClip={setSelectedClip} openBulkPublishing={openBulkPublishing} busy={busy} post={post} /> : null}
         {page === "publishing" ? <PublishingPage key={(publishClip?.name || "bulk") + "|" + bulkNames.join(",") + "|" + JSON.stringify(workspace.publishing)} workspace={workspace} clip={publishClip} bulkNames={bulkNames} busy={busy} post={post} openLibrary={() => navigate("clips")} /> : null}
         {page === "words" ? <HypeWordsPage key={workspace.words.text} workspace={workspace} /> : null}
@@ -530,8 +531,6 @@ function Sidebar({ page, navigate, connected, running, clipTotal, activeCreators
     </nav>
     <div className="sidebar-bottom">
       <div className={"sidebar-engine" + (running ? " engine-running" : "")}><i /><span><strong>{!connected ? "Connecting to engine" : running ? "Capture active" : "Engine connected"}</strong><small>{connected ? "Local processing" : "Waiting for local API"}</small></span><ShieldCheck size={15} /></div>
-      <button className={"nav-item" + (page === "help" ? " active" : "")} onClick={() => navigate("help")}><CircleHelp size={18} /><span>Help</span></button>
-      <button className={"nav-item" + (page === "about" ? " active" : "")} onClick={() => navigate("about")}><Info size={18} /><span>About</span></button>
     </div>
   </aside>;
 }
@@ -554,7 +553,7 @@ function Panel({ title, description, action, children, className = "" }: { title
   return <section className={"panel " + className}><div className="panel-heading"><div><h2>{title}</h2>{description ? <p>{description}</p> : null}</div>{action ? <div className="panel-action">{action}</div> : null}</div>{children}</section>;
 }
 function Button({ children, kind = "secondary", onClick, disabled, size = "normal", type = "button" }: {
-  children: ReactNode; kind?: "primary" | "secondary" | "quiet" | "danger"; onClick?: () => void; disabled?: boolean; size?: "normal" | "small"; type?: "button" | "submit";
+  children: ReactNode; kind?: "primary" | "secondary" | "quiet" | "danger" | "warning"; onClick?: () => void; disabled?: boolean; size?: "normal" | "small"; type?: "button" | "submit";
 }) {
   return <button type={type} className={"button button-" + kind + (size === "small" ? " button-small" : "")} onClick={onClick} disabled={disabled}>{children}</button>;
 }
@@ -652,10 +651,11 @@ function ClipCompact({ clip, click }: { clip: Clip; click: () => void }) {
   </button>;
 }
 
-function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
+function LivePage({ workspace, busy, post, navigate, preferredCreatorId }: { workspace: Workspace; busy: string; preferredCreatorId: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
   const settings = workspace.settings || {};
-  const [mode, setMode] = useState(String(settings.mode || "live"));
-  const [target, setTarget] = useState(String(settings.target || ""));
+  const preferredCreator = workspace.creators.find((creator) => creator.id === preferredCreatorId);
+  const [mode, setMode] = useState(preferredCreator ? "live" : String(settings.mode || "live"));
+  const [target, setTarget] = useState(preferredCreator?.target || String(settings.target || ""));
   const [setupTab, setSetupTab] = useState<StudioSetupTab>("capture");
   const [frame, setFrame] = useState("");
   const [outputPreview, setOutputPreview] = useState("");
@@ -666,7 +666,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
   const [facecamResult, setFacecamResult] = useState<RecordLike | null>(null);
   const [detectingFacecam, setDetectingFacecam] = useState(false);
   const [drag, setDrag] = useState<{ region: "facecam" | "game"; mode: "move" | "resize"; startX: number; startY: number; box: typeof facecamBox } | null>(null);
-  const [selectedCreatorId, setSelectedCreatorId] = useState(() => workspace.creators.find((creator) => creator.id === String(settings.creator_id || "") || creatorTargetKey(creator.target) === creatorTargetKey(String(settings.target || "")))?.id || "");
+  const [selectedCreatorId, setSelectedCreatorId] = useState(() => preferredCreator?.id || workspace.creators.find((creator) => creator.id === String(settings.creator_id || "") || creatorTargetKey(creator.target) === creatorTargetKey(String(settings.target || "")))?.id || "");
   const selectedCreator = workspace.creators.find((creator) => creator.id === selectedCreatorId)
     || workspace.creators.find((creator) => creator.id === String(settings.creator_id || ""))
     || workspace.creators.find((creator) => creatorTargetKey(creator.target) === creatorTargetKey(target))
@@ -762,6 +762,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
   };
   const tabs: Array<{ id: StudioSetupTab; label: string; icon: LucideIcon }> = [
     { id: "capture", label: "Capture", icon: Radio },
+    { id: "framing", label: "Framing", icon: Video },
     { id: "ai", label: "AI provider", icon: Sparkles },
     { id: "speech", label: "Transcription", icon: FileText },
     { id: "captions", label: "Captions", icon: Clapperboard },
@@ -786,7 +787,37 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
       </Field>}
     </Panel>
 
-    <Panel title="Facecam detection and layout" description="Find the webcam from multiple video frames, then inspect and adjust its exact region before rendering.">
+
+
+    <div className="studio-workspace-layout">
+      <section className="studio-setup" aria-label="Session setup">
+        <div className="studio-setup-heading">
+          <div><h2>Session setup</h2><p>All processing options are available here before you start a capture.</p></div>
+          <span className="studio-save-state">{workspace.saving ? "Saving changes..." : workspace.saveError || "Saved on this PC"}</span>
+        </div>
+        <nav className="studio-tabs" role="tablist" aria-label="Session configuration">
+          {tabs.map((tab, index) => {
+            const Icon = tab.icon;
+            return <button key={tab.id} type="button" role="tab" id={"studio-tab-" + tab.id} aria-controls="studio-setup-panel" aria-selected={setupTab === tab.id} tabIndex={setupTab === tab.id ? 0 : -1} className={"studio-tab" + (setupTab === tab.id ? " selected" : "")} onClick={() => setSetupTab(tab.id)} onKeyDown={(event) => {
+              if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+              event.preventDefault();
+              const nextIndex = (index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+              const next = tabs[nextIndex];
+              setSetupTab(next.id);
+              document.getElementById("studio-tab-" + next.id)?.focus();
+            }}>
+              <Icon size={16} /><span>{tab.label}</span>
+              {tab.id === "ai" ? <small>{providerLabel}</small> : null}
+            </button>;
+          })}
+        </nav>
+        <div className="studio-tab-panel" id="studio-setup-panel" role="tabpanel" aria-labelledby={"studio-tab-" + setupTab}>
+          {setupTab === "capture" ? <CaptureSettings workspace={workspace} /> : null}
+          {setupTab === "ai" ? <AISettings workspace={workspace} /> : null}
+          {setupTab === "speech" ? <SpeechSettings workspace={workspace} /> : null}
+          {setupTab === "captions" ? <CaptionSettings workspace={workspace} mode={mode} target={target} /> : null}
+          {setupTab === "framing" ? (
+            <Panel title="Facecam detection and layout" description="Find the webcam from multiple video frames, then inspect and adjust its exact region before rendering.">
       <div className="facecam-toolbar">
         <div><strong>Automatic facecam finder</strong><small>Local YuNet face detection + stable-border analysis. No cloud AI required.</small></div>
         <div className="facecam-toolbar-actions">
@@ -831,34 +862,7 @@ function LivePage({ workspace, busy, post, navigate }: { workspace: Workspace; b
       </div></div> : <div className="facecam-empty"><Video size={22}/><strong>Load a frame to set up both regions</strong><small>Automatic detection finds the facecam; the game capture region can be moved and resized independently.</small></div>}
       <div className="facecam-layout-values"><span>Facecam <b>{facecamBox.x.toFixed(1)}%, {facecamBox.y.toFixed(1)}% · {facecamBox.w.toFixed(1)} × {facecamBox.h.toFixed(1)}%</b></span><span>Game <b>{gameBox.x.toFixed(1)}%, {gameBox.y.toFixed(1)}% · {gameBox.w.toFixed(1)} × {gameBox.h.toFixed(1)}%</b></span></div>
     </Panel>
-
-    <div className="studio-workspace-layout">
-      <section className="studio-setup" aria-label="Session setup">
-        <div className="studio-setup-heading">
-          <div><h2>Session setup</h2><p>All processing options are available here before you start a capture.</p></div>
-          <span className="studio-save-state">{workspace.saving ? "Saving changes..." : workspace.saveError || "Saved on this PC"}</span>
-        </div>
-        <nav className="studio-tabs" role="tablist" aria-label="Session configuration">
-          {tabs.map((tab, index) => {
-            const Icon = tab.icon;
-            return <button key={tab.id} type="button" role="tab" id={"studio-tab-" + tab.id} aria-controls="studio-setup-panel" aria-selected={setupTab === tab.id} tabIndex={setupTab === tab.id ? 0 : -1} className={"studio-tab" + (setupTab === tab.id ? " selected" : "")} onClick={() => setSetupTab(tab.id)} onKeyDown={(event) => {
-              if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-              event.preventDefault();
-              const nextIndex = (index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
-              const next = tabs[nextIndex];
-              setSetupTab(next.id);
-              document.getElementById("studio-tab-" + next.id)?.focus();
-            }}>
-              <Icon size={16} /><span>{tab.label}</span>
-              {tab.id === "ai" ? <small>{providerLabel}</small> : null}
-            </button>;
-          })}
-        </nav>
-        <div className="studio-tab-panel" id="studio-setup-panel" role="tabpanel" aria-labelledby={"studio-tab-" + setupTab}>
-          {setupTab === "capture" ? <CaptureSettings workspace={workspace} /> : null}
-          {setupTab === "ai" ? <AISettings workspace={workspace} /> : null}
-          {setupTab === "speech" ? <SpeechSettings workspace={workspace} /> : null}
-          {setupTab === "captions" ? <CaptionSettings workspace={workspace} mode={mode} target={target} /> : null}
+          ) : null}
         </div>
       </section>
 
@@ -910,7 +914,7 @@ function ToolRow({ icon: Icon, title, detail }: { icon: LucideIcon; title: strin
   return <div className="tool-row"><Icon size={17} /><span><strong>{title}</strong><small>{detail}</small></span></div>;
 }
 
-function CreatorsPage({ workspace, busy, post, navigate }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void }) {
+function CreatorsPage({ workspace, busy, post, navigate, onCaptureCreator }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>; navigate: (page: PageId) => void; onCaptureCreator: (creatorId: string) => void }) {
   const creators = workspace.creators;
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
@@ -961,8 +965,8 @@ function CreatorsPage({ workspace, busy, post, navigate }: { workspace: Workspac
           <div className="creator-status-cell"><StatusPill tone={creator.watching_vods ? "success" : "neutral"}>{creator.watching_vods ? "Watching" : "Paused"}</StatusPill><small>{creator.vod_status || count(creator.vod_pending) + " files waiting"}</small></div>
           <div className="creator-counts"><span>{count(creator.live_clips)} live</span><span>{count(creator.vod_clips)} VOD</span></div>
           <div className="creator-actions">
-            {creator.running ? <Button size="small" kind="danger" onClick={() => void post("stop-" + creator.id, "/api/creators/stop", { id: creator.id })} disabled={!!busy || creator.phase === "stopping"}><Square size={13} />{creator.phase === "stopping" ? "Finishing..." : "Stop monitor"}</Button> : <Button size="small" kind="primary" onClick={() => void post("start-" + creator.id, "/api/creators/start", { id: creator.id })} disabled={!!busy}><Play size={13} />Monitor</Button>}
-            {captureActive ? <><Button size="small" onClick={() => navigate("live")}><Radio size={13} />View capture</Button><Button size="small" kind="danger" onClick={() => void post("stop-capture-" + creator.id, "/api/creators/stop-capture", { id: creator.id, force: false })} disabled={!!busy || !!creator.capture_stopping}><Square size={13} />{creator.capture_stopping ? "Finishing..." : "Stop capture"}</Button></> : null}
+            {creator.running ? <Button size="small" kind="primary" onClick={() => void post("stop-" + creator.id, "/api/creators/stop", { id: creator.id })} disabled={!!busy || creator.phase === "stopping"}><Square size={13} />{creator.phase === "stopping" ? "Finishing…" : "Stop monitor"}</Button> : <Button size="small" kind="primary" onClick={() => void post("start-" + creator.id, "/api/creators/start", { id: creator.id })} disabled={!!busy}><Play size={13} />Start monitor</Button>}
+            {!captureActive ? <Button size="small" onClick={() => { onCaptureCreator(creator.id); navigate("live"); }}><Radio size={13} />Capture this creator</Button> : <><Button size="small" onClick={() => navigate("live")}><Radio size={13} />View capture</Button><Button size="small" kind="warning" onClick={() => void post("stop-capture-" + creator.id, "/api/creators/stop-capture", { id: creator.id, force: false })} disabled={!!busy || !!creator.capture_stopping}><Square size={13} />{creator.capture_stopping ? "Finishing…" : "Stop capture"}</Button></>}
             {creator.watching_vods ? <Button size="small" onClick={() => void post("stop-vod-" + creator.id, "/api/creators/stop-vod-watch", { id: creator.id })} disabled={!!busy}><Pause size={13} />Stop VOD</Button> : <Button size="small" onClick={() => void post("watch-vod-" + creator.id, "/api/creators/watch-vods", { id: creator.id })} disabled={!!busy}><FolderOpen size={13} />Watch VODs</Button>}
             <div className="folder-menu"><button className="icon-button" aria-label={"Open " + creator.name + " folders"} aria-expanded={folderOpen === creator.id} onClick={() => setFolderOpen(folderOpen === creator.id ? "" : creator.id)}><MoreHorizontal size={17} /></button>
               {folderOpen === creator.id ? <div className="folder-popover">{folders.map(([folder, label]) => <button key={folder} onClick={() => { void post("folder-" + creator.id, "/api/creators/open", { id: creator.id, folder }); setFolderOpen(""); }}><FolderOpen size={14} />{label}</button>)}<button className="folder-danger" onClick={() => { setRemoving(creator); setFolderOpen(""); }}><Trash2 size={14} />Remove creator</button></div> : null}
@@ -1022,12 +1026,13 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
     setSelectedNames([]);
     setSelectedClip(null);
   };
-  const publishClip = async (clip: Clip, postTitle = clip.title || clip.name, postDescription = clip.description || "") => {
+  const publishClip = async (clip: Clip, postTitle = clip.title || clip.name, postDescription = clip.description || "", scheduleOnly = false) => {
     if (published || postingBlocked || clip.posted || clip.scheduled) return;
-    const result = await post("publish-" + clip.name, "/api/publishing/publish-one", {
+    const result = await post((scheduleOnly ? "schedule-" : "publish-") + clip.name, "/api/publishing/publish-one", {
       name: clip.name,
       title: postTitle,
       description: postDescription,
+      ...(scheduleOnly ? { auto_schedule: true } : {}),
     });
     if (result) setSelectedNames((items) => items.filter((name) => name !== clip.name));
   };
@@ -1098,13 +1103,15 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
           </button>
           {published
             ? <button className="icon-button clip-row-open" aria-label={"Open " + clip.name} onClick={() => setSelectedClip(clip)}><ArrowUpRight size={16} /></button>
-            : <button
+            : <>
+              <button
                 className="button button-primary button-small clip-row-publish"
                 type="button"
                 onClick={() => void publishClip(clip)}
                 disabled={postingBlocked || clip.posted || clip.scheduled}
                 aria-label={"Post " + (clip.title || clip.name) + " via Zernio"}
-              ><Send size={13} />{busy === "publish-" + clip.name ? "Sending…" : "Post"}</button>}
+              ><Send size={13} />{busy === "publish-" + clip.name ? "Posting…" : "Post"}</button>
+              <Button size="small" kind="secondary" onClick={() => void publishClip(clip, clip.title || clip.name, clip.description || "", true)} disabled={postingBlocked || clip.posted || clip.scheduled}><CalendarClock size={13} />{busy === "schedule-" + clip.name ? "Scheduling…" : "Schedule"}</Button></>}
         </div>)}</div> : <EmptyState
           icon={published ? BadgeCheck : Clapperboard}
           title={query ? "No matching clips" : published ? "Nothing scheduled yet" : "Your clip library is empty"}
@@ -1212,46 +1219,69 @@ function PublishingPage({ workspace, clip, bulkNames, busy, post, openLibrary }:
 function HypeWordsPage({ workspace }: { workspace: Workspace }) {
   const [text, setText] = useState(workspace.words.text);
   const [saving, setSaving] = useState(false);
-  const lines = text.split(/\r?\n/).filter((line) => line.trim() && !line.trim().startsWith("#"));
-  const save = async () => { setSaving(true); try { await workspace.saveWords(text); } catch { /* API layer reports errors. */ } finally { setSaving(false); } };
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
+  const parsed = lines.map((line) => {
+    const parts = line.split("|");
+    const phrase = parts[0].trim();
+    const score = Number(parts.length > 1 ? parts[1].trim() : "1");
+    return { raw: line, phrase, score, valid: !!phrase && parts.length <= 2 && Number.isFinite(score) && score >= 0.1 && score <= 10 };
+  });
+  const validEntries = parsed.filter((entry) => entry.valid);
+  const invalidCount = parsed.length - validEntries.length;
+  const save = async () => {
+    if (invalidCount) {
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "error", title: "Fix invalid hype words", message: invalidCount + " line(s) have an invalid phrase or score. Scores must be between 0.1 and 10." } }));
+      return;
+    }
+    setSaving(true); try { await workspace.saveWords(text); } catch { /* API layer reports errors. */ } finally { setSaving(false); }
+  };
   return <div className="page-stack">
-    <PageHeading title="Hype words" description="Custom phrases can help the highlight scorer notice creator-specific reactions." actions={<Button kind="primary" onClick={() => void save()} disabled={saving}><Check size={15} />Save phrase list</Button>} />
+    <PageHeading title="Hype words" description="Scoring-only phrases help rank moments. They are never inserted into captions or post copy." actions={<Button kind="primary" onClick={() => void save()} disabled={saving}><Check size={15} />Save phrase list</Button>} />
     <div className="settings-layout">
       <div className="settings-main-column"><Panel title="Custom words and phrases" description="One phrase per line. Add an optional score after a vertical bar, for example: no way bro | 3">
         <Field label="Custom phrase list"><textarea className="words-editor" rows={18} value={text} onChange={(event) => setText(event.target.value)} /></Field>
-        <div className="save-status"><span>{count(lines.length)} custom entries</span><span>{saving ? "Saving…" : "Save changes when ready."}</span></div>
-        <Button kind="primary" onClick={() => void save()} disabled={saving}><Check size={15} />Save phrase list</Button>
+        <div className="save-status"><span>{count(validEntries.length)} valid entries · {count(invalidCount)} invalid</span><span>{saving ? "Saving…" : "Scores: 0.1–10"}</span></div>
+        {invalidCount ? <div className="form-error" role="alert">{invalidCount} invalid line(s). Use phrase or phrase | score, with a score from 0.1 to 10.</div> : null}
+        <div className="hype-preview"><strong>Preview</strong>{validEntries.slice(0, 5).map((entry) => <span key={entry.raw}>{entry.phrase}<small>{entry.score}×</small></span>)}{!validEntries.length ? <small>No valid phrases yet.</small> : null}</div>
+        <Button kind="primary" onClick={() => void save()} disabled={saving || invalidCount > 0}><Check size={15} />Save phrase list</Button>
       </Panel></div>
-      <aside className="settings-side-column"><Panel title="Built-in vocabulary" description="The engine includes streamer reactions and phrases.">
+      <aside className="settings-side-column"><Panel title="Built-in scoring vocabulary" description="These built-in terms affect highlight ranking only; they are not caption text.">
         <div className="vocabulary-counts"><div><strong>{count(workspace.words.words.length)}</strong><span>Words</span></div><div><strong>{count(workspace.words.phrases.length)}</strong><span>Phrases</span></div></div>
         <div className="chip-cloud">{workspace.words.words.slice(0, 24).map((word) => <span key={word}>{word}</span>)}</div>
-      </Panel><div className="storage-note"><Info size={16} /><span><strong>How scoring works</strong><small>Transcript phrases contribute to moment detection. AI providers can also evaluate wider context when configured.</small></span></div></aside>
+      </Panel><div className="storage-note"><Info size={16} /><span><strong>Scoring only</strong><small>Matching phrases add weight during highlight detection. They do not become caption text, titles, or descriptions.</small></span></div></aside>
     </div>
   </div>;
 }
 
 function isProblemLog(log: LogEntry) {
+  const level = String(log.level || "").toLowerCase();
+  if (level) return ["error", "fatal", "critical"].includes(level);
   if (log.file_lock) return true;
-  return /\b(error|failed|failure|exception|warning|rejected|exhausted|unavailable)\b/i.test(log.m);
+  return /\b(error|failed|failure|exception|rejected)\b/i.test(log.m);
 }
 function ActivityPage({ workspace, busy, post }: { workspace: Workspace; busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null> }) {
   const [filter, setFilter] = useState("");
   const [view, setView] = useState<"all" | "problems">("all");
+  const [pageNumber, setPageNumber] = useState(1);
+  const pageSize = 50;
   const problemCount = useMemo(() => workspace.logs.filter(isProblemLog).length, [workspace.logs]);
   const filtered = workspace.logs.filter((log) => {
     if (view === "problems" && !isProblemLog(log)) return false;
     return (log.m + " " + log.t).toLowerCase().includes(filter.toLowerCase());
   });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const visibleLogs = filtered.slice().reverse().slice((pageNumber - 1) * pageSize, pageNumber * pageSize);
   return <div className="page-stack">
     <PageHeading title="Activity" description="Messages from capture, transcription, rendering, creator monitors, and publishing." actions={<a className="button button-secondary" href="/api/log/download"><Download size={15} />Download log</a>} />
     <Panel title="Engine events" description={count(filtered.length) + " messages shown."} action={<div className="activity-toolbar">
       <div className="activity-filter-tabs" role="tablist" aria-label="Activity filter">
-        <button type="button" role="tab" aria-selected={view === "all"} className={view === "all" ? "selected" : ""} onClick={() => setView("all")}>All events</button>
-        <button type="button" role="tab" aria-selected={view === "problems"} className={view === "problems" ? "selected" : ""} onClick={() => setView("problems")}>Problems only{problemCount ? <b>{count(problemCount)}</b> : null}</button>
+        <button type="button" role="tab" aria-selected={view === "all"} className={view === "all" ? "selected" : ""} onClick={() => { setView("all"); setPageNumber(1); }}>All events</button>
+        <button type="button" role="tab" aria-selected={view === "problems"} className={view === "problems" ? "selected" : ""} onClick={() => { setView("problems"); setPageNumber(1); }}>Problems only{problemCount ? <b>{count(problemCount)}</b> : null}</button>
       </div>
-      <label className="library-search"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter events" />{filter ? <button type="button" className="search-clear-btn" aria-label="Clear event filter" onClick={() => setFilter("")}><X size={13} /></button> : null}</label>
+      <label className="library-search"><Search size={15} /><input value={filter} onChange={(event) => { setFilter(event.target.value); setPageNumber(1); }} placeholder="Filter events" />{filter ? <button type="button" className="search-clear-btn" aria-label="Clear event filter" onClick={() => setFilter("")}><X size={13} /></button> : null}</label>
     </div>}>
-      {filtered.length ? <div className="activity-list">{filtered.slice().reverse().map((log) => <ActivityRow key={log.id} log={log} post={post} busy={busy} />)}</div> : <EmptyState icon={Activity} title={view === "problems" ? "No problems recorded" : "No activity found"} description={view === "problems" ? "Errors and warnings from capture, AI, or publishing will appear here." : "Engine messages appear here when capture, processing, or publishing work begins."} action={filter ? <Button onClick={() => setFilter("")}>Clear filter</Button> : undefined} />}
+      {filtered.length ? <><div className="activity-list">{visibleLogs.map((log) => <ActivityRow key={log.id} log={log} post={post} busy={busy} />)}</div>
+        <div className="pagination-row"><span>Page {pageNumber} of {pageCount} · {count(filtered.length)} messages</span><div><Button size="small" disabled={pageNumber <= 1} onClick={() => setPageNumber((current) => Math.max(1, current - 1))}><ChevronLeft size={15} />Previous</Button><Button size="small" disabled={pageNumber >= pageCount} onClick={() => setPageNumber((current) => Math.min(pageCount, current + 1))}>Next<ChevronRight size={15} /></Button></div></div></> : <EmptyState icon={Activity} title={view === "problems" ? "No problems recorded" : "No activity found"} description={view === "problems" ? "Errors and warnings from capture, AI, or publishing will appear here." : "Engine messages appear here when capture, processing, or publishing work begins."} action={filter ? <Button onClick={() => setFilter("")}>Clear filter</Button> : undefined} />}
     </Panel>
   </div>;
 }
@@ -1471,10 +1501,16 @@ function AppearanceSettings({ theme, setTheme, customAccent, setCustomAccent, fo
   setFont: (font: FontId) => void;
 }) {
   const selectedTheme = themes.find((item) => item.id === theme) || themes[0];
-  return <Panel title="Workspace appearance" description="Choose from 12 palettes or set your own accent color. Appearance is saved on this device.">
-    <div className="theme-grid">{themes.map((item) => <button key={item.id} className={"theme-card" + (theme === item.id ? " selected" : "")} onClick={() => setTheme(item.id)}>
+  return <Panel title="Workspace appearance" description="Choose a curated palette or reveal advanced palettes, then set your own accent color. Appearance is saved on this device.">
+    <div className="theme-grid">{themes.slice(0, 3).map((item) => <button key={item.id} className={"theme-card" + (theme === item.id ? " selected" : "")} onClick={() => setTheme(item.id)}>
       <span className="theme-preview"><i style={{ background: item.colors[0] }} /><i style={{ background: item.colors[1] }} /><i style={{ background: item.colors[item.colors.length - 1] }} /></span><span className="theme-card-copy"><strong>{item.name}</strong><small>{item.description}</small></span>{theme === item.id ? <CheckCircle2 size={17} /> : null}
     </button>)}</div>
+    <details className="theme-advanced-grid">
+      <summary>Advanced themes ({themes.length - 3})</summary>
+      <div className="theme-grid">{themes.slice(3).map((item) => <button key={item.id} className={"theme-card" + (theme === item.id ? " selected" : "")} onClick={() => setTheme(item.id)}>
+        <span className="theme-preview"><i style={{ background: item.colors[0] }} /><i style={{ background: item.colors[1] }} /><i style={{ background: item.colors[item.colors.length - 1] }} /></span><span className="theme-card-copy"><strong>{item.name}</strong><small>{item.description}</small></span>{theme === item.id ? <CheckCircle2 size={17} /> : null}
+      </button>)}</div>
+    </details>
     <div className="theme-accent-picker">
       <div className="theme-accent-copy">
         <label htmlFor="settings-workspace-accent">Custom accent color</label>
@@ -1496,7 +1532,7 @@ function AppearanceSettings({ theme, setTheme, customAccent, setCustomAccent, fo
       <select id="settings-workspace-font" value={font} onChange={(event) => setFont(event.target.value as FontId)}>
         {fontGroups.map((group) => <optgroup key={group.label} label={group.label}>{group.items.map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "jetbrains-mono" ? " · Default" : ""}</option>)}</optgroup>)}
       </select>
-      <small>JetBrains Mono is the default. Choose a sans-serif typeface such as Manrope, Inter, or DM Sans whenever you prefer a cleaner reading style.</small>
+      <small>Three bundled families are included: JetBrains Mono, Manrope, and Inter. Other choices use fonts installed on Windows.</small>
       <span className="theme-font-preview" style={{ fontFamily: (fontOptions.find((item) => item.id === font) || fontOptions[0]).family }}>The quick brown fox · StreamSnip AI</span>
     </div>
   </Panel>;

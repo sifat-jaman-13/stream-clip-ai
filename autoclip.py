@@ -1,4 +1,4 @@
-﻿r"""StreamSnip AI  -  a local-first Twitch, YouTube, and VOD clipper.
+r"""StreamSnip AI  -  a local-first Twitch, YouTube, and VOD clipper.
 
 The default workflow uses Streamlink, FFmpeg, faster-whisper, and hook-word
 scoring locally without requiring a cloud AI key. Ollama provides optional
@@ -12,7 +12,7 @@ Windows/source setup:
     python -m pip install -r requirements.txt
 
 Run:
-    python autoclip.py                 -> opens the local StreamSnip AI window
+    python autoclip.py                 -> starts the local FastAPI development server
     python autoclip.py live URL        -> headless live-stream mode
     python autoclip.py file video.mp4  -> headless local-file mode
 
@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 import mimetypes
 import urllib.request
 from importlib import metadata as importlib_metadata
-import http.server, urllib.parse, webbrowser
+import urllib.parse, webbrowser
 import numpy as np
 from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_MODEL,
                            DEFAULT_HUGGINGFACE_MODEL, RETIRED_GEMINI_MODELS,
@@ -365,14 +365,14 @@ def check_updates():
     return {"checked_at": time.strftime("%Y-%m-%d %H:%M:%S"), "items": result}
 
 def _installed_app_info():
-    """Return the registered native install version and launch path, or a source-build fallback."""
+    """Return the registered StreamSnip install version and pywebview shell path."""
     root = pathlib.Path(os.environ.get("LOCALAPPDATA") or (pathlib.Path.home() / "AppData" / "Local"))
     fallback_dir = root / "Programs" / "StreamSnip AI Native"
     fallback = {
         "version": APP_VERSION,
         "installed": False,
         "install_dir": str(fallback_dir),
-        "app_executable": str(fallback_dir / "desktop" / "StreamSnip.Desktop.exe"),
+        "app_executable": str(fallback_dir / "shell" / "StreamSnipAI.exe"),
     }
     if os.name != "nt":
         return fallback
@@ -407,9 +407,9 @@ def _installed_app_info():
                                 install_dir = pathlib.Path(location) if location else None
                                 if install_dir is None and icon:
                                     icon_path = pathlib.Path(os.path.expandvars(icon))
-                                    install_dir = icon_path.parent.parent if icon_path.parent.name.casefold() == "desktop" else icon_path.parent
+                                    install_dir = icon_path.parent.parent if icon_path.parent.name.casefold() in {"desktop", "shell"} else icon_path.parent
                                 install_dir = install_dir or fallback_dir
-                                executable = pathlib.Path(os.path.expandvars(icon)) if icon.lower().endswith(".exe") else install_dir / "desktop" / "StreamSnip.Desktop.exe"
+                                executable = pathlib.Path(os.path.expandvars(icon)) if icon.lower().endswith(".exe") else install_dir / "shell" / "StreamSnipAI.exe"
                                 return {
                                     "version": version,
                                     "installed": True,
@@ -955,7 +955,7 @@ DEFAULTS = {
     "streamer_tag": "", "show_tag_video": True,
     "capture_bitrate_kbps": 8000,
     "layout": "Facecam + game (Twitch)", "output_format": "9:16", "crop_x": 34.2, "crop_y": 0.0,
-    "crop_w": 31.6, "crop_h": 100.0, "delete_rec": False,
+    "crop_w": 31.6, "crop_h": 100.0, "delete_rec": True,
     "cam_x": 70, "cam_y": 4, "cam_w": 29, "cam_h": 37, "game_x": 50,
     # Default game region matches the original centered 1080x1152 lower panel on 16:9 input.
     "game_area_x": 23.6, "game_area_y": 0, "game_area_w": 52.8, "game_area_h": 100,
@@ -1031,7 +1031,7 @@ def clean_cfg(raw):
     c["show_tag_video"] = bool(raw.get("show_tag_video", c["show_tag_video"]))
     f = str(raw.get("font", c["font"])).strip()
     if re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", f): c["font"] = f
-    c["delete_rec"] = bool(raw.get("delete_rec", False))
+    c["delete_rec"] = bool(raw.get("delete_rec", c["delete_rec"]))
     for k in ("rec_dir", "out_dir", "creator_rec_dir", "creator_out_dir"):
         value = str(raw.get(k, "") or "").strip()
         # Keep user-selected paths portable across Windows installs while avoiding
@@ -1215,6 +1215,25 @@ def _unlink_clip_pair(clip_path):
                 CORE.push_file_lock(details)
                 raise RuntimeError(details["message"]) from exc
             raise
+
+
+def delete_clip_local_media(name, preserve_delivery_history=False):
+    """Delete only the local MP4/sidecar, optionally retaining the SQL delivery archive."""
+    name = str(name or "")
+    if not CLIP_RE.fullmatch(name):
+        raise ValueError("Invalid clip name.")
+    clip_path = find_clip_path(name)
+    if not clip_path:
+        raise FileNotFoundError("Clip not found.")
+    _unlink_clip_pair(clip_path)
+    if not preserve_delivery_history:
+        forget_posted_clips([name])
+    invalidate_clip_cache()
+    return {
+        "ok": True,
+        "name": name,
+        "history_preserved": bool(preserve_delivery_history),
+    }
 
 
 def write_clip_metadata_files(output_dir, clip_filename, source_filename, start, end,
@@ -1488,8 +1507,12 @@ def _clip_path_for_delivery_name(name):
         return str(path.resolve())
     with _database_connection() as db:
         row = db.execute(
-            "SELECT clip_path FROM clip_metadata WHERE clip_name=? ORDER BY updated_at DESC LIMIT 1",
-            (str(name),),
+            """SELECT clip_path FROM (
+                   SELECT clip_path,updated_at FROM clip_metadata WHERE clip_name=?
+                   UNION ALL
+                   SELECT clip_path,updated_at FROM clip_deliveries WHERE clip_name=?
+               ) ORDER BY updated_at DESC LIMIT 1""",
+            (str(name), str(name)),
         ).fetchone()
     return str(row["clip_path"]) if row else ""
 
@@ -1556,6 +1579,11 @@ def _registry_from_sql(state):
             "post_ids": [],
             "connection_ids": [],
         })
+        if row["clip_path"]:
+            item["clip_path"] = str(row["clip_path"])
+        if row["scheduled_for"]:
+            previous_schedule = str(item.get("scheduled_for") or "")
+            item["scheduled_for"] = max(previous_schedule, str(row["scheduled_for"]))
         if row["platform"] and row["account_id"]:
             item["accounts"].append(f"{row['platform']}:{row['account_id']}")
         if row["post_id"]:
@@ -1665,13 +1693,13 @@ def _write_delivery_records(name, state, accounts=None, records=None):
         for record in records:
             if not isinstance(record, dict):
                 continue
-            provider_status = str(record.get("status") or state).strip().lower()
+            provider_status = str(record.get("status") or "").strip().lower()
             record_state = (
                 "posted" if provider_status in {"published", "success", "posted"}
                 else "scheduled" if provider_status in {
                     "scheduled", "queued", "pending", "processing", "submitted", "draft"
                 }
-                else state
+                else ""
             )
             if record_state not in {"posted", "scheduled"}:
                 continue
@@ -1689,9 +1717,11 @@ def _write_delivery_records(name, state, accounts=None, records=None):
                 "status": provider_status,
                 "extra": record.get("extra") if isinstance(record.get("extra"), dict) else {},
             })
-    if not record_rows:
+    if records is None and not record_rows:
         for destination in accounts or []:
             platform, separator, account_id = str(destination or "").partition(":")
+            if not separator or not platform.strip() or not account_id.strip():
+                continue
             record_rows.append({
                 "connection_id": "",
                 "account_id": account_id if separator else "",
@@ -1704,9 +1734,10 @@ def _write_delivery_records(name, state, accounts=None, records=None):
                 "status": state,
                 "extra": {},
             })
-    if not record_rows and state == "posted":
-        # Keep compatibility with success callbacks that only confirm a clip
-        # and do not supply a destination list.
+    if not record_rows and state == "posted" and records is None and accounts is None:
+        # Keep compatibility only with the legacy callback API that supplies
+        # no destination payload at all. An explicit empty/failed provider
+        # response must never be converted into a successful delivery.
         record_rows.append({
             "connection_id": "",
             "account_id": "",
@@ -2329,13 +2360,13 @@ def profanity_audio_filter(words, start, end, padding=0.02, mode="beep"):
     )
     if str(mode or "beep").strip().lower() == "mute":
         return f"volume=0:enable='{expression}'"
-    # aeval preserves the incoming channel layout and original audio outside
-    # the censored word intervals. The beep replaces, rather than overlays,
-    # the speech inside those exact intervals.
+    # Explicit stereo output avoids FFmpeg's default mono aeval layout,
+    # which the AAC encoder rejected during the live test. Original audio is
+    # preserved outside censored intervals; the beep replaces only those words.
     return (
         "aeval=exprs='if("
         + expression
-        + ",0.18*sin(2*PI*1000*t),val(ch))'"
+        + ",0.18*sin(2*PI*1000*t),val(ch))':channel_layout=stereo"
     )
 
 def group_words(ws, max_words, max_chars, gap=0.7):
@@ -3111,12 +3142,22 @@ class Engine:
         return picks, n
 
     # ---- render
-    def render(self, src, start, end, words, name):
+    def render(self, src, start, end, words, name, metadata_words=None):
         cfg = self.cfg
         words = censor_transcript_words(
             words, enabled=cfg.get("profanity_filter_enabled", True),
             extra_terms=cfg.get("profanity_filter_words", "")
         )
+        # Keep captions and persisted transcript censored, but let the selected
+        # copy provider understand the full moment before its output is censored.
+        source_words = list(metadata_words if metadata_words is not None else words)
+        metadata_transcript = re.sub(
+            r"\s+", " ",
+            " ".join(
+                str(word).strip() for word_start, _word_end, word in source_words
+                if start <= word_start <= end
+            ),
+        ).strip()
         out_w, out_h = output_size(cfg)
         make_ass(words, start, end, self.out_dir / f"{name}.ass", cfg)
         vf = render_video_filter(cfg, f"{name}.ass")
@@ -3141,18 +3182,34 @@ class Engine:
             "-r", "30", "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart", tmp,
         ]
-        audio_args = ["-map", "0:a?", "-af", audio_filter, "-c:a", "aac", "-b:a", "160k"]
+        # Force a named stereo layout for AAC. FFmpeg's aeval output otherwise
+        # reports an unspecified "2 channels" layout that the AAC encoder rejects.
+        audio_args = ["-map", "0:a?", "-af", audio_filter, "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "160k"]
         ass_path = self.out_dir / f"{name}.ass"
         cmd = render_prefix + audio_args + render_suffix
         try:
             r = run(cmd, cwd=self.out_dir, capture_output=True, text=True)
             if r.returncode != 0 and ffmpeg_empty_audio_packets_error(r.stderr):
-                # Keep the ASS file alive: the retry uses the same subtitle filter graph.
-                # Removing it before retry makes FFmpeg fail with "Unable to open .ass".
-                self.log("This clip range contains no usable audio packets. Retrying the render without an audio stream.")
+                # TS input seeking can land on a video keyframe while the AAC
+                # packet timeline is offset. Retry with accurate output seeking,
+                # preserving the source audio instead of silently dropping it.
+                self.log("This clip range contains no usable audio packets. Retrying audio with accurate output seeking.")
                 (self.out_dir / tmp).unlink(missing_ok=True)
-                cmd = render_prefix + ["-an"] + render_suffix
+                precise_prefix = [
+                    ffmpeg_exe(), "-y", "-v", "error", "-fflags", "+genpts",
+                    *ffmpeg_cuda_decode_args(),
+                    "-i", str(pathlib.Path(src).resolve()),
+                    "-ss", f"{start:.2f}", "-t", f"{end - start:.2f}",
+                    "-filter_complex", vf, "-map", "[v]",
+                    *enc, "-pix_fmt", "yuv420p",
+                ]
+                cmd = precise_prefix + audio_args + render_suffix
                 r = run(cmd, cwd=self.out_dir, capture_output=True, text=True)
+                if r.returncode != 0 and ffmpeg_empty_audio_packets_error(r.stderr):
+                    raise RuntimeError(
+                        "No audio packets were available after accurate output seeking; "
+                        "the source recording was kept for retry."
+                    )
             if r.returncode != 0:
                 raise RuntimeError((r.stderr or "ffmpeg failed").strip()[-400:])
         except Exception:
@@ -3174,13 +3231,13 @@ class Engine:
                 ai_cfg = load_ai_settings()
             # Reuse the exact provider selected for highlight detection; there is no separate copy provider.
             provider = str(ai_cfg.get("provider", "gemini")).strip().lower()
-            if transcript and provider in {"ollama", "gemini", "huggingface", "custom", "openai", "anthropic"}:
-                post_copy = generate_social_copy(transcript, tag, ai_cfg, log=self.log)
-            elif transcript and provider == "hooks":
+            if metadata_transcript and provider in {"ollama", "gemini", "huggingface", "custom", "openai", "anthropic"}:
+                post_copy = generate_social_copy(metadata_transcript, tag, ai_cfg, log=self.log)
+            elif metadata_transcript and provider == "hooks":
                 self.log("Hook words is selected; the strongest exact hook phrase is used as the title.")
                 hook_terms = dict(load_custom())
                 hook_terms.update({term: 1.0 for term in HYPE_WORDS | HYPE_PHRASES})
-                post_copy = build_hook_word_copy(transcript, tag, hook_terms)
+                post_copy = build_hook_word_copy(metadata_transcript, tag, hook_terms)
         except Exception as exc:
             provider = str(ai_cfg.get("provider", "unknown")).lower()
             self.log(
@@ -3281,7 +3338,10 @@ class Engine:
             self.status(f"Rendering clip {i} of {len(peaks)} (hype score {sc:.1f})...", "rendering",
                         int((i - 1) / max(1, len(peaks)) * 100))
             try:
-                self.render(path, start, end, words, name)
+                self.render(path, start, end, words, name, raw_words)
+                completed_clip = self.out_dir / f"{name}.mp4"
+                if not completed_clip.is_file() or completed_clip.stat().st_size <= 0:
+                    raise RuntimeError("The renderer returned without creating a complete clip file.")
                 rendered_count += 1
                 self.status(f"Rendered clip {i} of {len(peaks)}.", "rendering",
                             int(i / max(1, len(peaks)) * 100))
@@ -3290,17 +3350,28 @@ class Engine:
             except Exception as e:
                 self.log(f"Render error: {e}")
         self.emit("chunk", "")
-        # Live capture chunks are temporary working files, not user-owned VODs.
-        # Free disk space after a completed analysis that produced clips or no worthwhile moments.
-        # Keep the source if every render failed so the user can retry it.
+        # Streamlink's .ts segments are disposable live-capture inputs, but only
+        # after at least one finished MP4 exists. Keep silent/no-clip/failed sources
+        # available for retry, respect the user's storage toggle, and never delete a
+        # VOD or another file type from a user-selected recording folder.
         same_recording_dir = os.path.normcase(str(pth.parent.resolve())) == os.path.normcase(str(self.rec_dir.resolve()))
-        if self.cfg.get("mode", "live") == "live" and same_recording_dir and (not peaks or rendered_count > 0):
+        is_streamlink_segment = pth.suffix.casefold() == ".ts" and pth.name.startswith("seg_")
+        delete_live_source = bool(self.cfg.get("delete_rec", DEFAULTS["delete_rec"]))
+        if (
+            self.cfg.get("mode", "live") == "live"
+            and same_recording_dir
+            and is_streamlink_segment
+            and delete_live_source
+            and rendered_count > 0
+        ):
             try:
                 pth.unlink(missing_ok=True)
-                reason = "no worthwhile clips" if not peaks else f"{rendered_count} clip(s) rendered"
-                self.log(f"Deleted temporary live recording {pth.name} after processing ({reason}).")
+                self.log(
+                    f"Deleted temporary live source {pth.name} after verifying "
+                    f"{rendered_count} completed clip(s)."
+                )
             except OSError as exc:
-                self.log(f"Could not delete temporary live recording {pth.name}: {exc}")
+                self.log(f"Could not delete temporary live source {pth.name}: {exc}")
 
     # ---- live
     def wait_live(self, url):
@@ -4372,32 +4443,30 @@ class Core:
                 return {"ok": True, "stopping": True}
         return {"ok": True, "stopping": False}
 
-    def state(self, since, clip_offset=0, clip_tab="clips", include_clips=True):
-        # Reuse the folder index and delivery maps. Counts must never read clip
-        # metadata for every MP4 just to discover the number of clips.
+    def state(self, since, clip_offset=0, clip_tab="clips", include_clips=True, clip_limit=60):
+        # Reuse the folder index and SQL delivery maps. Delivery history is
+        # independent of local media retention, so counts must include SQL-only rows.
         indexed = _clip_index()
         posted_registry = load_posted_registry()
         scheduled_registry = load_scheduled_registry()
         posted_names = set(posted_registry)
         scheduled_names = set(scheduled_registry)
-        ready_total = posted_total = scheduled_total = 0
-        for item in indexed:
-            name = item["name"]
-            is_posted = name in posted_names
-            is_scheduled = name in scheduled_names
-            if is_posted:
-                posted_total += 1
-            if is_posted or is_scheduled:
-                scheduled_total += 1
-            else:
-                ready_total += 1
+        indexed_names = {str(item["name"]) for item in indexed}
+        ready_total = sum(
+            1 for name in indexed_names
+            if name not in posted_names and name not in scheduled_names
+        )
+        posted_total = len(posted_names)
+        scheduled_total = len(posted_names | scheduled_names)
+        all_total = len(indexed_names | posted_names | scheduled_names)
         clip_total = (
-            posted_total if clip_tab == "posted"
+            all_total if clip_tab == "all"
+            else posted_total if clip_tab == "posted"
             else scheduled_total if clip_tab == "scheduled"
             else ready_total
         )
         clips = list_clips(
-            offset=clip_offset, clip_tab=clip_tab,
+            limit=clip_limit, offset=clip_offset, clip_tab=clip_tab,
             _indexed=indexed, _posted=posted_registry, _scheduled=scheduled_registry,
         ) if include_clips else []
         with self.lock:
@@ -4990,8 +5059,16 @@ class Core:
                         selected_accounts[platform] = str(cfg[platform + "_id"])
             if not selected_accounts:
                 raise ValueError("Connect and select at least one Zernio social account in Settings.")
-        valid = [str(n) for n in names if CLIP_RE.fullmatch(str(n)) and find_clip_path(str(n))]
-        if not valid: raise ValueError("No valid clips selected.")
+        valid = []
+        for raw_name in names:
+            name = str(raw_name)
+            if not CLIP_RE.fullmatch(name):
+                continue
+            clip_path = find_clip_path(name)
+            if clip_path and is_fully_rendered_clip(clip_path):
+                valid.append(name)
+        if not valid:
+            raise ValueError("No fully rendered clips are ready to publish.")
         if not self._make_publisher(provider, False): raise ValueError(f"{provider.title()} posting is unavailable.")
         with self.lock:
             if self.posting["active"]:
@@ -5013,8 +5090,10 @@ class Core:
                         self.push(f"{provider.title()}: uploading {index + 1} of {len(valid)} - {name}.")
                         caption_override = (caption_overrides or {}).get(name) if isinstance(caption_overrides, dict) else None
                         clip_path = find_clip_path(name)
-                        if not clip_path:
-                            raise FileNotFoundError(f"Clip is no longer available: {name}")
+                        if not clip_path or not is_fully_rendered_clip(clip_path):
+                            raise FileNotFoundError(
+                                f"Clip is no longer a fully rendered, post-ready video: {name}"
+                            )
                         publish_result = publisher.publish_one(
                             clip_path, schedule_minutes=delay,
                             accounts=selected_accounts, caption_override=caption_override,
@@ -5137,6 +5216,21 @@ def find_clip_path(name):
             path = pathlib.Path(item["_path"])
             return path if path.is_file() else None
     return None
+
+
+def is_fully_rendered_clip(clip_path):
+    """Only expose completed MP4s to publishing after the SQL copy sidecar is committed."""
+    path = pathlib.Path(clip_path)
+    try:
+        if not CLIP_RE.fullmatch(path.name):
+            return False
+        if not path.is_file() or path.stat().st_size <= 0:
+            return False
+        sidecar = path.with_suffix(".txt")
+        return sidecar.is_file() and sidecar.stat().st_size > 0
+    except OSError:
+        return False
+
 
 def _clip_thumbnail_target(clip_path):
     path = pathlib.Path(clip_path).resolve()
@@ -5295,39 +5389,107 @@ def list_clips(
     posted = _posted if _posted is not None else load_posted_registry()
     scheduled = _scheduled if _scheduled is not None else load_scheduled_registry()
     indexed = _indexed if _indexed is not None else _clip_index()
-    if clip_tab == "posted":
-        indexed = [item for item in indexed if item["name"] in posted]
-        indexed.sort(key=lambda item: float(posted[item["name"]].get("posted_at", item["mtime"])), reverse=True)
+    by_name = {}
+    for source_item in indexed:
+        name = str(source_item.get("name") or "")
+        if name:
+            by_name.setdefault(name, dict(source_item))
+
+    if clip_tab in {"all", "posted", "scheduled"}:
+        history_names = set(posted)
+        if clip_tab in {"all", "scheduled"}:
+            history_names.update(scheduled)
+        for name in history_names:
+            if name in by_name:
+                continue
+            history = scheduled.get(name) or posted.get(name) or {}
+            stored_path = str(history.get("clip_path") or _clip_path_for_delivery_name(name) or "")
+            if not stored_path:
+                continue
+            clip_path = pathlib.Path(stored_path)
+            local_exists = clip_path.is_file()
+            try:
+                stat = clip_path.stat() if local_exists else None
+            except OSError:
+                stat = None
+                local_exists = False
+            activity_timestamp = float(
+                posted.get(name, {}).get("posted_at", 0)
+                or scheduled.get(name, {}).get("scheduled_at", 0)
+                or 0
+            )
+            by_name[name] = {
+                "name": name,
+                "mtime": float(stat.st_mtime) if stat else activity_timestamp,
+                "size_mb": stat.st_size / (1024 * 1024) if stat else 0.0,
+                "source": "Zernio history",
+                "creator_name": "",
+                "_path": str(clip_path.resolve()),
+                "local_exists": local_exists,
+            }
+
+    if clip_tab == "all":
+        selected_names = set(by_name)
+    elif clip_tab == "posted":
+        selected_names = set(posted)
     elif clip_tab == "scheduled":
-        indexed = [item for item in indexed if item["name"] in posted or item["name"] in scheduled]
-        indexed.sort(
-            key=lambda item: float(
-                scheduled.get(item["name"], {}).get(
-                    "scheduled_at", posted.get(item["name"], {}).get("posted_at", item["mtime"])
-                )
+        # Scheduled is the provider delivery archive: pending Zernio posts plus
+        # destinations already published successfully. It is intentionally
+        # independent of whether the local MP4 has been retained.
+        selected_names = set(posted) | set(scheduled)
+    else:
+        selected_names = set(by_name) - set(posted) - set(scheduled)
+
+    filtered = [item for name, item in by_name.items() if name in selected_names]
+    if clip_tab == "posted":
+        filtered.sort(
+            key=lambda item: float(posted.get(item["name"], {}).get("posted_at", item.get("mtime", 0)) or 0),
+            reverse=True,
+        )
+    elif clip_tab == "scheduled":
+        filtered.sort(
+            key=lambda item: max(
+                float(scheduled.get(item["name"], {}).get("scheduled_at", 0) or 0),
+                float(posted.get(item["name"], {}).get("posted_at", 0) or 0),
             ),
             reverse=True,
         )
     else:
-        indexed = [item for item in indexed if item["name"] not in posted and item["name"] not in scheduled]
-    selected = indexed[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]
+        filtered.sort(key=lambda item: float(item.get("mtime", 0) or 0), reverse=True)
+
+    start = max(0, int(offset))
+    selected = filtered[start:start + max(1, int(limit))]
     metadata_by_path = get_clip_metadata_many([item["_path"] for item in selected])
     items = []
     for source_item in selected:
         item = dict(source_item)
         clip_path = pathlib.Path(item.pop("_path"))
+        local_exists = bool(item.get("local_exists", clip_path.is_file()))
         metadata = metadata_by_path.get(str(clip_path.resolve()), {
             "title": "", "description": "", "caption": "",
         })
+        posted_entry = posted.get(item["name"], {})
+        scheduled_entry = scheduled.get(item["name"], {})
         item["caption"] = metadata["caption"]
         item["title"] = metadata["title"]
         item["description"] = metadata["description"]
+        item["local_exists"] = local_exists
         item["posted"] = item["name"] in posted
-        item["posted_at"] = posted.get(item["name"], {}).get("posted_at")
-        # Keep the clip in Scheduled while any destination is still pending.
+        item["posted_at"] = posted_entry.get("posted_at")
+        # Keep the item in Scheduled while any destination is pending, and
+        # preserve the exact provider-supplied publishing time for the UI.
         item["scheduled"] = item["name"] in scheduled
-        item["scheduled_at"] = scheduled.get(item["name"], {}).get("scheduled_at")
-        item["delivery_state"] = "scheduled" if item["scheduled"] else "posted" if item["posted"] else "ready"
+        item["scheduled_at"] = scheduled_entry.get("scheduled_at")
+        item["scheduled_for"] = (
+            scheduled_entry.get("scheduled_for")
+            or posted_entry.get("scheduled_for")
+        )
+        item["delivery_accounts"] = list(dict.fromkeys(
+            list(posted_entry.get("accounts", [])) + list(scheduled_entry.get("accounts", []))
+        ))
+        item["delivery_state"] = (
+            "scheduled" if item["scheduled"] else "posted" if item["posted"] else "ready"
+        )
         items.append(item)
     return items
 
@@ -5516,7 +5678,7 @@ def grab_output_preview(mode, target, settings=None):
 CORE = Core()
 TOKEN = secrets.token_urlsafe(24)
 
-# ------------------------------------------------------------------ http server
+# ------------------------------------------------------------------ application route services
 def parse_json_object(raw):
     """Parse a JSON request body and reject malformed or non-object payloads."""
     try:
@@ -5580,7 +5742,7 @@ def schedule_clip_thumbnail(clip_path):
         return False
 
 
-class Handler(http.server.BaseHTTPRequestHandler):
+class AppRoutes:
     server_version = PRODUCT_NAME
     protocol_version = "HTTP/1.1"
 
@@ -5740,15 +5902,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if path == "/api/clips/names":
                 q = urllib.parse.parse_qs(u.query)
                 tab = q.get("tab", ["clips"])[0]
-                if tab not in {"clips", "posted", "scheduled"}: tab = "clips"
+                if tab not in {"clips", "posted", "scheduled", "all"}: tab = "clips"
                 posted = load_posted_registry()
                 scheduled = load_scheduled_registry()
-                names = [item["name"] for item in _clip_index()
-                         if (
-                             (item["name"] in posted) if tab == "posted"
-                             else (item["name"] in posted or item["name"] in scheduled) if tab == "scheduled"
-                             else (item["name"] not in posted and item["name"] not in scheduled)
-                         )]
+                if tab == "all":
+                    names = [item["name"] for item in list_clips(
+                        clip_tab="all", _posted=posted, _scheduled=scheduled
+                    )]
+                else:
+                    names = [item["name"] for item in _clip_index()
+                             if (
+                                 (item["name"] in posted) if tab == "posted"
+                                 else (item["name"] in posted or item["name"] in scheduled) if tab == "scheduled"
+                                 else (item["name"] not in posted and item["name"] not in scheduled)
+                             )]
                 return self._send(200, {"names": names})
             if path == "/api/creators":
                 return self._send(200, {"creators": CORE.list_creators()})
@@ -5772,9 +5939,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 try: clip_offset = max(0, int(q.get("clip_offset", ["0"])[0]))
                 except ValueError: clip_offset = 0
                 clip_tab = q.get("clip_tab", ["clips"])[0]
-                if clip_tab not in {"clips", "posted", "scheduled"}: clip_tab = "clips"
+                if clip_tab not in {"clips", "posted", "scheduled", "all"}: clip_tab = "clips"
                 include_clips = q.get("include_clips", ["1"])[0].strip().lower() not in {"0", "false", "no"}
-                return self._send(200, CORE.state(since, clip_offset, clip_tab, include_clips))
+                try: clip_limit = max(1, min(60, int(q.get("clip_limit", ["60"])[0] or 60)))
+                except ValueError: clip_limit = 60
+                return self._send(200, CORE.state(
+                    since, clip_offset, clip_tab, include_clips, clip_limit
+                ))
             if path == "/api/log/download":
                 if not RUNTIME_LOG.is_file():
                     return self._send(200, b"", "text/plain; charset=utf-8")
@@ -5939,10 +6110,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if not title:
                         raise ValueError("Add a post title before publishing.")
                     caption = title + (("\n\n" + description) if description else "")
+                    schedule_only = bool(body.get("auto_schedule", False))
                     return self._send(200, CORE.publish_clips(
                         [name], caption_overrides={name: caption},
                         account_ids=body.get("account_refs", body.get("account_ids")),
-                        force_publish_now=True,
+                        auto_schedule=schedule_only,
+                        force_publish_now=not schedule_only,
                     ))
                 if path == "/api/ai/settings":
                     return self._send(200, save_ai_settings(body))
@@ -5973,58 +6146,81 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                  else (item["name"] not in posted and item["name"] not in scheduled)
                              )]
                     deleted = []
-                    try:
-                        for name in names:
-                            clip_path = find_clip_path(name)
-                            if not clip_path: continue
-                            _unlink_clip_pair(clip_path)
+                    preserve_history = tab in {"posted", "scheduled"}
+                    for name in names:
+                        try:
+                            delete_clip_local_media(
+                                name, preserve_delivery_history=preserve_history
+                            )
                             deleted.append(name)
-                    finally:
-                        if deleted:
-                            forget_posted_clips(deleted)
-                    return self._send(200, {"ok": True, "deleted": len(deleted)})
+                        except FileNotFoundError:
+                            continue
+                    return self._send(200, {
+                        "ok": True, "deleted": len(deleted),
+                        "history_preserved": preserve_history,
+                    })
                 if path == "/api/delete_many":
                     names = body.get("names", [])
                     if not isinstance(names, list): names = []
-                    valid = [str(n) for n in names if CLIP_RE.fullmatch(str(n)) and find_clip_path(str(n))]
-                    if not valid: return self._send(400, {"error": "No valid clips selected."})
+                    posted = load_posted_registry()
+                    scheduled = load_scheduled_registry()
+                    requested_preserve = bool(body.get("preserve_delivery_history", False))
+                    valid = [
+                        str(name) for name in names
+                        if CLIP_RE.fullmatch(str(name)) and find_clip_path(str(name))
+                    ]
+                    if not valid: return self._send(400, {"error": "No valid local clips selected."})
                     deleted = []
-                    try:
-                        for name in valid:
-                            clip_path = find_clip_path(name)
-                            if not clip_path:
-                                continue
-                            _unlink_clip_pair(clip_path)
-                            deleted.append(name)
-                    finally:
-                        if deleted:
-                            forget_posted_clips(deleted)
-                    return self._send(200, {"ok": True, "deleted": len(deleted)})
+                    history_preserved = []
+                    for name in valid:
+                        preserve = requested_preserve or name in posted or name in scheduled
+                        delete_clip_local_media(name, preserve_delivery_history=preserve)
+                        deleted.append(name)
+                        if preserve:
+                            history_preserved.append(name)
+                    return self._send(200, {
+                        "ok": True, "deleted": len(deleted),
+                        "history_preserved": history_preserved,
+                    })
                 if path in ("/api/delete", "/api/reveal"):
                     name = str(body.get("name", ""))
                     clip_path = find_clip_path(name)
                     if not clip_path:
-                        return self._send(404, {"error": "Clip not found."})
+                        return self._send(404, {"error": "Local video not found."})
                     if path == "/api/reveal":
                         reveal(clip_path)
-                    else:
-                        _unlink_clip_pair(clip_path)
-                        forget_posted_clips([name])
-                    return self._send(200, {"ok": True})
+                        return self._send(200, {"ok": True})
+                    posted = load_posted_registry()
+                    scheduled = load_scheduled_registry()
+                    preserve = (
+                        bool(body.get("preserve_delivery_history", False))
+                        or name in posted or name in scheduled
+                    )
+                    result = delete_clip_local_media(
+                        name, preserve_delivery_history=preserve
+                    )
+                    return self._send(200, result)
                 if path == "/api/clip-metadata":
                     name = str(body.get("name", ""))
                     clip_path = find_clip_path(name)
-                    if not clip_path:
-                        raise ValueError("Clip not found.")
+                    local_exists = clip_path is not None
+                    if clip_path is None:
+                        stored_path = _clip_path_for_delivery_name(name)
+                        clip_path = pathlib.Path(stored_path) if stored_path else None
+                    if clip_path is None:
+                        raise ValueError("Clip metadata is no longer available.")
                     title = re.sub(r"[\\r\n]+", " ", str(body.get("title", ""))).strip()[:100]
                     description = str(body.get("description", "")).replace("\\x00", "").strip()[:2200]
                     if not title:
                         raise ValueError("Add a title before saving clip metadata.")
                     sidecar = clip_path.with_suffix(".txt")
-                    if sidecar.is_symlink():
+                    if local_exists and sidecar.is_symlink():
                         raise ValueError("The metadata sidecar is a symbolic link and cannot be edited.")
                     metadata = title + (("\n\n" + description) if description else "")
-                    saved = save_clip_metadata(clip_path, title, description, caption=metadata, write_sidecar=True)
+                    saved = save_clip_metadata(
+                        clip_path, title, description, caption=metadata,
+                        write_sidecar=local_exists,
+                    )
                     CORE.push(f"Updated SQL clip metadata for {name}")
                     return self._send(200, {"ok": True, **saved})
                 if path == "/api/open_folder":
@@ -6137,7 +6333,7 @@ def main():
     bind_host = os.environ.get("STREAMSNIP_BIND_HOST", "127.0.0.1")
     bind_port = int(os.environ.get("STREAMSNIP_PORT", "0"))
     app = create_app(
-        Handler,
+        AppRoutes,
         token=TOKEN,
         quit_event=QUIT,
         begin_window_lease=begin_window_lease,
@@ -6186,7 +6382,7 @@ def main():
     )
     if should_open_browser_window(bind_host):
         dashboard_dist = pathlib.Path(__file__).resolve().parent / "dashboard" / "dist" / "index.html"
-        # Browser mode remains unchanged; native WinUI hosts own their own window.
+        # The packaged pywebview shell sets STREAMSNIP_NATIVE_HOST=1 and owns its own window.
         open_window(url.rstrip("/") + "/dashboard/" if dashboard_dist.is_file() else url)
     try:
         while not QUIT.wait(0.5):
@@ -6204,1251 +6400,6 @@ def main():
     if server_thread.is_alive():
         server.force_exit = True
         server_thread.join(timeout=2)
-
-
-HTML = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/png" href="/assets/app-icon.png">
-<title>StreamSnip AI</title>
-<style>
-:root{--bg:#07080d;--card:rgba(255,255,255,.035);--card2:rgba(255,255,255,.07);--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.16);
---tx:#eef0f7;--dim:#9a9fb5;--mute:#646a82;--a1:#8b5cf6;--a2:#ec4899;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--grad:linear-gradient(135deg,var(--a1),var(--a2))}
-*{box-sizing:border-box;margin:0;padding:0}
-[hidden]{display:none!important}
-html,body{height:100%}
-body{background:var(--bg);color:var(--tx);font:14px/1.45 "Segoe UI Variable Text","Segoe UI",Inter,system-ui,-apple-system,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
-body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(900px 520px at 6% -12%,rgba(139,92,246,.24),transparent 60%),radial-gradient(800px 480px at 100% -5%,rgba(236,72,153,.15),transparent 60%)}
-::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:10px;border:2px solid transparent;background-clip:padding-box}::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2);background-clip:padding-box;border:2px solid transparent}
-button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
-.app{position:relative;height:100%;display:grid;grid-template-rows:auto 1fr}
-header{display:flex;align-items:center;gap:14px;padding:16px 22px}
-.logo{display:flex;align-items:center;gap:11px;font-weight:700;font-size:18px;letter-spacing:-.2px}
-.mark{width:34px;height:34px;flex:0 0 34px;border-radius:11px;background:#0b0000;display:grid;place-items:center;overflow:hidden;box-shadow:0 6px 22px rgba(139,92,246,.45);border:1px solid rgba(255,255,255,.12)}
-.mark img{width:100%;height:100%;object-fit:cover}
-.tag{color:var(--dim);font-weight:400;font-size:13px;margin-left:2px}
-.sp{flex:1}
-.main{position:relative;display:grid;grid-template-columns:430px minmax(0,1fr);gap:18px;padding:0 22px 22px;min-height:0}
-.left{display:flex;flex-direction:column;min-height:0;gap:0}
-.scroll{display:flex;flex-direction:column;flex:1;overflow:auto;padding-right:6px;margin-right:-6px}
-.right{display:flex;flex-direction:column;min-height:0;gap:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px;backdrop-filter:blur(8px)}
-.ai-card{order:-1;border-color:rgba(139,92,246,.48);background:radial-gradient(520px 180px at 0 0,rgba(139,92,246,.14),transparent 72%),var(--card)}
-.ai-card .num{width:24px;font-size:9px;letter-spacing:-.5px}
-.ai-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
-.ai-choice{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.2);color:var(--tx);text-align:left;transition:.15s}
-.ai-choice:hover{border-color:rgba(139,92,246,.65);transform:translateY(-1px)}
-.ai-choice.on{border-color:var(--a1);background:rgba(139,92,246,.16);box-shadow:0 0 0 1px rgba(139,92,246,.2) inset}
-.ai-choice b{font-size:13px}.ai-choice small{font-size:11px;color:var(--mute)}
-.ch{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-.ch h3{font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim);font-weight:600}
-.num{width:20px;height:20px;border-radius:7px;background:var(--grad);font-size:11px;font-weight:700;display:grid;place-items:center}
-.seg{display:flex;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:12px;padding:3px;gap:2px}
-.seg button{flex:1;padding:8px 10px;border-radius:9px;color:var(--dim);font-weight:500;transition:.15s;white-space:nowrap}
-.seg button:hover{color:var(--tx)}
-.seg button.on{background:var(--card2);color:var(--tx);box-shadow:0 1px 0 rgba(255,255,255,.08) inset,0 4px 12px rgba(0,0,0,.35)}
-.field{display:flex;gap:8px;margin-top:12px}
-.text{width:100%;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:12px;padding:11px 14px;color:var(--tx);font:inherit;outline:0;transition:.15s}
-.text:focus{border-color:var(--a1);box-shadow:0 0 0 3px rgba(139,92,246,.2)}
-.text::placeholder{color:var(--mute)}
-.hint{color:var(--mute);font-size:12px;margin-top:9px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:12px;font-weight:600;transition:.15s;white-space:nowrap}
-.btn.ghost{background:var(--card2);border:1px solid var(--line)}.prow .btn.on{border-color:var(--a1);color:var(--a1)}
-.btn.ghost:hover{background:rgba(255,255,255,.11);border-color:var(--line2)}
-.btn.lock-stop{font-size:11px;padding:4px 9px;margin:5px 0 2px 8px;border-color:rgba(248,113,113,.45);color:#ffd7db}
-.btn.danger{background:#dc4452;color:#fff}.btn.danger:hover{background:#ec5a68}
-.btn:disabled{opacity:.5;cursor:default}
-.settings-dialog{width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;background:#12141d;border:1px solid var(--line2);border-radius:20px;padding:18px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
-.settings-dialog .card{margin:0;background:transparent;border:0;padding:0;backdrop-filter:none}
-.settings-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px}.settings-head h2{font-size:18px;letter-spacing:-.2px}.settings-head p{color:var(--dim);font-size:12px;margin-top:2px}
-.row{display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px}
-.row:first-child{margin-top:0}
-.row label{color:var(--dim);font-size:13px}
-.row b{font-weight:600;font-variant-numeric:tabular-nums}
-.subhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);font-weight:600}
-.toggle.compact{margin-top:0;gap:8px}.toggle.compact span{font-size:11px}.color-text{width:100%;height:42px;padding:4px;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:10px;cursor:pointer}
-.ends{display:flex;justify-content:space-between;color:var(--mute);font-size:11px;margin-top:5px}
-input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:6px;outline:0;cursor:pointer;
-background:linear-gradient(90deg,var(--a1),var(--a2)) 0/var(--p,50%) 100% no-repeat,rgba(255,255,255,.1)}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.5);border:0}
-input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;border:0}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.two .row{margin-top:14px}
-.folder-pick{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
-.update-list{line-height:1.7;white-space:pre-line}
-.about-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.about-links a{color:var(--tx);background:rgba(139,92,246,.12);border-color:rgba(139,92,246,.28)}.about-links a:hover{color:#fff;background:rgba(236,72,153,.2);border-color:rgba(236,72,153,.48)}
-.about-dialog{width:min(680px,calc(100vw - 32px));background:linear-gradient(145deg,#151522,#11131c)}.about-hero{padding:18px;border:1px solid rgba(139,92,246,.24);border-radius:16px;background:radial-gradient(420px 180px at 0 0,rgba(139,92,246,.2),transparent 70%),rgba(255,255,255,.025)}.about-title{display:flex;align-items:center;gap:12px}.about-title h3{font-size:18px;letter-spacing:-.2px}.about-title .hint{margin-top:3px}.small-mark{width:42px;height:42px;border-radius:13px}.small-mark img{width:100%;height:100%;object-fit:cover;border-radius:inherit}.about-copy{color:var(--dim);font-size:13px;line-height:1.6;margin-top:16px}
-.sw{display:flex;gap:10px}
-.sw button{width:30px;height:30px;border-radius:50%;border:2px solid transparent;box-shadow:0 0 0 2px rgba(0,0,0,.5) inset;transition:.15s}
-.sw button.on{border-color:#fff;transform:scale(1.12)}
-.toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;margin-top:16px}
-.toggle span{color:var(--dim);font-size:13px}
-.toggle input{display:none}
-.sl{width:42px;height:24px;border-radius:24px;background:rgba(255,255,255,.12);position:relative;transition:.2s;flex:none}
-.sl:after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s}
-.toggle input:checked+.sl{background:var(--grad)}.toggle input:checked+.sl:after{left:21px}
-select.text{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:34px}
-select.text option{background:#14161f}
-/* phone preview */
-.pv{display:flex;justify-content:center;margin:2px 0 6px}
-.phone{width:216px;aspect-ratio:9/16;border-radius:28px;border:6px solid #1c1f2d;background:#000;position:relative;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06)}
-.phone .bg{position:absolute;inset:-25%;background:radial-gradient(circle at 28% 30%,#7c5cff,transparent 52%),radial-gradient(circle at 72% 72%,#ff4d9d,transparent 52%),#1a1030;filter:blur(16px)}
-.phone .vid{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);aspect-ratio:16/9;background:linear-gradient(135deg,#2c3150,#12141f);display:grid;place-items:center;color:rgba(255,255,255,.18)}
-.phone.fill .vid{aspect-ratio:auto;height:100%;top:0;transform:none;background:linear-gradient(160deg,#323863,#141725)}
-.cap{position:absolute;left:0;right:0;text-align:center;line-height:1.08;text-transform:uppercase;display:flex;flex-wrap:wrap;justify-content:center;gap:0 .26em;pointer-events:none}
-.cap span{display:inline-block}
-.cap .hot{color:var(--cap);animation:pop .16s ease-out}
-@keyframes pop{from{transform:scale(1.22)}to{transform:scale(1)}}
-.camv{display:none}
-.phone.cam .bg,.phone.cam .vid{display:none}
-.phone.cam .camv{display:block;position:absolute;inset:0}
-.camv .ct{position:absolute;left:0;right:0;top:0;height:40%;background:linear-gradient(160deg,#5b3ea8,#2a1c52);display:grid;place-items:center;color:rgba(255,255,255,.35);border-bottom:2px solid #000}
-.camv .cb{position:absolute;left:0;right:0;top:40%;bottom:0;background:linear-gradient(160deg,#323863,#141725)}
-.pvl{text-align:center;color:var(--mute);font-size:11px;margin:8px 0 4px}
-.editor{width:min(940px,95vw);max-height:94vh;overflow:auto;background:#12141d;border:1px solid var(--line2);border-radius:20px;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
-.editor h4{font-size:17px;margin-bottom:4px}.editor .sub{color:var(--dim);font-size:13px;margin-bottom:14px}
-.cstage{position:relative;width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,#2c3150,#12141f);border-radius:12px;overflow:hidden;touch-action:none;user-select:none}
-.cstage .cimg{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;pointer-events:none}
-.crect{position:absolute;border:2px solid #ff40ff;background:rgba(255,64,255,.12);pointer-events:auto}
-.crect .move-hit{position:absolute;inset:12px;cursor:move;pointer-events:auto;touch-action:none;z-index:1}
-.crect span{position:absolute;left:4px;top:3px;font-size:10px;font-weight:700;letter-spacing:.8px;color:#fff;text-shadow:0 1px 3px #000;z-index:2}
-.crect.game{border:2px dashed #22d3ee;background:rgba(34,211,238,.07);cursor:default;pointer-events:none}
-.crect .hdl{position:absolute;width:14px;height:14px;background:#fff;border:2px solid #ff40ff;border-radius:3px;pointer-events:auto;touch-action:none;z-index:3}
-.crect .hdl.nw{left:-7px;top:-7px;cursor:nwse-resize}.crect .hdl.ne{right:-7px;top:-7px;cursor:nesw-resize}
-.crect .hdl.sw{left:-7px;bottom:-7px;cursor:nesw-resize}.crect .hdl.se{right:-7px;bottom:-7px;cursor:nwse-resize}
-.erow{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}
-.erow .grow{flex:1;min-width:220px}
-/* hero */
-.hero{display:flex;align-items:center;gap:18px;padding:18px 20px;margin:0;background:var(--card);border:1px solid var(--line);border-radius:18px;position:relative;overflow:hidden}
-.hero:before{content:"";position:absolute;inset:0;background:radial-gradient(500px 120px at 0 0,var(--hc,transparent),transparent 70%);opacity:.18;pointer-events:none;transition:.4s}
-.eq{display:flex;align-items:center;gap:4px;height:38px;width:46px;flex:none}
-.eq i{flex:1;height:18%;border-radius:3px;background:var(--hc,var(--mute));transition:background .4s}
-.hero.live .eq i{animation:eq 1s ease-in-out infinite}
-.eq i:nth-child(2){animation-delay:.15s!important}.eq i:nth-child(3){animation-delay:.3s!important}.eq i:nth-child(4){animation-delay:.45s!important}.eq i:nth-child(5){animation-delay:.6s!important}
-@keyframes eq{0%,100%{height:18%}50%{height:100%}}
-.ph{font-size:19px;font-weight:700;letter-spacing:-.3px}
-.st{color:var(--dim);font-size:13px;margin-top:1px;max-width:48ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.stats{margin-left:auto;display:flex;gap:22px}
-.stat{text-align:right}.stat b{display:block;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}.stat span{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.8px}
-.hero[data-phase=idle]{--hc:#646a82}.hero[data-phase=waiting]{--hc:#fbbf24}.hero[data-phase=recording]{--hc:#f87171}
-.hero[data-phase=transcribing]{--hc:#8b5cf6}.hero[data-phase=rendering]{--hc:#ec4899}.hero[data-phase=stopping]{--hc:#fbbf24}.hero[data-phase=working]{--hc:#8b5cf6}
-.progress-wrap{padding:11px 14px 12px;background:var(--card);border:1px solid var(--line);border-radius:12px}.progress-meta{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;font-weight:600;margin-bottom:7px}.progress-track{height:10px;background:rgba(255,255,255,.1);border-radius:8px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.35)}.progress-fill{height:100%;width:0;background:var(--grad);border-radius:8px;transition:width .25s ease;box-shadow:0 0 14px rgba(139,92,246,.55)}
-.post-progress{margin-bottom:12px;padding:11px 14px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.3);border-radius:12px}.post-progress .progress-meta{margin-bottom:7px}.post-progress .progress-track{height:9px}
-.local-note{color:var(--mute);font-size:11px;padding:0 22px 8px}.local-note b{color:var(--dim)}
-.rec-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--bad);margin-right:8px;animation:blink 1.2s infinite;vertical-align:1px}
-@keyframes blink{50%{opacity:.25}}
-/* tabs */
-.tabs{display:flex;align-items:center;gap:6px}
-.tab{padding:8px 14px;border-radius:10px;color:var(--dim);font-weight:600;transition:.15s}
-.tab:hover{color:var(--tx)}.tab.on{background:var(--card2);color:var(--tx)}
-.tab em{font-style:normal;background:var(--grad);color:#fff;font-size:11px;padding:1px 7px;border-radius:20px;margin-left:6px}
-.panel{flex:1;min-height:0;overflow:auto;padding-right:6px;margin-right:-6px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:14px;padding-bottom:6px}
-.clip{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;transition:.2s}
-.clip:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:0 14px 36px rgba(0,0,0,.4)}
-.thumb{position:relative;aspect-ratio:9/16;background:#000;cursor:pointer}
-.thumb video{width:100%;height:100%;object-fit:cover;display:block}
-.pb{position:absolute;right:10px;bottom:10px;width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);display:grid;place-items:center;transition:.2s}
-.clip:hover .pb{background:var(--grad)}
-.cm{padding:10px 12px 8px}
-.cc{font-size:12.5px;line-height:1.35;height:34px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.cr{display:flex;align-items:center;justify-content:space-between;margin-top:8px;color:var(--mute);font-size:11.5px}
-.acts{display:flex;gap:2px;margin-right:-6px}
-.ib{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--dim);transition:.15s}.ib.post{width:auto;min-width:34px;padding:0 7px;font-size:11px;font-weight:600}
-.ib:hover{background:var(--card2);color:var(--tx)}.ib.del:hover{color:var(--bad)}
-.empty{height:100%;min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--dim);gap:8px;border:1px dashed var(--line2);border-radius:18px;padding:30px}
-.empty h4{font-size:17px;color:var(--tx)}.empty p{max-width:44ch;font-size:13px}
-.empty .big{width:62px;height:62px;border-radius:20px;background:var(--grad);display:grid;place-items:center;margin-bottom:8px;box-shadow:0 12px 36px rgba(139,92,246,.4)}
-#log{font:12px/1.65 "Cascadia Mono",Consolas,monospace;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-height:100%}
-#log div{white-space:pre-wrap;word-break:break-word}#log .t{color:var(--mute);margin-right:10px}#log .err{color:var(--bad)}#log .okk{color:var(--ok)}
-.creator-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}.creator-item{border:1px solid var(--line);background:rgba(0,0,0,.2);border-radius:12px;padding:10px}.creator-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.creator-name{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.creator-state{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim)}.creator-state.live{color:var(--ok)}.creator-detail{font-size:11px;color:var(--mute);margin-top:4px;overflow-wrap:anywhere}.creator-actions{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}.creator-actions .btn{padding:6px 9px;font-size:11px}.z-account-picks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:8px 0}.z-account-pick{display:flex;align-items:center;gap:8px;min-width:0;padding:9px;border:1px solid var(--line);border-radius:10px;background:rgba(0,0,0,.16);font-size:12px}.z-account-pick input{accent-color:var(--a1)}.z-account-pick span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.log-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.log-title{display:flex;align-items:center;gap:9px;font-weight:700}.log-live{font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:var(--ok);border:1px solid rgba(52,211,153,.35);border-radius:999px;padding:3px 8px}.log-live.paused{color:var(--warn);border-color:rgba(251,191,36,.35)}.log-actions{display:flex;gap:7px}.log-actions .btn{padding:7px 10px;font-size:11px}
-.hw{display:flex;flex-direction:column;gap:12px;min-height:100%}
-.hw textarea{flex:1;min-height:260px;resize:none;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:16px;padding:14px 16px;color:var(--tx);font:13px/1.6 "Cascadia Mono",Consolas,monospace;outline:0}
-.hw textarea:focus{border-color:var(--a1);box-shadow:0 0 0 3px rgba(139,92,246,.2)}
-.hwb{display:flex;align-items:center;gap:12px}.hwb .msg{color:var(--ok);font-size:13px;opacity:0;transition:.3s}.hwb .msg.show{opacity:1}
-.help{color:var(--dim);font-size:13px;line-height:1.55}.help code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:6px;font-size:12px;color:var(--tx)}
-details{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
-summary{cursor:pointer;color:var(--dim);font-weight:600}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;max-height:200px;overflow:auto}
-.chips span{background:rgba(255,255,255,.06);border-radius:8px;padding:2px 9px;font-size:12px;color:var(--dim)}
-/* primary live capture controls stay visible above the dashboard */
-.capture-top{padding:0 22px 12px}
-.capture-top .startbar{padding:0;max-width:1600px;margin:0 auto}
-.capture-top .go{min-height:54px}
-.capture-top .stopb{min-height:54px}
-/* start bar */
-.startbar{padding:14px 0 0;display:flex;gap:10px}
-.go{flex:1;padding:15px;font-size:16px;border-radius:15px;background:var(--grad);font-weight:700;color:#fff;box-shadow:0 10px 30px rgba(139,92,246,.4);transition:.2s;display:flex;align-items:center;justify-content:center;gap:10px}
-.go:hover{transform:translateY(-1px);box-shadow:0 14px 38px rgba(236,72,153,.4)}
-.go:disabled{opacity:.6;transform:none}
-.stopb{flex:1;padding:15px;font-size:15px;border-radius:15px;background:#dc4452;font-weight:700;color:#fff;transition:.15s}.stopb:hover{background:#ec5a68}.stopb:disabled{opacity:.55}
-.stopb.alt{flex:none;background:var(--card2);border:1px solid var(--line);color:var(--tx);padding:15px 20px}.stopb.alt:hover{background:rgba(255,255,255,.12)}
-/* StreamSnip 4.x  -  refined commercial dashboard */
-:root{
- --bg:#090d16;--card:#111827;--card2:#182235;--line:rgba(148,163,184,.14);--line2:rgba(148,163,184,.27);
- --tx:#f1f5fb;--dim:#a6b2c5;--mute:#718096;--a1:#6d8cff;--a2:#28c7b7;
- --ok:#35d6a0;--warn:#f6c66b;--bad:#fb7185;
- --grad:linear-gradient(115deg,#5478ed,#27b8aa);
-}
-body{background:var(--bg);font-size:13px}
-body:before{background:radial-gradient(900px 520px at 8% -15%,rgba(84,120,237,.15),transparent 62%),radial-gradient(760px 420px at 100% 0,rgba(39,184,170,.09),transparent 62%)}
-header{padding:16px 26px;border-bottom:1px solid var(--line);background:rgba(9,13,22,.88);backdrop-filter:blur(18px)}
-.logo{font-size:17px;letter-spacing:-.35px}.mark{border-radius:10px;box-shadow:0 5px 18px rgba(84,120,237,.2)}
-.tag{font-size:12px;color:#8292aa}
-.local-note{padding:7px 26px 5px;color:#65748b}
-.capture-top{padding:8px 26px 16px}
-.capture-top .startbar{max-width:none}
-.go{background:linear-gradient(110deg,#5478ed,#3867d8);box-shadow:0 8px 22px rgba(55,99,214,.22);border-radius:12px;font-size:14px;min-height:48px}
-.go:hover{box-shadow:0 10px 26px rgba(55,99,214,.3)}
-.stopb{border-radius:12px;font-size:14px;min-height:48px}
-.main{grid-template-columns:minmax(330px,370px) minmax(0,1fr);gap:18px;padding:0 26px 24px}
-.left{min-height:0}.scroll{gap:0;padding-right:5px}
-.right{gap:12px}
-.card{background:linear-gradient(160deg,rgba(20,30,47,.96),rgba(15,23,37,.96));border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:11px;backdrop-filter:none;box-shadow:0 5px 18px rgba(0,0,0,.12)}
-.ai-card{border-color:rgba(109,140,255,.24);background:linear-gradient(155deg,rgba(25,37,61,.98),rgba(15,23,37,.98))}
-.ch{margin-bottom:11px;gap:9px}.ch h3{font-size:11px;letter-spacing:1.05px;color:#aab8cc}
-.num{background:rgba(109,140,255,.16);color:#a9bcff;border:1px solid rgba(109,140,255,.2);border-radius:6px}
-.creator-card{border-color:rgba(39,184,170,.3);background:linear-gradient(155deg,rgba(15,42,48,.75),rgba(15,23,37,.98))}
-.creator-card .num{background:rgba(39,184,170,.14);color:#62ddce;border-color:rgba(39,184,170,.25)}
-.text{background:#0b1321;border:1px solid rgba(148,163,184,.17);border-radius:9px;padding:10px 12px}
-.text:focus{border-color:#6d8cff;box-shadow:0 0 0 3px rgba(109,140,255,.13)}
-.btn{border-radius:9px;font-size:12px;padding:9px 12px}
-.btn.ghost{background:#1a2639;border-color:rgba(148,163,184,.16)}
-.btn.ghost:hover{background:#24334b;border-color:rgba(148,163,184,.3)}
-.seg{background:#0b1321;border-color:var(--line);border-radius:9px}
-.seg button{padding:7px 9px;font-size:12px}.seg button.on{background:#253653;box-shadow:none;color:#eaf0ff}
-.ai-choices{gap:7px}.ai-choice{background:#0d1727;border-radius:9px;padding:10px;border-color:rgba(148,163,184,.13)}
-.ai-choice.on{border-color:#6d8cff;background:rgba(109,140,255,.12);box-shadow:0 0 0 1px rgba(109,140,255,.12) inset}
-.row{margin:11px 0 7px}.row label{font-size:12px;color:#9eacc0}
-.hint{font-size:11.5px;line-height:1.55;color:#8190a6}
-.creator-item{background:#0c1725;border-color:rgba(148,163,184,.13);border-radius:10px;padding:11px}
-.creator-state{font-size:9px;letter-spacing:.8px}
-.hero{border-radius:14px;background:linear-gradient(120deg,#15233a,#111a2a);border-color:var(--line);padding:17px 19px}
-.ph{font-size:17px}.stats{gap:18px}.stat b{font-size:19px}
-.progress-wrap{border-radius:10px;background:#111b2b;border-color:var(--line)}
-.tabs{padding:4px;background:#0c1422;border:1px solid var(--line);border-radius:11px;width:max-content}
-.tab{padding:8px 13px;border-radius:8px;font-size:12px}.tab.on{background:#243552;color:#f3f6ff}
-.grid{gap:12px;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
-.clip{background:#111b2a;border-color:var(--line);border-radius:12px}
-.clip:hover{border-color:rgba(109,140,255,.42);box-shadow:0 10px 28px rgba(0,0,0,.24)}
-.cm{padding:11px 12px}.cc{font-size:12px}
-.empty{border-radius:14px;background:rgba(17,27,42,.35)}
-#log{background:#0b1321;border-color:var(--line);border-radius:12px}
-.details,details{background:#111b2a;border-color:var(--line);border-radius:11px}
-@media(min-width:1500px){.main{grid-template-columns:390px minmax(0,1fr);gap:22px;padding-left:32px;padding-right:32px}.capture-top{padding-left:32px;padding-right:32px}.grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}}
-@media(max-width:1080px){.main{grid-template-columns:minmax(0,1fr);padding:0 16px 20px}.capture-top{padding-left:16px;padding-right:16px}header{padding:13px 16px}}
-@media(max-width:650px){header{flex-wrap:wrap}.tag{display:none}.stats{width:100%;justify-content:space-between}.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
-/* overlays */
-.overlay{position:fixed;inset:0;background:rgba(4,5,9,.78);backdrop-filter:blur(10px);display:grid;place-items:center;z-index:50;animation:fade .15s}
-@keyframes fade{from{opacity:0}}
-.dialog{background:#12141d;border:1px solid var(--line2);border-radius:20px;padding:22px;max-width:380px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
-.dialog h4{font-size:17px;margin-bottom:6px}.dialog p{color:var(--dim);margin-bottom:18px}.dlg-actions{display:flex;gap:10px;justify-content:flex-end}
-.player{display:flex;gap:22px;align-items:stretch;max-height:92vh;max-width:94vw;background:#0d0f17;border:1px solid var(--line2);border-radius:22px;padding:14px;box-shadow:0 30px 90px rgba(0,0,0,.7)}
-.player video{height:min(82vh,820px);aspect-ratio:9/16;border-radius:14px;background:#000;display:block}
-.pside{width:290px;display:flex;flex-direction:column;gap:12px;padding:6px 6px 2px}
-.pside h4{font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim)}
-.post-dialog{width:min(680px,calc(100vw - 28px));max-height:92vh;overflow:auto;background:#12141d;border:1px solid var(--line2);border-radius:20px;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.65)}
-.post-dialog h3{font-size:18px;margin-bottom:5px}.post-dialog .sub{font-size:12px;color:var(--dim);margin-bottom:16px}
-.post-dialog label{display:block;color:var(--dim);font-size:12px;margin:12px 0 6px}
-.post-dialog label.platform-pick{display:flex;align-items:center;margin:0}
-.post-dialog textarea{min-height:145px;resize:vertical;line-height:1.5}
-.platform-picks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:14px 0}
-.platform-pick{display:flex;align-items:center;gap:8px;padding:11px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.2);font-size:12px;color:var(--tx);cursor:pointer}
-.platform-pick:has(input:checked){border-color:var(--a1);background:rgba(139,92,246,.15)}
-.post-note{font-size:11px;color:var(--mute);line-height:1.5;margin:10px 0 16px}
-@media(max-width:650px){.platform-picks{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.pcap{white-space:pre-wrap;font:13px/1.55 inherit;font-family:inherit;color:var(--tx);background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:12px;padding:12px;flex:1;overflow:auto}
-.prow{display:flex;gap:8px;flex-wrap:wrap}
-#toasts{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;align-items:center;z-index:99;pointer-events:none}
-.toast{background:#1b1e2b;border:1px solid var(--line2);padding:10px 18px;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.5);animation:up .25s;transition:.3s}
-.toast.bad{border-color:rgba(248,113,113,.6)}.toast.ok{border-color:rgba(52,211,153,.5)}.toast.out{opacity:0;transform:translateY(8px)}
-@keyframes up{from{opacity:0;transform:translateY(10px)}}
-#offline{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#3a1d22;border:1px solid var(--bad);color:#ffd7db;padding:9px 18px;border-radius:12px;z-index:90}
-@media(max-width:1080px){body{overflow:auto}.app{height:auto}.main{grid-template-columns:1fr}.scroll,.panel{overflow:visible}.hero{flex-wrap:wrap}.stats{margin-left:0}}
-</style>
-</head>
-<body>
-<div class="app">
-<header>
-  <div class="logo"><div class="mark"><img src="/assets/app-icon.png" alt="StreamSnip AI" onerror="this.style.display='none';this.parentElement.textContent='⚡'"></div>StreamSnip AI<span class="tag">by ScarZero &middot; live stream &rarr; viral Shorts</span></div>
-  <div class="sp"></div>
-  <a class="btn ghost" href="/dashboard/" title="Open the React creator workspace">React dashboard</a>
-  <button class="btn ghost" id="btn-folder"><span data-ico="folder"></span>Clips folder</button>
-  <button class="btn ghost" id="btn-settings"><span data-ico="settings"></span>Settings</button>
-  <button class="btn ghost" id="btn-about"><span data-ico="info"></span>About</button>
-  <button class="btn ghost" id="btn-quit" title="Stop everything and close StreamSnip AI"><span data-ico="power"></span>Quit</button>
-</header>
-<div class="local-note">If buttons do not respond, disable your ad blocker for <b>127.0.0.1</b> / <b>localhost</b>.</div>
-<div class="capture-top">
-  <div class="startbar" id="startbar"><button class="go" id="btn-start"><span data-ico="bolt" data-s="20"></span><span id="go-label">Start recording &amp; clipping</span></button></div>
-  <div class="startbar" id="stopbar" hidden><button class="stopb" id="btn-stop">Stop &amp; finish clips</button><button class="stopb alt" id="btn-kill">Stop now</button></div>
-</div>
-
-<div class="main">
-<section class="left">
- <div class="scroll">
-  <div class="card creator-card">
-    <div class="ch"><span class="num">LIVE</span><h3>Creator monitors</h3></div>
-    <p class="hint" style="margin:0 0 10px">Track up to 10 creators simultaneously. Each creator gets separate recordings and clips. Ten concurrent streams can be demanding on CPU, GPU, and network resources.</p>
-    <input id="creator-name" class="text" type="text" maxlength="80" placeholder="Creator name">
-    <div class="field"><input id="creator-target" class="text" type="url" spellcheck="false" placeholder="Twitch or YouTube live URL"><button class="btn ghost" id="creator-add">Add</button></div>
-    <p class="hint">Each creator has separate Live recordings/clips and a Recorded VOD inbox. Turn on Watch VOD folder, then drop full VOD files into that creator's inbox. VOD clips and processed originals stay separate from Live.</p>
-    <div id="creator-list" class="creator-list"><p class="hint">Loading creator monitors...</p></div>
-  </div>
-  <div class="card">
-    <div class="ch"><span class="num">1</span><h3>Source</h3></div>
-    <div class="seg" data-key="mode"><button data-v="live">Live stream</button><button data-v="file">Video file / VOD</button></div>
-    <div class="field"><input id="target" class="text" type="text" spellcheck="false" autocomplete="off"><button id="btn-browse" class="btn ghost" hidden>Browse</button></div>
-    <p class="hint" id="src-hint"></p>
-  </div>
-
-  <div class="card ai-card" id="ai-card">
-    <div class="ch"><span class="num">AI</span><h3>Choose your highlight engine</h3></div>
-    <p class="hint" style="margin-top:0">Hook words and Ollama run locally and use no hosted AI quota. Gemini and Hugging Face send transcript windows to hosted services and can consume your account quota or credits. Whisper creates the transcript separately.</p>
-    <div class="ai-choices" role="group" aria-label="AI highlight provider">
-      <button type="button" class="ai-choice" data-ai-provider="hooks"><b>Hook words</b><small>Free · offline · default</small></button>
-      <button type="button" class="ai-choice" data-ai-provider="ollama"><b>Ollama local AI</b><small>Free · private · local model</small></button>
-      <button type="button" class="ai-choice" data-ai-provider="gemini"><b>Gemini API</b><small>Hosted · uses Google quota</small></button>
-      <button type="button" class="ai-choice" data-ai-provider="huggingface"><b>Hugging Face</b><small>Hosted · may use provider credits</small></button>
-      <button type="button" class="ai-choice" data-ai-provider="custom"><b>Free / Custom API</b><small>OpenAI-compatible endpoint</small></button>
-    </div>
-    <select id="ai-provider" class="text" hidden><option value="hooks">Built-in and custom hook words</option><option value="ollama">Ollama local AI</option><option value="huggingface">Hugging Face hosted model</option><option value="gemini">Gemini API</option><option value="custom">Free / custom OpenAI-compatible API</option></select>
-    <div id="ollama-ai-fields" hidden>
-      <div class="row"><label>Ollama address</label></div><input id="ollama-url" class="text" value="http://127.0.0.1:11434">
-      <div class="row"><label>Installed Ollama model</label><button class="btn ghost" id="ai-detect-ollama">Detect models</button></div>
-      <select id="ollama-model" class="text"><option value="">Click Detect models</option></select>
-      <p class="hint">Install Ollama and at least one model first. Only models already installed and detected by Ollama are available.</p>
-    </div>
-    <div id="gemini-ai-fields" hidden><div class="row"><label>Gemini API key</label><div class="prow"><b id="gemini-key-state">Not saved</b><button type="button" class="btn ghost" id="gemini-key-clear">Clear saved key</button></div></div><input id="gemini-key" class="text" type="password" placeholder="Enter a Gemini API key"><div class="row"><label>Preferred Gemini model</label></div><input id="gemini-model" class="text" value="gemini-3.8-flash" placeholder="gemini-3.8-flash"><p class="hint">The app checks this model first, tries the other available Gemini models if needed, then falls back to Ollama. Model IDs can change; use one enabled for your API key.</p></div>
-    <div id="hf-ai-fields" hidden><div class="row"><label>Hugging Face model</label></div><input id="hf-model" class="text" value="deepseek-ai/DeepSeek-V4.1-Flash:fastest"><div class="row"><label>Hugging Face access token</label><div class="prow"><b id="hf-token-state">Not saved</b><button type="button" class="btn ghost" id="hf-token-clear">Clear saved token</button></div></div><input id="hf-token" class="text" type="password" placeholder="hf_… token with Inference Providers access"><p class="hint">Save your token here. StreamSnip also uses it for authenticated Whisper model downloads. Use a token with Inference Providers access and available provider credits.</p></div>
-    <div id="custom-ai-fields" hidden>
-      <div class="row"><label>OpenAI-compatible API base URL</label></div>
-      <input id="custom-api-base" class="text" type="url" value="https://api.openai.com/v1" placeholder="https://your-provider.example/v1">
-      <div class="row"><label>Model name</label></div>
-      <input id="custom-api-model" class="text" type="text" placeholder="Enter the exact model ID">
-      <div class="row"><label>API key (optional for local/free endpoints)</label><div class="prow"><b id="custom-api-key-state">Not saved</b><button type="button" class="btn ghost" id="custom-api-key-clear">Clear saved key</button></div></div>
-      <input id="custom-api-key" class="text" type="password" placeholder="Paste API key if your provider requires one">
-      <p class="hint">Works with OpenAI-compatible chat-completions APIs, including providers that offer free model tiers. Enter the provider's base URL, exact model ID, and key if required. Provider quotas, rate limits, and terms still apply.</p>
-    </div>
-
-    <p class="hint" style="margin-top:12px">Titles and descriptions are generated automatically for each clip using the same provider selected above for highlight detection. Hook words mode uses transcript-based copy because it does not include a text-generating model. Gemini, local Ollama, Hugging Face, and custom compatible APIs follow the same creator-style format: catchy Title Case titles, fitting emojis, a quote-led caption with context, creator credit, and ready-to-post hashtags. Invalid or incomplete AI responses use the transcript fallback.</p>
-    <div class="prow" style="margin-top:12px"><button class="btn ghost" id="ai-settings-save">Save AI settings</button><button class="btn ghost" id="ai-test-provider">Test connection</button><span class="msg" id="ai-settings-msg">Built-in hook detection selected</span></div>
-  </div>
-
-  <div class="card">
-    <div class="ch"><span class="num">2</span><h3>Moment detection</h3></div>
-    <div class="row"><label>Min viral score</label><b id="v-sens"></b></div>
-    <input type="range" id="r-sens" min="0" max="100" step="1">
-    <div class="ends"><span>More clips</span><span>Only the best</span></div>
-    <p class="hint">0 = no limit  -  selects every non-overlapping moment above the viral-score floor. Weak segments can produce fewer or no clips.</p>
-    <div class="two">
-      <div><div class="row"><label>Clips / chunk (0 = no limit)</label><b id="v-cpc"></b></div><input type="range" id="r-cpc" min="0" max="10" step="1"></div>
-      <div><div class="row"><label>Analysis window</label><b id="v-chunk"></b></div><input type="range" id="r-chunk" min="3" max="15" step="1"><p class="hint">3 min = faster AI reviews; 15 min = deeper context. The full local video is still transcribed and analyzed.</p></div>
-      <div><div class="row"><label>Clip duration</label><b id="v-duration"></b></div>
-        <select id="clip-duration" class="field">
-          <option value="15">15 seconds</option><option value="20">20 seconds</option>
-          <option value="30">30 seconds</option><option value="45">45 seconds</option>
-          <option value="60">60 seconds</option>
-        </select>
-        <p class="hint">The selected viral moment is the hook. A two-second lead-in is added automatically.</p></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="ch"><span class="num">3</span><h3>Captions</h3></div>
-    <div class="pv"><div class="phone" id="phone"><div class="bg"></div><div class="vid"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div><div class="camv"><div class="ct"><svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0z"/></svg></div><div class="cb"></div></div><div class="cap" id="cap"></div></div></div>
-    <div class="pvl">Live preview of your caption style</div>
-    <div class="row"><label>Highlight colour</label><div class="sw" id="sw"></div></div>
-    <div class="row"><label>Position</label></div>
-    <div class="seg" data-key="position"><button data-v="Low">Low</button><button data-v="Lower third">Lower third</button><button data-v="Middle">Middle</button></div>
-    <div class="row"><label>Words per line</label></div>
-    <div class="seg" data-key="words_per_line" data-num="1"><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button></div>
-    <div class="row"><label>Text size</label><b id="v-size"></b></div>
-    <input type="range" id="r-size" min="60" max="150" step="2">
-    <div class="row"><label>Font</label></div>
-    <input id="font" class="text" list="fonts" spellcheck="false" autocomplete="off">
-    <datalist id="fonts"><option value="Impact"><option value="Arial Black"><option value="Segoe UI Black"><option value="Bahnschrift"><option value="Franklin Gothic Heavy"><option value="Verdana"></datalist>
-    <p class="hint">Impact is the classic MrBeast look. Any font installed on your PC works.</p>
-    <div class="subhead"><span>Subtitles (customize)</span><label class="toggle compact"><span>Leave off to use server defaults</span><input type="checkbox" id="t-sub-custom"><i class="sl"></i></label></div>
-    <div id="sub-custom-fields" hidden>
-      <div class="two">
-        <div><div class="row"><label>Mode</label></div><select id="sub-mode" class="text"><option>Karaoke</option><option>Classic</option></select></div>
-        <div><div class="row"><label>Style preset</label></div><select id="sub-style" class="text"><option>Classic</option><option>Hormozi</option><option>Neon</option><option>MrBeast</option><option>Minimal</option><option>Fire</option></select></div>
-      </div>
-      <div class="two">
-        <div><div class="row"><label>Font size</label><b id="v-sub-size"></b></div><input type="range" id="r-sub-size" min="60" max="180" step="2"></div>
-        <div><div class="row"><label>Vertical nudge</label><b id="v-sub-nudge"></b></div><input type="range" id="r-sub-nudge" min="-400" max="400" step="1"></div>
-      </div>
-      <div class="two">
-        <div><div class="row"><label>Text color</label></div><input id="sub-text-color" class="color-text" type="color" value="#FFFFFF"></div>
-        <div><div class="row"><label>Stroke color</label></div><input id="sub-stroke-color" class="color-text" type="color" value="#000000"></div>
-      </div>
-      <div class="two">
-        <div><div class="row"><label>Position</label></div><div class="seg" data-key="subtitle_position"><button data-v="Top">Top</button><button data-v="Center">Center</button><button data-v="Bottom">Bottom</button></div></div>
-        <div><div class="row"><label>Alignment</label></div><div class="seg" data-key="subtitle_alignment"><button data-v="Left">Left</button><button data-v="Center">Center</button></div></div>
-      </div>
-      <p class="hint">Presets control the font and animation. Text/stroke colors, position, alignment, and size remain yours to tune.</p>
-    </div>
-    <div class="subhead"><span>Profanity censor</span><label class="toggle compact"><span>Censor audio + captions</span><input type="checkbox" id="t-profanity"><i class="sl"></i></label></div>
-    <textarea id="profanity-words" class="text" rows="3" spellcheck="false" placeholder="Add extra words or phrases, one per line"></textarea>
-    <p class="hint">Censoring only changes the rendered audio, captions and generated post text. It never removes a clip, lowers its viral score, or blocks publishing. You can still publish clips containing profanity; turn censoring off before rendering when you want the original audio and words. Existing clips must be re-rendered to apply a changed setting. Speech recognition can miss words, so review before posting.</p>
-  </div>
-
-  <div class="card">
-    <div class="ch"><span class="num">4</span><h3>Output</h3></div>
-    <div class="row"><label>Video format</label></div>
-    <select id="output-format" class="text">
-      <option value="9:16">9:16 Portrait (Shorts / Reels)</option>
-      <option value="16:9">16:9 Landscape (YouTube)</option>
-      <option value="1:1">1:1 Square</option>
-      <option value="4:5">4:5 Portrait (Instagram)</option>
-    </select>
-    <p class="hint" id="format-hint">9:16 keeps the facecam + game layout.</p>
-    <div class="row"><label>Layout</label></div>
-    <div class="seg" data-key="layout"><button data-v="Facecam + game (Twitch)">Facecam + game</button><button data-v="Blur background">Blurred bg</button><button data-v="Fill (crop center)">Fill</button><button data-v="Selected crop">Selected crop</button></div>
-    <div id="camrow" hidden>
-      <div class="row" id="cam-area-row"><label>Facecam area</label><b id="v-cam"></b></div>
-      <button class="btn ghost" id="btn-cam" style="width:100%">Set facecam area on a frame</button>
-      <p class="hint" id="cam-hint">Like Twitch: the facecam fills the top 40% of the clip and the game fills the bottom 60%.</p>
-    </div>
-    <div class="row"><label>Transcription engine</label></div>
-    <select id="transcriber-provider" class="text">
-      <option value="faster-whisper">Built-in faster-whisper · local, no API key</option>
-      <option value="custom-command">Bring your own transcriber · CLI / script</option>
-    </select>
-    <div id="faster-whisper-fields"><div class="row"><label>Speech model</label></div><select id="model" class="text"></select></div>
-    <div id="transcriber-custom-fields" hidden>
-      <div class="row"><label>Your transcriber command</label></div>
-      <input id="transcriber-command" class="text" type="text" spellcheck="false" placeholder='whisper-cli -f "{input}" -oj -of "{output}"'>
-      <div class="row"><label>Language placeholder</label></div>
-      <input id="transcriber-language" class="text" type="text" value="auto" maxlength="20" placeholder="auto">
-      <p class="hint">No StreamSnip API key is needed. Use your own local executable or script. Placeholders: {input}, {output}, {language}. Return JSON to {output} or stdout with timestamped words: {"words":[{"start":0.1,"end":0.5,"word":"hello"}]}. Segment JSON with start/end/text is also accepted. Your own transcriber handles any credentials it needs. Do not paste secrets in this command field; use environment variables or its secure local config.</p>
-    </div>
-    <p class="hint">Temporary live recordings are automatically deleted after clips render or when no worthwhile moments are found. Original VOD files are kept and archived.</p>
-    <div class="row"><label>Tag / credit</label></div>
-    <input id="streamer-tag" class="text" type="text" maxlength="80" placeholder="Auto-detect from stream URL">
-    <p class="hint">Leave blank to tag the Twitch or YouTube handle from the source URL. Enter a value to override it.</p>
-    <label class="toggle"><span>Show credit on the video</span><input type="checkbox" id="show-tag-video"><i class="sl"></i></label>
-  </div>
-
-  <div class="card" id="settings-card">
-    <div class="ch"><span class="num">5</span><h3>App settings</h3></div>
-    <div class="row"><label>Storage folders</label></div>
-    <p class="hint">Choose where recordings and finished clips are saved. Changes apply after clipping is stopped.</p>
-    <div class="row"><label>Recording folder</label></div>
-    <div class="folder-pick"><input id="rec-dir" class="text" type="text" placeholder="Default: app folder\rec"><button class="btn ghost" id="rec-dir-browse">Browse</button></div>
-    <div class="row"><label>Output / clips folder</label></div>
-    <div class="folder-pick"><input id="out-dir" class="text" type="text" placeholder="Default: app folder\out"><button class="btn ghost" id="out-dir-browse">Browse</button></div>
-    <div class="row"><label>Processing hardware</label></div>
-    <select id="compute-device" class="text"><option value="gpu">Automatic  -  use NVIDIA GPU when available</option></select>
-    <p class="hint">Speech uses CUDA when a supported NVIDIA GPU is detected; video recording and rendering use NVENC whenever FFmpeg provides it. CPU processing is used only when no supported GPU is detected. A GPU initialization failure is shown in Activity instead of silently switching to CPU.</p>
-    <div class="row"><label>Live video bitrate target (kbps)</label><b>Full HD</b></div>
-    <input id="capture-bitrate" class="text" type="number" min="8000" max="50000" step="500" value="8000" aria-label="Capture video bitrate target in kilobits per second">
-    <p class="hint">Default target is 6,000 kbps (minimum setting). Captures at 1080p when available and falls back to 720p. A source below 1080p cannot gain real detail from upscaling.</p>
-    <div class="row"><label>App and runtime updates</label></div>
-    <p class="hint">Current app version: __APP_VERSION__. Check the published release before updating.</p>
-    <div class="prow"><button class="btn ghost" id="btn-app-version">Check app version</button><button class="btn ghost" id="btn-app-update" disabled>Open update</button><span class="msg" id="app-version-msg">Not checked</span></div>
-    <p class="hint">Check FFmpeg, speech packages, Streamlink, NumPy, CTranslate2, and the selected speech-model cache.</p>
-    <div class="prow"><button class="btn ghost" id="btn-updates">Check for updates</button><button class="btn ghost" id="btn-update-components">Update components</button><span class="msg" id="updates-msg">Not checked</span></div>
-    <div class="hint update-list" id="updates-list"></div>
-    <div class="row"><label>Publishing provider</label></div>
-    <select id="pub-provider" class="text" disabled><option value="zernio">Zernio hosted</option></select>
-    <p class="hint">Zernio is the supported posting provider. Zernio service and platform limits may apply. Auto-post stays off until you turn it on.</p>
-    <div class="row"><label>API key</label><b id="z-key-state">Not saved</b></div>
-    <input id="z-api" class="text" type="password" placeholder="Enter a new key to replace the saved key">
-    <p class="hint">Credentials are stored locally in this app folder and never sent to the browser.</p>
-    <div class="row"><label>Connected social accounts</label></div>
-    <div id="z-account-picks" class="z-account-picks"><p class="hint">Save your Zernio key, then identify connected accounts.</p></div>
-    <p class="hint">Choose one connected account per platform. StreamSnip can publish a clip to several selected platforms in one Zernio request.</p>
-    <div class="two">
-      <div><div class="row"><label>Schedule delay (minutes)</label></div><input id="z-delay" class="text" type="number" min="0" value="0"></div>
-      <div><div class="row"><label>YouTube visibility</label></div><select id="z-vis" class="text"><option>public</option><option>unlisted</option><option>private</option></select></div>
-    </div>
-    <label class="toggle"><span>Auto-post new clips</span><input type="checkbox" id="z-auto"><i class="sl"></i></label>
-    <div class="prow" style="margin-top:12px"><button class="btn ghost" id="z-check">Save &amp; identify channels</button><span class="msg" id="z-msg">Not connected</span></div>
-  </div>
- </div>
-</section>
-
-<section class="right">
-  <div class="hero" id="hero" data-phase="idle">
-    <div class="eq"><i></i><i></i><i></i><i></i><i></i></div>
-    <div><div class="ph" id="ph">Ready</div><div class="st" id="st">Ready when you are.</div></div>
-    <div class="stats">
-      <div class="stat"><b id="s-time">0:00</b><span>Elapsed</span></div>
-      <div class="stat"><b id="s-chunks">0</b><span>Chunks</span></div>
-      <div class="stat"><b id="s-clips">0</b><span>New clips</span></div>
-    </div>
-  </div>
-  <div class="progress-wrap" id="progress-wrap" hidden><div class="progress-meta"><span id="progress-label">Preparing...</span><span id="progress-value">0%</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div></div>
-  <div class="tabs" id="tabs">
-    <button class="tab on" data-t="clips">Clips<em id="cnt" hidden></em></button>
-    <button class="tab" data-t="log">Live log</button>
-    <button class="tab" data-t="words">Hype words</button>
-  </div>
-  <div class="panel" id="p-clips">
-    <div class="post-progress" id="post-progress" hidden><div class="progress-meta"><span id="post-label">Preparing uploads...</span><span><span id="post-value">0%</span> · <span id="post-time">0:00</span></span></div><div class="progress-track"><div class="progress-fill" id="post-fill"></div></div></div>
-    <div class="prow" style="justify-content:space-between;margin-bottom:10px"><div class="prow"><button class="btn ghost on" id="btn-view-clips">Clips</button><button class="btn ghost" id="btn-view-posted">Posted</button></div><div class="prow"><button class="btn ghost" id="btn-select-all">Select all</button><button class="btn ghost" id="btn-publish-selected">Publish selected (0)</button><button class="btn danger" id="btn-delete-selected">Delete selected (0)</button><button class="btn danger" id="btn-delete-all">Delete all</button><button class="btn danger" id="btn-publish-all">Publish all clips</button></div></div>
-    <div class="grid" id="grid"></div>
-    <div class="prow" id="clip-pages" style="justify-content:center;margin-top:12px"><button class="btn ghost" id="btn-clips-newer">Newer</button><span class="hint" id="clip-page-label"></span><button class="btn ghost" id="btn-clips-older">Older</button></div>
-    <div class="empty" id="empty"><div class="big"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h4>No clips yet</h4><p>Paste a Twitch or YouTube live link (or choose a VOD file) and hit Start. Finished 9:16 clips with captions appear here, ready to post.</p></div>
-  </div>
-  <div class="panel" id="p-log" hidden><div class="log-head"><div class="log-title">Live diagnostic log <span id="log-live" class="log-live">Live</span></div><div class="log-actions"><button class="btn ghost" id="log-pause" type="button">Pause</button><button class="btn ghost" id="log-clear" type="button">Clear view</button><a class="btn ghost" href="/api/log/download" download="streamsnip.log">Download</a></div></div><div id="log"></div></div>
-  <div class="panel" id="p-words" hidden>
-    <div class="hw">
-      <p class="help">One word or phrase per line. Add what <b>your</b> streamer actually says - e.g. <code>oh my days</code> or <code>no chance | 3</code> (the number is the weight, default 2). Lines starting with <code>#</code> are comments. Saved changes apply to the next chunk, even mid-stream.</p>
-      <textarea id="words" spellcheck="false"></textarea>
-      <div class="hwb"><button class="btn ghost" id="btn-words-save"><span data-ico="check"></span>Save hype words</button><span class="msg" id="words-msg">Saved</span></div>
-      <details><summary id="builtin-sum">Built-in hype words</summary><div class="chips" id="chips"></div></details>
-    </div>
-  </div>
-</section>
-</div>
-</div>
-<div class="overlay" id="settings-overlay" hidden>
- <div class="settings-dialog">
-   <div class="settings-head"><div><h2>App settings</h2><p>Configure clipping defaults and publishing providers.</p></div><div class="prow"><button class="btn ghost" id="btn-settings-save">Save settings</button><button class="btn ghost" id="btn-settings-close">Close</button></div></div>
-  <div id="settings-slot"></div>
- </div>
-</div>
-<div class="overlay" id="about-overlay" hidden>
- <div class="settings-dialog about-dialog">
-  <div class="settings-head"><div><h2>About StreamSnip AI</h2><p>Local-first clipping tools for creators, by ScarZero.</p></div><button class="btn ghost" id="btn-about-close">Close</button></div>
-  <div class="about-hero">
-   <div class="about-title"><div class="mark small-mark"><img src="/assets/app-icon.png" alt="StreamSnip AI"></div><div><h3>StreamSnip AI by ScarZero</h3><p class="hint">Turn Twitch, YouTube, and video files into captioned clips for Shorts, Reels, and YouTube.</p></div></div>
-   <p class="about-copy">StreamSnip AI keeps capture, transcription, rendering, settings, and generated clips local by default. Hook words and Ollama work locally; Gemini, Hugging Face, and Zernio are optional hosted integrations.</p>
-   <p class="about-copy">Built for flexible framing, animated captions, creator credit, local clip review, and deliberate publishing workflows.</p>
-   <p class="about-copy"><strong>Created and maintained by Sifat Jaman / ScarZero.</strong> Development has included assistance from OpenAI, Anthropic, and Google AI tools.</p>
-   <div class="about-links"><a class="btn ghost" href="https://github.com/sifat-jaman-13/stream-clip-ai" target="_blank" rel="noopener">GitHub · Source</a><a class="btn ghost" href="https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest" target="_blank" rel="noopener">Latest release</a><a class="btn ghost" href="https://youtube.com/@scarclipfarm" target="_blank" rel="noopener">YouTube · Scar Clip Farm</a><a class="btn ghost" href="https://www.youtube.com/@scarzeroyt" target="_blank" rel="noopener">YouTube · Scarzero</a><a class="btn ghost" href="https://www.instagram.com/scarzero13/" target="_blank" rel="noopener">Instagram · @scarzero13</a><a class="btn ghost" href="https://www.facebook.com/ScarZero13" target="_blank" rel="noopener">Facebook · ScarZero13</a><a class="btn ghost" href="https://www.twitch.tv/scarzero13" target="_blank" rel="noopener">Twitch · scarzero13</a><a class="btn ghost" href="https://www.tiktok.com/@scarzero13" target="_blank" rel="noopener">TikTok · @scarzero13</a></div>
-  </div>
- </div>
-</div>
-<div id="toasts"></div>
-<div id="offline" hidden>Lost connection to StreamSnip AI - is it still running?</div>
-
-<script>
-const BOOT=__BOOT__;
-const TOKEN="__TOKEN__";
-let appClosing=false;
-const S=Object.assign({},BOOT.settings);
-const P=Object.assign({provider:"zernio",providers:{}},BOOT.publishing||{});
-let activeProvider="zernio";
-let Z=Object.assign({},(P.providers&&P.providers[activeProvider])||{});
-let accountsLoadedFor="";
-let clipOffset=0,clipTab="clips",tabClipNames=[];
-const CLIP_PAGE_SIZE=60;
-const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
-const ICON={
- copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
- download:'<path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/>',
- folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
- trash:'<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
- play:'<path d="M8 5v14l11-7z" fill="currentColor"/>',
- bolt:'<path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor"/>',
- power:'<path d="M12 3v9"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>',
- info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
- settings:'<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="m4.9 4.9 1.4 1.4M17.7 17.7l1.4 1.4M4 12H2M22 12h-2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4M12 4V2M12 22v-2"/>',
- check:'<path d="m5 12 5 5 9-10"/>'
-};
-function ico(n,s){const e=document.createElementNS("http://www.w3.org/2000/svg","svg");e.setAttribute("viewBox","0 0 24 24");e.setAttribute("width",s||16);e.setAttribute("height",s||16);e.setAttribute("fill","none");e.setAttribute("stroke","currentColor");e.setAttribute("stroke-width","2");e.setAttribute("stroke-linecap","round");e.setAttribute("stroke-linejoin","round");e.innerHTML=ICON[n];return e}
-$$("[data-ico]").forEach(el=>el.append(ico(el.dataset.ico,+el.dataset.s||16)));
-function h(tag,attrs,...kids){const e=document.createElement(tag);for(const [k,v] of Object.entries(attrs||{})){if(k==="class")e.className=v;else if(k.startsWith("on"))e.addEventListener(k.slice(2),v);else if(v===true)e.setAttribute(k,"");else if(v!==false&&v!=null)e.setAttribute(k,v)}for(const c of kids.flat()){if(c==null||c===false)continue;e.append(c.nodeType?c:document.createTextNode(String(c)))}return e}
-async function api(path,body){
-  const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:JSON.stringify(body||{})});
-  let j={};try{j=await r.json()}catch(e){}
-  if(!r.ok)throw new Error(j.error||("Request failed ("+r.status+")"));
-  return j;
-}
-async function refreshCreators(){
-  const host=$("#creator-list");if(!host)return;
-  try{
-    const response=await fetch("/api/creators",{cache:"no-store"});
-    if(!response.ok)throw new Error("Could not load creator monitors");
-    const data=await response.json(),items=data.creators||[];
-    if(!items.length){host.replaceChildren(h("p",{class:"hint"},"No creator monitors yet. Add a Twitch or YouTube channel above."));return}
-    host.replaceChildren(...items.map(c=>{
-      const running=!!c.running,phase=c.phase||"offline";
-      const watching=!!c.watching_vods;
-      const actions=h("div",{class:"creator-actions"},
-        h("button",{class:"btn ghost",onclick:async()=>{try{await api(running?"/api/creators/stop":"/api/creators/start",{id:c.id});await refreshCreators()}catch(e){toast(e.message,"bad")}}},running?"Stop live":"Start live"),
-        h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/creators/open",{id:c.id,folder:"root"})}catch(e){toast(e.message,"bad")}}},"Creator folder"),
-        h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/creators/open",{id:c.id,folder:"live_clips"})}catch(e){toast(e.message,"bad")}}},"Live clips"),
-        h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/creators/open",{id:c.id,folder:"vod_inbox"})}catch(e){toast(e.message,"bad")}}},"VOD inbox"),
-        h("button",{class:"btn ghost",onclick:async()=>{try{await api("/api/creators/open",{id:c.id,folder:"vod_clips"})}catch(e){toast(e.message,"bad")}}},"VOD clips"),
-        h("button",{class:"btn "+(watching?"danger":"primary"),onclick:async()=>{try{await api(watching?"/api/creators/stop-vod-watch":"/api/creators/watch-vods",{id:c.id});await refreshCreators()}catch(e){toast(e.message,"bad")}}},watching?"Stop folder watch":"Watch VOD folder"),
-        h("button",{class:"btn ghost",onclick:async()=>{if(!(await confirmBox("Remove "+c.name+"?","Stop both monitors first. Existing recordings and clips are kept.","Remove")))return;try{await api("/api/creators/remove",{id:c.id});await refreshCreators()}catch(e){toast(e.message,"bad")}}},"Remove"));
-      return h("div",{class:"creator-item"},
-        h("div",{class:"creator-top"},h("div",{class:"creator-name"},c.name),h("span",{class:"creator-state "+(running?"live":"")},running?(phase==="recording"?"LIVE":phase):"OFFLINE")),
-        h("div",{class:"creator-detail"},c.status||c.target),
-        h("div",{class:"creator-detail"},"Live clips: "+(Number(c.live_clips)||0)+" · Recorded-VOD clips: "+(Number(c.vod_clips)||0)+" · VODs waiting: "+(Number(c.vod_pending)||0)),
-        h("div",{class:"creator-detail"},c.vod_status||"Recorded-VOD folder is not being watched."),
-        actions);
-    }));
-  }catch(e){host.replaceChildren(h("p",{class:"hint"},e.message))}
-}
-$("#creator-add").onclick=async()=>{
-  const name=$("#creator-name").value.trim(),target=$("#creator-target").value.trim();
-  if(!name||!target){toast("Enter a creator name and Twitch/YouTube URL.","bad");return}
-  const button=$("#creator-add");button.disabled=true;
-  try{await api("/api/creators/add",{name,target});$("#creator-name").value="";$("#creator-target").value="";await refreshCreators();toast("Creator monitor added.","ok")}
-  catch(e){toast(e.message,"bad")}
-  button.disabled=false;
-};
-const markWindowOpen=()=>api("/api/window/open").catch(()=>{});
-const createWindowLeaseId=()=>window.crypto&&typeof window.crypto.randomUUID==="function"?window.crypto.randomUUID():"window-"+Date.now()+"-"+Math.random().toString(36).slice(2);
-let windowLeaseId=createWindowLeaseId(),windowLeaseController=null,windowLeaseActive=false;
-function startWindowLease(){if(windowLeaseActive)return;windowLeaseActive=true;windowLeaseController=new AbortController();const controller=windowLeaseController;(async()=>{while(windowLeaseActive&&controller===windowLeaseController){try{const r=await fetch("/api/window/lease?id="+encodeURIComponent(windowLeaseId),{headers:{"X-Token":TOKEN},cache:"no-store",signal:controller.signal});if(!r.ok)throw new Error("Window lease failed");const reader=r.body.getReader();while(windowLeaseActive){const part=await reader.read();if(part.done)break}}catch(e){}if(windowLeaseActive)await new Promise(resolve=>setTimeout(resolve,350))}})()}
-function stopWindowLease(){windowLeaseActive=false;if(windowLeaseController)windowLeaseController.abort();windowLeaseController=null}
-markWindowOpen();startWindowLease();window.addEventListener("pageshow",()=>{if(!windowLeaseActive)windowLeaseId=createWindowLeaseId();markWindowOpen();startWindowLease()});
-window.addEventListener("pagehide",()=>{const closingLeaseId=windowLeaseId;stopWindowLease();if(appClosing)return;fetch("/api/window/closing?id="+encodeURIComponent(closingLeaseId),{method:"POST",headers:{"Content-Type":"application/json","X-Token":TOKEN},body:JSON.stringify({id:closingLeaseId}),keepalive:true}).catch(()=>{})});
-const AI=BOOT.ai||{provider:"gemini",ollama_url:"http://127.0.0.1:11434",ollama_model:""};
-$("#ai-provider").value=AI.provider||"gemini";
-$("#ollama-url").value=AI.ollama_url||"http://127.0.0.1:11434";
-$("#ollama-model").replaceChildren(h("option",{value:AI.ollama_model||""},AI.ollama_model||"Click Detect models"));
-$("#hf-model").value=AI.huggingface_model||"deepseek-ai/DeepSeek-V4.1-Flash:fastest";
-$("#custom-api-base").value=AI.custom_api_base||"https://api.openai.com/v1";
-$("#custom-api-model").value=AI.custom_api_model||"";
-$("#custom-api-key-state").textContent=AI.custom_api_key_set?"Saved locally":"Not saved";
-$("#custom-api-key-clear").disabled=!AI.custom_api_key_set;
-$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";
-$("#gemini-model").value=AI.gemini_model||"gemini-3.8-flash";
-$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";
-$("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set;
-function showAIFields(updateMessage=false){
-  const p=$("#ai-provider").value;
-  $("#ollama-ai-fields").hidden=p!=="ollama";
-  $("#gemini-ai-fields").hidden=p!=="gemini";
-  $("#hf-ai-fields").hidden=p!=="huggingface";
-  $("#custom-ai-fields").hidden=p!=="custom";
-  $("#ai-test-provider").hidden=p==="hooks";
-  if(updateMessage){
-    const names={ollama:"Ollama",gemini:"Gemini",huggingface:"Hugging Face",custom:"custom OpenAI-compatible API"};
-    $("#ai-settings-msg").textContent=p==="hooks"?"Built-in hook detection selected":"Ready to test or save "+names[p]+" settings";
-  }
-  $$(".ai-choice").forEach(b=>{const active=b.dataset.aiProvider===p;b.classList.toggle("on",active);b.setAttribute("aria-pressed",active?"true":"false")});
-}
-$("#ai-provider").onchange=()=>showAIFields(true);$$(".ai-choice").forEach(b=>b.onclick=()=>{$("#ai-provider").value=b.dataset.aiProvider;showAIFields(true)});showAIFields(true);
-$("#ai-detect-ollama").onclick=async()=>{const b=$("#ai-detect-ollama");b.disabled=true;try{const r=await api("/api/ai/ollama/models",{ollama_url:$("#ollama-url").value});const select=$("#ollama-model");select.replaceChildren(...(r.models.length?r.models.map(m=>h("option",{value:m},m)):[h("option",{value:""},"No models installed") ]));if(AI.ollama_model&&r.models.includes(AI.ollama_model))select.value=AI.ollama_model;else if(r.models.length)select.value=r.models[0];$("#ai-settings-msg").textContent=r.models.length?"Found "+r.models.length+" installed Ollama model(s)":"Ollama is installed, but no models were found"}catch(e){$("#ai-settings-msg").textContent=e.message}b.disabled=false};
-function aiSettingsPayload(){const payload={provider:$("#ai-provider").value,ollama_url:$("#ollama-url").value,ollama_model:$("#ollama-model").value,gemini_model:$("#gemini-model").value.trim()||"gemini-3.8-flash",huggingface_model:$("#hf-model").value.trim()||"deepseek-ai/DeepSeek-V4.1-Flash:fastest",custom_api_base:$("#custom-api-base").value.trim(),custom_api_model:$("#custom-api-model").value.trim()};if($("#gemini-key").value)payload.gemini_api_key=$("#gemini-key").value;if($("#hf-token").value)payload.huggingface_token=$("#hf-token").value;if($("#custom-api-key").value)payload.custom_api_key=$("#custom-api-key").value;return payload}
-function refreshAISecretState(){$("#gemini-key-state").textContent=AI.gemini_key_set?"Saved locally":"Not saved";$("#hf-token-state").textContent=AI.huggingface_token_set?"Saved locally":"Not saved";$("#custom-api-key-state").textContent=AI.custom_api_key_set?"Saved locally":"Not saved";$("#gemini-key-clear").disabled=!AI.gemini_key_set;$("#hf-token-clear").disabled=!AI.huggingface_token_set;$("#custom-api-key-clear").disabled=!AI.custom_api_key_set}
-$("#ai-settings-save").onclick=async()=>{const b=$("#ai-settings-save");b.disabled=true;try{const r=await api("/api/ai/settings",aiSettingsPayload());Object.assign(AI,r);$("#gemini-key").value="";$("#hf-token").value="";$("#custom-api-key").value="";refreshAISecretState();$("#ai-settings-msg").textContent="Saved. "+$("#ai-provider option:checked").textContent;toast("AI highlight settings saved","ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
-async function clearAISecret(kind){
-  const configs={
-    gemini:{label:"Gemini API key",button:"#gemini-key-clear",input:"#gemini-key",flag:"clear_gemini_key"},
-    huggingface:{label:"Hugging Face token",button:"#hf-token-clear",input:"#hf-token",flag:"clear_huggingface_token"},
-    custom:{label:"Custom API key",button:"#custom-api-key-clear",input:"#custom-api-key",flag:"clear_custom_api_key"}
-  };
-  const item=configs[kind];
-  if(!item)return;
-  if(!(await confirmBox("Clear saved "+item.label+"?","The credential will be removed from this computer. Add and save a new one before using this hosted provider again.","Clear credential")))return;
-  const button=$(item.button);button.disabled=true;
-  try{
-    const payload=aiSettingsPayload();payload[item.flag]=true;
-    const r=await api("/api/ai/settings",payload);Object.assign(AI,r);
-    $(item.input).value="";refreshAISecretState();
-    $("#ai-settings-msg").textContent=item.label+" cleared from this computer";toast(item.label+" cleared","ok");
-  }catch(e){refreshAISecretState();$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}
-}
-$("#gemini-key-clear").onclick=()=>clearAISecret("gemini");
-$("#hf-token-clear").onclick=()=>clearAISecret("huggingface");
-$("#custom-api-key-clear").onclick=()=>clearAISecret("custom");
-$("#ai-test-provider").onclick=async()=>{const b=$("#ai-test-provider");b.disabled=true;$("#ai-settings-msg").textContent="Testing connection...";try{const r=await api("/api/ai/test",aiSettingsPayload());$("#ai-settings-msg").textContent=r.message;toast(r.message,"ok")}catch(e){$("#ai-settings-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
-function selectedZernioAccounts(){
-  const selected={};
-  $$("#z-account-picks input:checked").forEach(input=>{selected[input.dataset.platform]=input.value});
-  return selected;
-}
-async function loadPublishingAccounts(){
-  if(Z.available===false){$("#z-msg").textContent="Posting adapter unavailable";$("#z-msg").classList.add("show");return}
-  const provider=activeProvider;
-  const r=await api("/api/publishing/accounts",{provider});
-  if(provider!==activeProvider)return;
-  const saved=Object.assign({},Z.accounts||{});
-  if(!Object.keys(saved).length){
-    if(Z.instagram_id)saved.instagram=Z.instagram_id;
-    if(Z.youtube_id)saved.youtube=Z.youtube_id;
-  }
-  const host=$("#z-account-picks");host.replaceChildren();
-  const groups={};
-  r.accounts.forEach(account=>{
-    const platform=String(account.platform||"").toLowerCase();
-    if(!groups[platform])groups[platform]=[];
-    groups[platform].push(account);
-  });
-  const labels={instagram:"Instagram",facebook:"Facebook",youtube:"YouTube"};
-  const defaults={};
-  Object.entries(groups).forEach(([platform,items])=>{
-    if(items.length)defaults[platform]=String(items[0].id);
-    items.forEach(account=>{
-      const input=h("input",{type:"radio",name:"z-account-"+platform,value:account.id,"data-platform":platform});
-      input.checked=String(saved[platform]||(!Object.keys(saved).length?defaults[platform]:""))===String(account.id);
-      host.append(h("label",{class:"z-account-pick"},input,h("span",{},(labels[platform]||platform)+" · "+(account.name||account.username||account.id))));
-    });
-  });
-  if(!Object.keys(saved).length)Z.accounts=defaults;
-  Z.connected_accounts=r.accounts;
-  if(!r.accounts.length)host.append(h("p",{class:"hint"},"No connected social accounts were found for this Zernio key."));
-  accountsLoadedFor=provider;
-  $("#z-msg").textContent=r.accounts.length?r.accounts.length+" connected account(s) identified":"No supported social accounts found";
-  $("#z-msg").classList.add("show");
-}
-function toast(msg,kind){if($$(".toast").some(x=>x.textContent===msg))return;const t=h("div",{class:"toast "+(kind||"")},msg);$("#toasts").append(t);setTimeout(()=>{t.classList.add("out");setTimeout(()=>t.remove(),300)},3200)}
-const settingsOverlay=$("#settings-overlay");
-const aboutOverlay=$("#about-overlay");
-$("#settings-slot").append($("#settings-card"));
-function closeSettings(){settingsOverlay.hidden=true}
-function openSettings(){settingsOverlay.hidden=false;$("#z-api").focus()}
-function closeAbout(){aboutOverlay.hidden=true}
-function openAbout(){aboutOverlay.hidden=false}
-$("#btn-settings").onclick=openSettings;
-$("#btn-settings-close").onclick=closeSettings;
-settingsOverlay.onclick=e=>{if(e.target===settingsOverlay)closeSettings()};
-$("#btn-about").onclick=openAbout;
-$("#btn-about-close").onclick=closeAbout;
-aboutOverlay.onclick=e=>{if(e.target===aboutOverlay)closeAbout()};
-document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(!settingsOverlay.hidden)closeSettings();if(!aboutOverlay.hidden)closeAbout()});
-$("#rec-dir").value=S.rec_dir||""; $("#out-dir").value=S.out_dir||""; $("#capture-bitrate").value=S.capture_bitrate_kbps||8000;
-function wireFolderPicker(inputId,buttonId,key){
-  const input=$(inputId), button=$(buttonId);
-  input.addEventListener("change",()=>{S[key]=input.value.trim();scheduleSave()});
-  button.onclick=async()=>{button.disabled=true;try{const r=await api("/api/browse_folder");if(r.path){input.value=r.path;S[key]=r.path;scheduleSave();toast("Folder saved","ok")}}catch(e){toast(e.message,"bad")}button.disabled=false};
-}
-wireFolderPicker("#rec-dir","#rec-dir-browse","rec_dir");
-wireFolderPicker("#out-dir","#out-dir-browse","out_dir");
-$("#compute-device").value=S.compute_device||"gpu";
-$("#compute-device").addEventListener("change",e=>{S.compute_device=e.target.value;scheduleSave()});
-$("#capture-bitrate").addEventListener("change",e=>{S.capture_bitrate_kbps=Math.max(8000,Math.min(50000,+e.target.value||8000));e.target.value=S.capture_bitrate_kbps;scheduleSave()});
-$("#btn-settings-save").onclick=async()=>{const b=$("#btn-settings-save");b.disabled=true;try{await api("/api/settings",S);toast("Settings saved","ok")}catch(e){toast(e.message,"bad")}b.disabled=false};
-$("#btn-updates").onclick=async()=>{const b=$("#btn-updates");b.disabled=true;$("#updates-msg").textContent="Checking...";try{const r=await api("/api/check_updates");$("#updates-msg").textContent="Checked "+r.checked_at;$("#updates-list").textContent=r.items.map(x=>x.name+": "+x.current+(x.latest!=="Unknown"?" → "+x.latest:"")+(x.update?" (update available)":"")+(x.note?"  -  "+x.note:"")).join("\n")}catch(e){$("#updates-msg").textContent=e.message}b.disabled=false};
-$("#btn-app-version").onclick=async()=>{const b=$("#btn-app-version"),u=$("#btn-app-update");b.disabled=true;$("#app-version-msg").textContent="Checking...";try{const r=await api("/api/check_app_update");$("#app-version-msg").textContent=r.update?"Update available: v"+r.latest:"You are up to date (v"+r.current+")";u.disabled=!r.update;u.onclick=()=>window.open(r.url,"_blank","noopener");if(r.update)toast("A new StreamSnip AI version is available","ok")}catch(e){$("#app-version-msg").textContent=e.message;u.disabled=true}b.disabled=false};
-$("#btn-update-components").onclick=async()=>{if(!(await confirmBox("Update components?","This updates Python packages and downloads the selected speech model. FFmpeg is bundled into the next installer build.","Update")))return;const b=$("#btn-update-components");b.disabled=true;$("#updates-msg").textContent="Updating...";try{const r=await api("/api/update_components");$("#updates-msg").textContent=r.message;toast("Components updated","ok")}catch(e){$("#updates-msg").textContent=e.message;toast(e.message,"bad")}b.disabled=false};
-function confirmBox(title,msg,ok){return new Promise(res=>{
-  const done=v=>{m.remove();res(v)};
-  const m=h("div",{class:"overlay"},h("div",{class:"dialog"},h("h4",{},title),h("p",{},msg),h("div",{class:"dlg-actions"},h("button",{class:"btn ghost",onclick:()=>done(false)},"Cancel"),h("button",{class:"btn danger",onclick:()=>done(true)},ok||"Delete"))));
-  document.body.append(m)})}
-
-/* ---------- settings <-> controls ---------- */
-let saveT=null;
-function scheduleSave(){clearTimeout(saveT);saveT=setTimeout(()=>{api("/api/settings",S).catch(()=>{})},500)}
-function paintRange(el){const p=(el.value-el.min)/(el.max-el.min)*100;el.style.setProperty("--p",p+"%")}
-const RANGES=[["r-sens","min_score","v-sens",v=>Math.round(+v),true],["r-cpc","clips_per_chunk","v-cpc",v=>v,true],["r-chunk","chunk_min","v-chunk",v=>v+" min",true],
- ["r-size","caption_size","v-size",v=>v,true]];
-RANGES.forEach(([id,key,lab,fmt])=>{
-  const el=$("#"+id);el.value=S[key];
-  const upd=()=>{S[key]=+el.value;$("#"+lab).textContent=fmt(el.value);paintRange(el)};
-  el.addEventListener("input",()=>{upd();preview();scheduleSave()});upd();
-});
-const clipDurationSelect=$("#clip-duration");
-clipDurationSelect.value=String(S.clip_duration||30);
-function updateClipDuration(){
-  S.clip_duration=Number(clipDurationSelect.value)||30;
-  $("#v-duration").textContent=S.clip_duration+" s";
-  scheduleSave();
-}
-clipDurationSelect.addEventListener("change",updateClipDuration);
-updateClipDuration();
-$$(".seg[data-key]").forEach(sg=>{
-  const key=sg.dataset.key,num=!!sg.dataset.num;
-  const paint=()=>$$("button",sg).forEach(b=>b.classList.toggle("on",b.dataset.v===String(S[key])));
-  sg.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;S[key]=num?+b.dataset.v:b.dataset.v;paint();onMode();preview();scheduleSave()});
-  paint();
-});
-const sw=$("#sw");
-Object.entries(BOOT.colors).forEach(([name,css])=>{sw.append(h("button",{title:name,style:"background:"+css,"data-v":name,onclick:()=>{S.color=name;paintSw();preview();scheduleSave()}}))});
-function paintSw(){$$("button",sw).forEach(b=>b.classList.toggle("on",b.dataset.v===S.color))}paintSw();
-BOOT.models.forEach(m=>$("#model").append(h("option",{value:m},m==="distil-large-v3"?"distil-large-v3 (fast, English)":m==="large-v3-turbo"?"large-v3-turbo (fast, any language)":m==="medium"?"medium (balanced)":m==="large-v3"?"large-v3 (highest accuracy)":m==="small"?"small (light)":"base (lightest)")));
-$("#model").value=S.model;$("#model").addEventListener("change",e=>{S.model=e.target.value;scheduleSave()});
-$("#transcriber-provider").value=S.transcriber_provider||"faster-whisper";
-$("#transcriber-command").value=S.transcriber_command||"";
-$("#transcriber-language").value=S.transcriber_language||"auto";
-function updateTranscriberFields(){
-  const custom=$("#transcriber-provider").value==="custom-command";
-  $("#transcriber-custom-fields").hidden=!custom;
-  $("#faster-whisper-fields").hidden=custom;
-}
-$("#transcriber-provider").addEventListener("change",e=>{S.transcriber_provider=e.target.value;updateTranscriberFields();scheduleSave()});
-$("#transcriber-command").addEventListener("change",e=>{S.transcriber_command=e.target.value.slice(0,2000);scheduleSave()});
-$("#transcriber-language").addEventListener("change",e=>{S.transcriber_language=e.target.value.trim().slice(0,20)||"auto";scheduleSave()});
-updateTranscriberFields();
-$("#output-format").value=S.output_format;function updateFormatUI(){const f=S.output_format;$("#format-hint").textContent=f==="9:16"?"9:16 keeps the facecam + game layout.":f==="16:9"?"16:9 renders a landscape YouTube frame.":f==="1:1"?"1:1 renders a square social frame.":"4:5 renders an Instagram portrait frame."}function resetCropForFormat(){const r=({"9:16":9/16,"16:9":16/9,"1:1":1,"4:5":4/5}[S.output_format]||9/16),w=Math.min(100,100*r/(16/9));S.crop_w=+w.toFixed(1);S.crop_h=100;S.crop_x=+( (100-w)/2 ).toFixed(1);S.crop_y=0}$("#output-format").addEventListener("change",e=>{S.output_format=e.target.value;resetCropForFormat();updateFormatUI();preview();scheduleSave()});updateFormatUI();
-$("#font").value=S.font;$("#font").addEventListener("input",e=>{const v=e.target.value.trim();if(/^[A-Za-z0-9 \-]{1,40}$/.test(v)){S.font=v;preview();scheduleSave()}});
-// Temporary live capture cleanup is automatic; original VOD files are preserved.
-$("#show-tag-video").checked=!!S.show_tag_video;
-$("#show-tag-video").addEventListener("change",e=>{S.show_tag_video=e.target.checked;scheduleSave()});
-$("#t-sub-custom").checked=!!S.subtitle_custom;
-$("#sub-custom-fields").hidden=!S.subtitle_custom;
-$("#t-sub-custom").addEventListener("change",e=>{S.subtitle_custom=e.target.checked;$("#sub-custom-fields").hidden=!S.subtitle_custom;scheduleSave();preview()});
- $("#t-profanity").checked=S.profanity_filter_enabled!==false;
- $("#t-profanity").addEventListener("change",e=>{S.profanity_filter_enabled=e.target.checked;scheduleSave()});
- $("#profanity-words").value=S.profanity_filter_words||"";
- $("#profanity-words").addEventListener("input",e=>{S.profanity_filter_words=e.target.value.slice(0,4000);scheduleSave()});
-$("#sub-mode").value=S.subtitle_mode;$("#sub-mode").addEventListener("change",e=>{S.subtitle_mode=e.target.value;scheduleSave()});
-$("#sub-style").value=S.subtitle_style;$("#sub-style").addEventListener("change",e=>{S.subtitle_style=e.target.value;scheduleSave();preview()});
-$("#sub-text-color").value=S.subtitle_text_color;$("#sub-text-color").addEventListener("input",e=>{S.subtitle_text_color=e.target.value.toUpperCase();scheduleSave();preview()});
-$("#sub-stroke-color").value=S.subtitle_stroke_color;$("#sub-stroke-color").addEventListener("input",e=>{S.subtitle_stroke_color=e.target.value.toUpperCase();scheduleSave();preview()});
-for(const [id,key,lab,fmt] of [["r-sub-size","subtitle_font_size","v-sub-size",v=>v+" px"],["r-sub-nudge","subtitle_nudge","v-sub-nudge",v=>v+" px"]]){
-  const el=$("#"+id);el.value=S[key];const upd=()=>{S[key]=+el.value;$("#"+lab).textContent=fmt(el.value);paintRange(el)};
-  el.addEventListener("input",()=>{upd();preview();scheduleSave()});upd();
-}
-function inferStreamerTag(url){
-  let m=String(url||"").match(/twitch\.tv\/([^/?#]+)/i);
-  if(m&&!/^(videos|directory|search)$/i.test(m[1]))return "@"+m[1];
-  m=String(url||"").match(/youtube\.com\/@([^/?#]+)/i);
-  return m?"@"+m[1]:"";
-}
-let tagManual=!!S.streamer_tag&&S.streamer_tag!==inferStreamerTag(S.target);
-function syncStreamerTag(){
-  if(tagManual)return;
-  S.streamer_tag=inferStreamerTag(S.target);
-  $("#streamer-tag").value=S.streamer_tag;
-}
-$("#target").value=S.target||"";syncStreamerTag();
-$("#target").addEventListener("input",e=>{S.target=e.target.value;syncStreamerTag();scheduleSave()});
-$("#streamer-tag").addEventListener("input",e=>{tagManual=true;S.streamer_tag=e.target.value.replace(/[\n{}\\]/g,"").slice(0,80);scheduleSave()});
-function onMode(){
-  const live=S.mode==="live";
-  const facecam=S.layout.startsWith("Facecam"),selected=S.layout.startsWith("Selected");
-  $("#camrow").hidden=!(facecam||selected);
-  $("#cam-area-row").hidden=!facecam;
-  $("#v-cam").textContent="x"+S.cam_x+"% y"+S.cam_y+"% size "+S.cam_w+"%";
-  $("#btn-cam").textContent=facecam?"Set facecam area on a frame":"Select source segment on a frame";
-  $("#cam-hint").textContent=facecam?"Like Twitch: the facecam fills the top 40% of the clip and the game fills the bottom 60%.":"Uses the original source frame (normally 16:9). The selected format box captures exactly the segment you choose.";
-  $("#btn-cam").onclick=facecam?openCamEditor:openCropEditor;
-  $("#target").placeholder=live?"https://www.twitch.tv/channel":"Path to a .mp4 / .mkv recording";
-  $("#btn-browse").hidden=live;
-  $("#src-hint").textContent=live?"Works with Twitch and YouTube live links. If the stream is offline, StreamSnip AI waits and starts when it goes live.":"Clips are cut from the whole file. Long VODs get more clips automatically.";
-  $("#go-label").textContent=live?"Start recording & clipping":"Make clips from this file";
-}
-onMode();
-$("#btn-browse").onclick=async()=>{const b=$("#btn-browse");b.disabled=true;try{const r=await api("/api/browse");if(r.path){$("#target").value=r.path;S.target=r.path;scheduleSave()}}catch(e){toast(e.message,"bad")}b.disabled=false};
-
-/* ---------- caption preview ---------- */
-const FLAT="NO WAY BRO THIS IS INSANE LET HIM COOK ARE YOU MAD".split(" ");
-let tick=0;
-function preview(){
-  const ph=$("#phone"),cap=$("#cap");
-  const formatRatio={"9:16":"9/16","16:9":"16/9","1:1":"1/1","4:5":"4/5"}[S.output_format]||"9/16";
-  ph.style.aspectRatio=formatRatio;
-  ph.classList.toggle("fill",S.layout.startsWith("Fill"));ph.classList.toggle("cam",S.layout.startsWith("Facecam"));
-  const k=ph.getBoundingClientRect().width/1080||0.2;
-  const custom=!!S.subtitle_custom;
-  const n=S.words_per_line;
-  const subFont=custom?({Classic:"Impact",Hormozi:"Arial Black",Neon:"Arial Black",MrBeast:"Impact",Minimal:"Segoe UI Black",Fire:"Impact"}[S.subtitle_style]||"Impact"):S.font;
-  const subPos=custom?S.subtitle_position:"Bottom";
-  const bottom=custom?(subPos==="Bottom"?70:subPos==="Center"?760:null):(BOOT.positions[S.position]||520);
-  const idx=tick%FLAT.length,g=Math.floor(idx/n),words=FLAT.slice(g*n,Math.min(FLAT.length,g*n+n));
-  const o=Math.max(1,9*k),sh=[];for(let a=0;a<12;a++){const r=a/12*Math.PI*2;sh.push((Math.cos(r)*o).toFixed(1)+"px "+(Math.sin(r)*o).toFixed(1)+"px 0 #000")}
-  const baseCol=custom?(S.subtitle_text_color||"#FFFFFF"):"#FFFFFF";
-  const highlightCol=BOOT.colors[S.color]||"#FFE600";
-  cap.style.cssText=(bottom==null?"top:"+(70+S.subtitle_nudge)*k+"px;":"bottom:"+((bottom+S.subtitle_nudge)*k)+"px;")+"padding:0 "+(70*k)+"px;font-size:"+((custom?S.subtitle_font_size:S.caption_size)*k)+"px;font-family:'"+subFont+"',Impact,'Arial Black',sans-serif;--cap:"+highlightCol+";text-shadow:"+sh.join(",")+";color:"+baseCol;
-  cap.replaceChildren(...words.map((w,i)=>h("span",{class:(g*n+i===idx)?"hot":""},w)));
-}
-setInterval(()=>{tick++;preview()},430);preview();
-
-/* ---------- facecam area editor ---------- */
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-function openCamEditor(){
-  const box={x:+S.cam_x,y:+S.cam_y,w:+S.cam_w,h:+S.cam_h};let gx=+S.game_x,ar=16/9;
-  const img=h("img",{class:"cimg",draggable:false});
-  const handles=["nw","ne","sw","se"].map(pos=>h("i",{class:"hdl "+pos}));
-  const moveHit=h("i",{class:"move-hit",title:"Drag to move the facecam"});
-  const rc=h("div",{class:"crect"},moveHit,h("span",{},"FACECAM"),handles);
-  const rg=h("div",{class:"crect game"},h("span",{},"GAME"));
-  const stage=h("div",{class:"cstage"},img,rg,rc);
-  const hh=w=>w*ar/(1080/768);                       /* keeps the box the same shape as the top 40% area */
-  function paint(){
-    rc.style.cssText="left:"+box.x+"%;top:"+box.y+"%;width:"+box.w+"%;height:"+box.h+"%";
-    const gw=Math.min(100,(1080/1152)/ar*100);rg.style.cssText="left:"+((100-gw)*gx/100)+"%;top:0;width:"+gw+"%;height:100%";
-  }
-  function fit(){box.h=hh(box.w);if(box.y+box.h>100){box.h=100-box.y;box.w=box.h*(1080/768)/ar}if(box.x+box.w>100){box.w=100-box.x;box.h=hh(box.w)}}
-  fit();
-  const drag=(el,mode,corner)=>el.addEventListener("pointerdown",e=>{
-    e.preventDefault();e.stopPropagation();
-    const r=stage.getBoundingClientRect(),s0={x:box.x,y:box.y,w:box.w,h:box.h,px:e.clientX,py:e.clientY};
-    const mv=ev=>{if(ev.pointerId!==e.pointerId)return;const dx=(ev.clientX-s0.px)/r.width*100,dy=(ev.clientY-s0.py)/r.height*100;
-      if(mode==="move"){box.x=clamp(s0.x+dx,0,100-s0.w);box.y=clamp(s0.y+dy,0,100-s0.h)}
-      else{
-        const left=corner.includes("w"),top=corner.includes("n"),right=s0.x+s0.w,bottom=s0.y+s0.h;
-        /* Use the dominant movement axis. The old code only used dx, so
-           dragging the upper-right/lower-left handle vertically did nothing
-           and made the facecam look stuck at the top edge. */
-        const ratio=hh(1), horizontal= Math.abs(dx) >= Math.abs(dy)/ratio;
-        const deltaW=horizontal ? (left?-dx:dx) : (top?-dy:dy)/ratio;
-        let w=clamp(s0.w+deltaW,8,100),h=hh(w),x=left?right-w:s0.x,y=top?bottom-h:s0.y;
-        if(x<0){x=0;w=right;h=hh(w);y=top?bottom-h:y}
-        if(x+w>100){x=left?0:s0.x;w=100-x;h=hh(w);y=top?bottom-h:y}
-        if(y<0){y=0;h=bottom;w=h*(1080/768)/ar;x=left?right-w:x}
-        if(y+h>100){y=top?0:s0.y;h=100-y;w=h*(1080/768)/ar;x=left?right-w:x}
-        box.x=clamp(x,0,100-w);box.y=clamp(y,0,100-h);box.w=w;box.h=h
-      }
-      paint()};
-    const up=()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);window.removeEventListener("pointercancel",up)};
-    window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up,{once:true});window.addEventListener("pointercancel",up,{once:true})});
-  drag(moveHit,"move");handles.forEach(hdl=>drag(hdl,"resize",hdl.classList[1]));
-  img.addEventListener("load",()=>{if(img.naturalWidth){ar=img.naturalWidth/img.naturalHeight;stage.style.aspectRatio=img.naturalWidth+"/"+img.naturalHeight;fit();paint()}});
-  const gs=h("input",{type:"range",min:0,max:100,step:1,value:Math.round(gx)});paintRange(gs);
-  gs.addEventListener("input",()=>{gx=+gs.value;paintRange(gs);paint()});
-  const msg=h("span",{class:"hint",style:"margin:0"},"");
-  const grab=h("button",{class:"btn ghost"},"Grab a frame");
-  const center=h("button",{class:"btn ghost"},"Center game frame");
-  const centerCrop=()=>{gx=50;gs.value=50;paintRange(gs);paint();msg.textContent="Game frame centered."};
-  center.onclick=centerCrop;
-  const doGrab=async()=>{grab.disabled=true;msg.textContent="Grabbing a frame...";try{const r=await api("/api/frame",{mode:S.mode,target:S.target});img.src=r.image;msg.textContent="Drag the pink box over the facecam and pull the corner to resize."}catch(e){msg.textContent=e.message}grab.disabled=false};
-  grab.onclick=doGrab;
-  const close=()=>{m.remove();document.removeEventListener("keydown",esc)};
-  const esc=e=>{if(e.key==="Escape")close()};
-  const save=()=>{S.cam_x=+box.x.toFixed(1);S.cam_y=+box.y.toFixed(1);S.cam_w=+box.w.toFixed(1);S.cam_h=+box.h.toFixed(1);S.game_x=gx;onMode();scheduleSave();close();toast("Facecam area saved","ok")};
-  const m=h("div",{class:"overlay",onclick:e=>{if(e.target===m)close()}},
-    h("div",{class:"editor"},h("h4",{},"Set the facecam area"),
-      h("div",{class:"sub"},"Pink = the facecam (becomes the top 40% of the clip). Dashed blue = the part of the game that fills the bottom 60%."),
-      stage,
-       h("div",{class:"erow"},grab,center,msg),
-      h("div",{class:"erow"},h("div",{class:"grow"},h("div",{class:"row",style:"margin:0 0 8px"},h("label",{},"Game crop position (left to right)")),gs)),
-      h("div",{class:"erow",style:"justify-content:flex-end"},h("button",{class:"btn ghost",onclick:close},"Cancel"),h("button",{class:"btn danger",style:"background:var(--a1)",onclick:save},"Save area"))));
-  document.body.append(m);document.addEventListener("keydown",esc);paint();
-  if(S.target&&S.target.trim())doGrab();else msg.textContent="Paste a stream link or pick a file first, then press Grab a frame. You can still drag the box now.";
-}
-function openCropEditor(){
-  const box={x:+S.crop_x,y:+S.crop_y,w:+S.crop_w,h:+S.crop_h};let sourceAr=16/9;
-  const img=h("img",{class:"cimg",draggable:false}),hdl=h("i",{class:"hdl"});
-  const rc=h("div",{class:"crect"},h("span",{},"OUTPUT SEGMENT"),hdl);
-  const stage=h("div",{class:"cstage"},img,rc);
-  const targetAr=({"9:16":9/16,"16:9":16/9,"1:1":1,"4:5":4/5}[S.output_format]||9/16);
-  const boxH=w=>w*sourceAr/targetAr;
-  function fit(){
-    box.h=boxH(box.w);
-    if(box.h>100){box.h=100;box.w=box.h*targetAr/sourceAr}
-    box.x=clamp(box.x,0,100-box.w);box.y=clamp(box.y,0,100-box.h);
-  }
-  function paint(){rc.style.cssText="left:"+box.x+"%;top:"+box.y+"%;width:"+box.w+"%;height:"+box.h+"%"}
-  fit();
-  const drag=(el,mode)=>el.addEventListener("pointerdown",e=>{
-    e.preventDefault();e.stopPropagation();el.setPointerCapture(e.pointerId);
-    const r=stage.getBoundingClientRect(),s0={x:box.x,y:box.y,w:box.w,px:e.clientX,py:e.clientY};
-    const mv=ev=>{const dx=(ev.clientX-s0.px)/r.width*100,dy=(ev.clientY-s0.py)/r.height*100;
-      if(mode==="move"){box.x=clamp(s0.x+dx,0,100-box.w);box.y=clamp(s0.y+dy,0,100-box.h)}
-      else{let w=clamp(s0.w+dx,8,100-box.x);let hh=boxH(w);if(hh>100-box.y){hh=100-box.y;w=hh*targetAr/sourceAr}box.w=w;box.h=hh}
-      paint()};
-    const up=()=>{el.removeEventListener("pointermove",mv);el.removeEventListener("pointerup",up)};
-    el.addEventListener("pointermove",mv);el.addEventListener("pointerup",up)});
-  drag(rc,"move");drag(hdl,"resize");
-  img.addEventListener("load",()=>{if(img.naturalWidth){sourceAr=img.naturalWidth/img.naturalHeight;stage.style.aspectRatio=img.naturalWidth+"/"+img.naturalHeight;fit();paint()}});
-  const msg=h("span",{class:"hint",style:"margin:0"},"");
-  const grab=h("button",{class:"btn ghost"},"Grab a frame");
-  const center=h("button",{class:"btn ghost"},"Center segment");
-  center.onclick=()=>{box.x=(100-box.w)/2;box.y=(100-box.h)/2;paint();msg.textContent="Source segment centered."};
-  const doGrab=async()=>{grab.disabled=true;msg.textContent="Grabbing a frame...";try{const r=await api("/api/frame",{mode:S.mode,target:S.target});img.src=r.image;msg.textContent="Drag the fixed-aspect box to choose the exact source segment."}catch(e){msg.textContent=e.message}grab.disabled=false};
-  grab.onclick=doGrab;
-  const close=()=>{m.remove();document.removeEventListener("keydown",esc)};
-  const esc=e=>{if(e.key==="Escape")close()};
-  const save=()=>{S.crop_x=+box.x.toFixed(1);S.crop_y=+box.y.toFixed(1);S.crop_w=+box.w.toFixed(1);S.crop_h=+box.h.toFixed(1);scheduleSave();close();toast("Source segment saved","ok")};
-  const m=h("div",{class:"overlay",onclick:e=>{if(e.target===m)close()}},
-    h("div",{class:"editor"},h("h4",{},"Select the source segment"),
-      h("div",{class:"sub"},"The frame stays in its original aspect ratio. The fixed box matches your selected output format: "+S.output_format+"."),
-      stage,h("div",{class:"erow"},grab,center,msg),
-      h("div",{class:"erow",style:"justify-content:flex-end"},h("button",{class:"btn ghost",onclick:close},"Cancel"),h("button",{class:"btn danger",style:"background:var(--a1)",onclick:save},"Save segment"))));
-  document.body.append(m);document.addEventListener("keydown",esc);paint();
-  if(S.target&&S.target.trim())doGrab();else msg.textContent="Paste a stream link or choose a file first, then press Grab a frame.";
-}
-
-/* ---------- tabs ---------- */
-let wordsLoaded=false;
-$$(".tab").forEach(t=>t.onclick=()=>{
-  $$(".tab").forEach(x=>x.classList.toggle("on",x===t));
-  ["clips","log","words"].forEach(n=>$("#p-"+n).hidden=(n!==t.dataset.t));
-  if(t.dataset.t==="words"&&!wordsLoaded)loadWords();
-  if(t.dataset.t==="log"){const l=$("#p-log");l.scrollTop=l.scrollHeight}
-});
-async function loadWords(){
-  try{const r=await (await fetch("/api/words",{cache:"no-store"})).json();
-   $("#words").value=r.text;wordsLoaded=true;
-   $("#builtin-sum").textContent="Built-in hype words ("+r.words.length+" words, "+r.phrases.length+" phrases)";
-   $("#chips").replaceChildren(...r.phrases.map(p=>h("span",{},p)),...r.words.map(w=>h("span",{},w)));
-  }catch(e){toast("Couldn't load hype words","bad")}
-}
-async function saveWords(){
-  try{const r=await api("/api/words",{text:$("#words").value});const m=$("#words-msg");m.textContent="Saved ("+r.entries+" custom entries)";m.classList.add("show");setTimeout(()=>m.classList.remove("show"),2200)}
-  catch(e){toast(e.message,"bad")}
-}
-$("#btn-words-save").onclick=saveWords;
-$("#words").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveWords()}});
-
-/* ---------- actions ---------- */
-function loadProviderForm(){const cfg=(P.providers&&P.providers.zernio)||{};Z=Object.assign({},cfg);$("#pub-provider").value="zernio";$("#z-api").value="";$("#z-key-state").textContent=cfg.api_key_set?"Saved locally":"Not saved";$("#z-delay").value=cfg.schedule_minutes||0;$("#z-vis").value=cfg.visibility||"public";$("#z-auto").checked=!!cfg.auto_post}
-$("#pub-provider").onchange=async e=>{activeProvider="zernio";accountsLoadedFor="";loadProviderForm();$("#z-account-picks").replaceChildren();if((P.providers.zernio||{}).api_key_set)loadPublishingAccounts().catch(err=>$("#z-msg").textContent=err.message)};loadProviderForm();
-$("#z-key-state").textContent=Z.api_key_set?"Saved locally":"Not saved";
-$("#z-key-state").style.color=Z.api_key_set?"var(--ok)":"var(--dim)";
-$("#z-check").onclick=async()=>{
-  const b=$("#z-check");b.disabled=true;
-  try{
-    const payload={provider:"zernio",api_key:$("#z-api").value,auto_post:$("#z-auto").checked,schedule_minutes:+$("#z-delay").value||0,visibility:$("#z-vis").value};
-    if(accountsLoadedFor==="zernio")payload.account_ids=selectedZernioAccounts();
-    const r=await api("/api/publishing",payload);
-    Object.assign(P,r);Object.assign(Z,(r.providers||{})[activeProvider]||{});$("#z-api").value="";$("#z-key-state").textContent="Saved locally";$("#z-key-state").style.color="var(--ok)";await loadPublishingAccounts();toast(activeProvider+" settings saved locally","ok");
-  }catch(e){$("#z-msg").textContent=e.message;$("#z-msg").classList.add("show");toast(e.message,"bad")}
-  b.disabled=false;
-};
-if(Z.api_key_set)loadPublishingAccounts().catch(e=>{$("#z-msg").textContent=e.message});
-$("#btn-folder").onclick=()=>api("/api/open_folder").then(()=>toast("Clips folder opened","ok")).catch(e=>toast(e.message,"bad"));
-function normalizeLiveUrl(v){const t=v.trim().replace(/^"|"$/g,"");return /^(www\.)?(twitch\.tv|youtube\.com|youtu\.be)\//i.test(t)?"https://"+t:t}
-$("#btn-start").onclick=async()=>{
-  if(!S.target.trim()){toast(S.mode==="live"?"Paste a stream link first":"Choose a video file first","bad");$("#target").focus();return}
-  if(S.mode==="live"){S.target=normalizeLiveUrl(S.target);$("#target").value=S.target;scheduleSave()}
-  const b=$("#btn-start");b.disabled=true;
-  try{await api("/api/start",S);await poll(true)}catch(e){toast(e.message,"bad")}
-  b.disabled=false;
-};
-$("#btn-stop").onclick=()=>api("/api/stop",{force:false}).then(()=>poll(true)).catch(e=>toast(e.message,"bad"));
-$("#btn-kill").onclick=()=>api("/api/stop",{force:true}).then(()=>poll(true)).catch(e=>toast(e.message,"bad"));
-$("#btn-quit").onclick=async()=>{
-  if(!(await confirmBox("Quit StreamSnip AI?","Any recording in progress will stop. Finished clips stay in the clips folder.","Quit")))return;
-  appClosing=true;
-  try{await api("/api/quit")}catch(e){}
-  document.body.replaceChildren(h("div",{style:"height:100%;display:grid;place-items:center;text-align:center;color:#9a9fb5"},h("div",{},h("h2",{style:"color:#fff;margin-bottom:8px"},"StreamSnip AI has closed"),h("p",{},"You can close this window."))));
-  setTimeout(()=>window.close(),400);
-};
-
-/* ---------- state polling ---------- */
-const PHASES={idle:"Ready",waiting:"Waiting for the stream",recording:"Recording live",transcribing:"Listening for hype",rendering:"Rendering clips",stopping:"Wrapping up",working:"Working"};
-let lastLog=0,fails=0,busy=false,order="",cards=new Map(),selectedClips=new Set(),lastPostDone=0,lastPostStarted=null;
-let logPaused=false;
-const fmtT=s=>{const m=Math.floor(s/60),h2=Math.floor(m/60);return h2?h2+":"+String(m%60).padStart(2,"0")+":"+String(s%60).padStart(2,"0"):m+":"+String(s%60).padStart(2,"0")};
-function ago(t){const s=Math.max(0,Date.now()/1000-t);if(s<60)return"just now";if(s<3600)return Math.floor(s/60)+" min ago";if(s<86400)return Math.floor(s/3600)+" h ago";return Math.floor(s/86400)+" d ago"}
-function addLogs(list){
-  if(!list.length)return;const box=$("#log"),pl=$("#p-log"),stick=pl.scrollHeight-pl.scrollTop-pl.clientHeight<60;
-  list.forEach(l=>{
-    const cls=/error|failed|could not finish using/i.test(l.m)?"err":/clip ready|live - rec/i.test(l.m)?"okk":"";
-    const row=h("div",{class:cls},h("span",{class:"t"},l.t),l.m);
-    (l.file_lock&&l.file_lock.holders||[]).forEach(holder=>{
-      const stop=h("button",{class:"btn ghost lock-stop",onclick:async e=>{
-        const button=e.currentTarget;
-        const detail=(holder.path?"\n"+holder.path:"")+"\nPID "+holder.pid+"\n\nWindows will close this process to release the clip. Save any work in it first.";
-        if(!(await confirmBox("Stop "+holder.name+"?",detail,"Stop process")))return;
-        button.disabled=true;
-        try{const result=await api("/api/stop_file_holder",{name:l.file_lock.name,pid:holder.pid});button.textContent="Stop requested";toast(result.message,"ok");poll(true)}
-        catch(error){button.disabled=false;toast(error.message,"bad")}
-      }},"Stop "+holder.name+" (PID "+holder.pid+")");
-      row.append(document.createElement("br"),stop);
-    });
-    box.append(row);
-  });
-  while(box.children.length>500)box.firstChild.remove();
-  if(stick)pl.scrollTop=pl.scrollHeight;
-}
-$("#log-pause").onclick=()=>{
-  logPaused=!logPaused;
-  const button=$("#log-pause"), badge=$("#log-live");
-  button.textContent=logPaused?"Resume":"Pause";
-  badge.textContent=logPaused?"Paused":"Live";
-  badge.classList.toggle("paused",logPaused);
-};
-$("#log-clear").onclick=()=>$("#log").replaceChildren();
-function updateSelectedButton(){
-  const count=selectedClips.size;
-  const b=$("#btn-publish-selected");b.textContent="Publish selected ("+count+")";b.disabled=count===0;
-  const d=$("#btn-delete-selected");d.textContent="Delete selected ("+count+")";d.disabled=count===0;
-  const all=tabClipNames.length>0&&tabClipNames.every(name=>selectedClips.has(name));$("#btn-select-all").textContent=all?"Clear selection":"Select all";
-}
-async function selectAllClips(){
-  try{
-    const all=tabClipNames.length>0&&tabClipNames.every(name=>selectedClips.has(name));
-    if(all){selectedClips.clear()}else{tabClipNames.forEach(name=>selectedClips.add(name))}
-    cards.forEach(card=>{const pick=card.querySelector(".pick");if(pick)pick.checked=selectedClips.has(card.dataset.name)});
-    updateSelectedButton();
-  }catch(e){toast(e.message,"bad")}
-}
-function toggleClipSelection(name){
-  if(selectedClips.has(name))selectedClips.delete(name);else selectedClips.add(name);
-  const card=cards.get(name),pick=card&&card.querySelector(".pick");
-  if(pick)pick.checked=selectedClips.has(name);
-  updateSelectedButton();
-  toast(selectedClips.has(name)?"Clip selected for publishing":"Clip removed from selection","ok");
-}
-function updatePosting(p){
-  if(!p)return;
-  if(p.started!==lastPostStarted){lastPostStarted=p.started;lastPostDone=0}
-  const total=Number(p.total)||0,done=Number(p.completed)||0,active=!!p.active;
-  const visible=active||total>0;
-  $("#post-progress").hidden=!visible;
-  const pct=total?Math.round(done/total*100):0;
-  $("#post-fill").style.width=pct+"%";$("#post-value").textContent=pct+"%";
-  $("#post-time").textContent=p.started?fmtT(Math.max(0,Math.floor(Date.now()/1000-p.started))):"0:00";
-  $("#post-label").textContent=active?(p.current?"Uploading "+done+" of "+total+": "+p.current:"Preparing uploads...")
-    :(p.errors?"Posting complete with "+p.errors+" failure(s).":"All uploads complete.");
-  $("#btn-publish-all").disabled=active;updateSelectedButton();
-  if(Number(p.done)>lastPostDone){toast("Upload complete: "+p.last_name,"ok");lastPostDone=Number(p.done)}
-}
-function updateRun(s){
-  const hero=$("#hero");hero.dataset.phase=s.phase;
-  hero.classList.toggle("live",s.running&&s.phase!=="waiting"||s.phase==="waiting"&&s.running);
-  const ph=$("#ph");ph.replaceChildren(...(s.phase==="recording"?[h("span",{class:"rec-dot"})]:[]),PHASES[s.phase]||"Working");
-  $("#st").textContent=s.status;$("#st").title=s.status;
-  const showProgress=s.running&&(s.phase==="recording"||s.phase==="transcribing"||s.phase==="rendering");
-  $("#progress-wrap").hidden=!showProgress;
-  const progress=Math.max(0,Math.min(100,Number(s.progress)||0));
-  $("#progress-fill").style.width=progress+"%";$("#progress-value").textContent=progress+"%";
-  $("#progress-label").textContent=s.phase==="recording"?"Next clip batch":"";
-  if(s.phase==="transcribing")$("#progress-label").textContent="Transcribing video";
-  if(s.phase==="rendering")$("#progress-label").textContent="Rendering clips";
-  updatePosting(s.posting);
-  $("#s-time").textContent=fmtT(s.session.elapsed);$("#s-chunks").textContent=s.session.chunks;$("#s-clips").textContent=s.session.clips;
-  $("#startbar").hidden=s.running;$("#stopbar").hidden=!s.running;
-  const live=s.mode==="live";
-  $("#btn-kill").hidden=!live;
-  const stop=$("#btn-stop");stop.textContent=live?(s.stopping?"Wrapping up...":"Stop & finish clips"):"Cancel";stop.disabled=!!s.stopping&&live;
-  $$(".left .scroll input,.left .scroll select,.left .scroll .seg button,.left .scroll .sw button").forEach(el=>{});
-}
-function openSocialPost(c){
-  const titleText=c.title||((c.caption||"").split("
-")[0]||c.name);
-  const descText=c.description||((c.caption||"").split("
-
-").slice(1).join("
-
-"));
-  const title=h("input",{class:"text",type:"text",maxlength:"100"});
-  title.value=titleText;
-  const description=h("textarea",{class:"text"});
-  description.value=descText;
-  const directChecks={};
-  const savedAccounts=Object.assign({},Z.accounts||{});
-  if(!Object.keys(savedAccounts).length){
-    if(Z.instagram_id)savedAccounts.instagram=Z.instagram_id;
-    if(Z.youtube_id)savedAccounts.youtube=Z.youtube_id;
-  }
-  const platformLabels={instagram:"Instagram",facebook:"Facebook",youtube:"YouTube"};
-  const connected=Object.entries(savedAccounts);
-  const choices=h("div",{class:"platform-picks"},...connected.map(([id,accountId])=>{
-    const input=h("input",{type:"checkbox"});
-    input.checked=true;
-    directChecks[id]=input;
-    return h("label",{class:"platform-pick"},input,platformLabels[id]||id);
-  }));
-  const selectedAccounts=()=>Object.fromEntries(connected.filter(([id])=>directChecks[id]&&directChecks[id].checked));
-  const close=()=>{overlay.remove();document.removeEventListener("keydown",onKey)};
-  const onKey=e=>{if(e.key==="Escape")close()};
-  const overlay=h("div",{class:"overlay",onclick:e=>{if(e.target===overlay)close()}});
-  const publish=h("button",{class:"btn primary",disabled:!connected.length||!Z.api_key_set,onclick:async()=>{
-    const accounts=selectedAccounts();
-    if(!Object.keys(accounts).length){toast("Select at least one connected Zernio account","bad");return}
-    if(!title.value.trim()){toast("Add a post title first","bad");return}
-    publish.disabled=true;publish.textContent="Queueing publish...";
-    try{
-      await api("/api/publishing/publish-one",{name:c.name,title:title.value.trim(),description:description.value.trim(),account_ids:accounts});
-      toast("Clip queued for Zernio publishing to "+Object.keys(accounts).join(", "), "ok");
-      close();
-    }catch(error){toast(error.message,"bad");publish.disabled=false;publish.textContent="Publish via Zernio"}
-  }},"Publish via Zernio");
-  const cancel=h("button",{class:"btn ghost",onclick:close},"Cancel");
-  overlay.append(h("div",{class:"post-dialog"},
-    h("h3",{},"Prepare Zernio post"),
-    h("p",{class:"sub"},"Clip: "+c.name+" · Choose connected Zernio destinations"),
-    h("label",{},"Post title"),
-    title,
-    h("label",{},"Description and hashtags"),
-    description,
-    h("label",{},"Connected Zernio accounts"),
-    choices,
-    h("p",{class:"post-note"},connected.length?"Zernio uploads this clip and submits your title and description to the selected connected accounts.":"Connect Zernio and select social accounts in Publishing settings to publish."),
-    h("div",{class:"prow",style:"justify-content:flex-end"},cancel,h("a",{class:"btn ghost",href:"/clips/"+encodeURIComponent(c.name),download:c.name},"Download clip"),publish)
-  ));
-  document.body.append(overlay);
-  document.addEventListener("keydown",onKey);
-}
-function clipCard(c){
-  const v=h("video",{src:"/clips/"+encodeURIComponent(c.name)+"#t=0.1",loop:true,playsinline:true,preload:"metadata"});v.muted=true;
-  const first=(c.caption||"").split("\n")[0]||c.name;
-  const when=h("span",{class:"when","data-t":c.mtime},ago(c.mtime));
-  const origin=c.creator_name?c.creator_name+" · "+(c.source==="vod"?"Recorded VOD":"Live"):"Local recording";
-  const pick=h("input",{class:"pick",type:"checkbox",title:"Select this clip"});pick.checked=selectedClips.has(c.name);pick.onchange=()=>{pick.checked?selectedClips.add(c.name):selectedClips.delete(c.name);updateSelectedButton()};
-  const copy=()=>{navigator.clipboard.writeText(c.caption||"").then(()=>toast("Caption copied","ok"),()=>toast("Couldn't copy","bad"))};
-  const post=()=>openSocialPost(c);
-  const del=async()=>{if(await confirmBox("Delete this clip?","This permanently removes the video and its caption file.","Delete")){try{await api("/api/delete",{name:c.name});toast("Clip deleted");poll(true)}catch(e){toast(e.message,"bad")}}};
-  return h("div",{class:"clip","data-name":c.name,title:"Double-click this clip to select it for publishing",ondblclick:e=>{if(!e.target.closest("button,a,input"))toggleClipSelection(c.name)},onmouseenter:()=>{v.play().catch(()=>{})},onmouseleave:()=>v.pause()},
-    h("div",{class:"thumb",onclick:()=>openClip(c)},v,h("div",{class:"pb"},ico("play",15))),
-    h("div",{class:"cm"},h("div",{class:"cc",title:first},first),
-      h("div",{class:"cr"},h("span",{},pick," ",when," · "+c.size_mb+" MB · "+origin),
-        h("span",{class:"acts"},
-          h("button",{class:"ib post",title:"Prepare a post for Instagram, Facebook, or YouTube",onclick:post},"Post"),
-          h("button",{class:"ib",title:"Copy caption + hashtags",onclick:copy},ico("copy",15)),
-          h("a",{class:"ib",title:"Download",href:"/clips/"+encodeURIComponent(c.name),download:c.name},ico("download",15)),
-          h("button",{class:"ib",title:"Show in folder",onclick:()=>api("/api/reveal",{name:c.name}).catch(e=>toast(e.message,"bad"))},ico("folder",15)),
-          h("button",{class:"ib del",title:"Delete",onclick:del},ico("trash",15))))));
-}
-function renderClips(list,total=0){
-  $("#btn-publish-all").hidden=clipTab==="posted";
-
-  if(!list.length&&clipOffset>0){clipOffset=Math.max(0,clipOffset-CLIP_PAGE_SIZE);return}
-  const sig=list.map(c=>c.name).join("|");
-  $("#empty").hidden=list.length>0;$("#grid").hidden=list.length===0;
-  const cnt=$("#cnt");cnt.hidden=!list.length;cnt.textContent=list.length;
-  $("#empty h4").textContent=clipTab==="posted"?"No posted clips yet":"No clips yet";
-  $("#empty p").textContent=clipTab==="posted"?"Clips appear here after a successful Zernio post.":"Paste a Twitch or YouTube live link (or choose a video file) and hit Start. Finished clips appear here, ready to review and post.";
-  $("#clip-page-label").textContent=list.length?`${clipOffset+1}-${clipOffset+list.length} of ${total} clips`:"0 clips";
-  $("#btn-clips-newer").disabled=clipOffset===0;
-  $("#btn-clips-older").disabled=clipOffset+list.length>=total;
-  if(sig!==order){
-    order=sig;const keep=new Set(list.map(c=>c.name));
-    for(const [n,el] of cards){if(!keep.has(n)){el.remove();cards.delete(n)}}
-    const frag=[];
-    list.forEach(c=>{let el=cards.get(c.name);if(!el){el=clipCard(c);cards.set(c.name,el)}frag.push(el)});
-    $("#grid").replaceChildren(...frag);
-  }
-  $$(".when").forEach(w=>w.textContent=ago(+w.dataset.t));
-}
-async function publishNames(names){
-  if(!names.length){toast("Select at least one clip first","bad");return}
-  const accounts=Object.assign({},Z.accounts||{});
-  if(!Object.keys(accounts).length){if(Z.instagram_id)accounts.instagram=Z.instagram_id;if(Z.youtube_id)accounts.youtube=Z.youtube_id}
-  try{const r=await api("/api/publishing/publish",{names,account_ids:accounts});toast("Started uploading "+r.queued+" clip(s) to "+Object.keys(accounts).join(", "),"ok");selectedClips.clear();$$('.pick').forEach(x=>x.checked=false);updateSelectedButton();}
-  catch(e){toast(e.message,"bad")}
-}
-$("#btn-publish-selected").onclick=()=>publishNames([...selectedClips]);
-$("#btn-select-all").onclick=selectAllClips;
-$("#btn-view-clips").onclick=()=>{clipTab="clips";clipOffset=0;selectedClips.clear();order="";$("#btn-view-clips").classList.add("on");$("#btn-view-posted").classList.remove("on");poll(true)};
-$("#btn-view-posted").onclick=()=>{clipTab="posted";clipOffset=0;selectedClips.clear();order="";$("#btn-view-posted").classList.add("on");$("#btn-view-clips").classList.remove("on");poll(true)};
-$("#btn-delete-all").onclick=async()=>{const count=tabClipNames.length;if(!count){toast("Nothing to delete in this tab","bad");return}if(!(await confirmBox("Delete all "+(clipTab==="posted"?"posted":"unposted")+" clips?","This permanently removes all "+count+" video(s) and their caption files from this tab.","Delete all")))return;try{const r=await api("/api/delete_all",{clip_tab:clipTab});selectedClips.clear();toast("Deleted "+r.deleted+" clip(s)","ok");order="";poll(true)}catch(e){toast(e.message,"bad")}};
-$("#btn-delete-selected").onclick=async()=>{
-  const names=[...selectedClips];if(!names.length){toast("Select at least one clip first","bad");return}
-  if(!(await confirmBox("Delete selected clips?","This permanently removes "+names.length+" video(s) and their caption files.","Delete")))return;
-  try{const r=await api("/api/delete_many",{names});selectedClips.clear();toast("Deleted "+r.deleted+" clip(s)","ok");poll(true)}catch(e){toast(e.message,"bad")}
-};
-$("#btn-publish-all").onclick=async()=>{if(!(await confirmBox("Publish all clips?","This submits every unposted clip in the clips tab to the connected Zernio accounts. This may publish many videos.","Publish all")))return;const accounts=Object.assign({},Z.accounts||{});if(!Object.keys(accounts).length){if(Z.instagram_id)accounts.instagram=Z.instagram_id;if(Z.youtube_id)accounts.youtube=Z.youtube_id}try{const r=await api("/api/publishing/publish",{all:true,account_ids:accounts});toast("Started uploading "+r.queued+" clip(s) to "+Object.keys(accounts).join(", "),"ok")}catch(e){toast(e.message,"bad")}};
-$("#btn-clips-newer").onclick=()=>{clipOffset=Math.max(0,clipOffset-CLIP_PAGE_SIZE);poll()};
-$("#btn-clips-older").onclick=()=>{clipOffset+=CLIP_PAGE_SIZE;poll()};
-function openClip(c){
-  const v=h("video",{src:"/clips/"+encodeURIComponent(c.name),controls:true,autoplay:true,loop:true,playsinline:true});
-  const close=()=>{v.pause();m.remove();document.removeEventListener("keydown",esc)};
-  const esc=e=>{if(e.key==="Escape")close()};
-  const m=h("div",{class:"overlay",onclick:e=>{if(e.target===m)close()}},
-    h("div",{class:"player"},v,
-      h("div",{class:"pside"},h("h4",{},"Caption & hashtags"),h("pre",{class:"pcap"},c.caption||"(none)"),
-        h("div",{class:"prow"},
-          h("button",{class:"btn ghost",onclick:()=>navigator.clipboard.writeText(c.caption||"").then(()=>toast("Caption copied","ok"),()=>toast("Couldn't copy","bad"))},ico("copy",15),"Copy caption"),
-          h("a",{class:"btn ghost",href:"/clips/"+encodeURIComponent(c.name),download:c.name},ico("download",15),"Download")),
-        h("button",{class:"btn ghost",onclick:close},"Close"))));
-  document.body.append(m);document.addEventListener("keydown",esc);
-}
-async function poll(){
-  if(busy)return;busy=true;
-  try{
-    const r=await fetch("/api/state?since="+lastLog+"&clip_offset="+clipOffset+"&clip_tab="+clipTab,{cache:"no-store"});const s=await r.json();
-    const namesResponse=await fetch("/api/clips/names?tab="+clipTab,{cache:"no-store"});const namesData=await namesResponse.json();tabClipNames=namesData.names||[];updateSelectedButton();
-    $("#btn-view-posted").textContent="Posted ("+(s.posted_total||0)+")";
-    fails=0;$("#offline").hidden=true;
-    if(!logPaused){lastLog=s.last_id;addLogs(s.logs)}updateRun(s);renderClips(s.clips,s.clip_total);
-  }catch(e){if(++fails>=3)$("#offline").hidden=false}
-  busy=false;
-}
-setInterval(poll,900);poll();
-refreshCreators();setInterval(refreshCreators,2500);
-</script>
-</body>
-</html>
-"""
 
 if __name__ == "__main__":
     main()

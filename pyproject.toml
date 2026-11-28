@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stream-clip-ai"
 version = "4.1.0"
-description = "Local-first Twitch, YouTube, and VOD clipper with Whisper transcription, optional AI highlights, captions, FFmpeg rendering, and Zernio publishing"
+description = "Local-first StreamSnip creator studio with FastAPI, React, pywebview, Whisper, FFmpeg and Zernio publishing"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
@@ -44,6 +44,10 @@ dependencies = [
 dev = [
   "pytest>=8",
 ]
+desktop = [
+  "pywebview>=6,<7",
+  "pyinstaller>=6.19,<7",
+]
 gpu = [
   "nvidia-cublas-cu12; platform_system == 'Windows'",
 ]
@@ -69,7 +73,7 @@ Download = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
 Security = "https://github.com/sifat-jaman-13/stream-clip-ai/security/policy"
 
 [tool.setuptools]
-py-modules = ["autoclip", "api_server", "ai_highlights", "post_metadata", "zernio_poster", "zernio_connections", "facecam_detect", "secret_store"]
+py-modules = ["autoclip", "api_server", "ai_highlights", "post_metadata", "zernio_poster", "zernio_connections", "facecam_detect", "secret_store", "desktop_shell"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

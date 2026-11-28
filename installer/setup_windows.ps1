@@ -4,7 +4,7 @@ param(
     [switch]$CheckOnly,
     [switch]$SkipLaunch,
     [switch]$NoPause,
-    [switch]$NativeDesktop,
+    [switch]$DesktopShell,
     [switch]$NonInteractive
 )
 
@@ -420,7 +420,7 @@ function Save-HuggingFaceSetupSettings($Settings, [string]$SettingsPath) {
 }
 
 function Request-HuggingFaceToken {
-    $settingsPath = if ($NativeDesktop) {
+    $settingsPath = if ($DesktopShell) {
         Join-Path $logRoot "Library\ai_settings.json"
     } else {
         Join-Path $source "ai_settings.json"
@@ -651,14 +651,14 @@ try {
             Write-Host "No NVIDIA CUDA GPU was detected; StreamSnip AI will use CPU inference." -ForegroundColor Yellow
         }
 
-        # Native engine uses STREAMSNIP_DATA_DIR=<Library>, so its active
+        # Desktop shell uses STREAMSNIP_DATA_DIR=<Library>, so its active
         # Whisper models must live in Library\models, not the packaged source tree.
-        $speechModelRoot = if ($NativeDesktop) {
+        $speechModelRoot = if ($DesktopShell) {
             Join-Path $logRoot "Library\models"
         } else {
             Join-Path $source "models"
         }
-        if ($NativeDesktop) {
+        if ($DesktopShell) {
             $legacyModelRoot = Join-Path $source "models"
             New-Item -ItemType Directory -Force -Path $speechModelRoot | Out-Null
             foreach ($modelName in @("distil-large-v3", "large-v3-turbo", "medium", "large-v3", "small", "base")) {
@@ -854,12 +854,12 @@ with tempfile.TemporaryDirectory(prefix="streamsnip-install-smoke-") as temp_dir
             Write-Host "New Python runtime verified; previous runtime backup removed." -ForegroundColor Green
         }
 
-        if ($NativeDesktop) {
-            # The native host reads this config to find the installed engine and
+        if ($DesktopShell) {
+            # The pywebview shell reads this config to find the installed engine and
             # user library. Write it only after Python, packages and all speech
             # models have passed setup verification.
             $dataRoot = Join-Path $logRoot "Library"
-            $nativeConfigPath = Join-Path $logRoot "native-engine.json"
+            $nativeConfigPath = Join-Path $logRoot "desktop-shell.json"
             $nativeConfigTemp = "$nativeConfigPath.$PID.tmp"
             New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
             $nativeConfig = [ordered]@{
@@ -872,7 +872,7 @@ with tempfile.TemporaryDirectory(prefix="streamsnip-install-smoke-") as temp_dir
             $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
             [System.IO.File]::WriteAllText($nativeConfigTemp, $nativeConfigJson, $utf8NoBom)
             Move-Item -LiteralPath $nativeConfigTemp -Destination $nativeConfigPath -Force
-            Write-Host "Native desktop engine configuration saved: $nativeConfigPath" -ForegroundColor Green
+            Write-Host "Desktop shell engine configuration saved: $nativeConfigPath" -ForegroundColor Green
             Write-Host "Clip library and application data: $dataRoot" -ForegroundColor Green
         }
 

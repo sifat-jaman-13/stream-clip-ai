@@ -104,7 +104,7 @@ class APIServerTests(unittest.TestCase):
 
     def test_real_streamsnip_handler_is_compatible_with_fastapi_adapter(self):
         app = create_app(
-            autoclip.Handler,
+            autoclip.AppRoutes,
             token=autoclip.TOKEN,
             quit_event=autoclip.QUIT,
             begin_window_lease=autoclip.begin_window_lease,
@@ -153,7 +153,7 @@ class APIServerTests(unittest.TestCase):
 
     def test_quit_response_is_returned_before_shutdown_is_scheduled(self):
         app = create_app(
-            autoclip.Handler,
+            autoclip.AppRoutes,
             token=autoclip.TOKEN,
             quit_event=autoclip.QUIT,
             begin_window_lease=autoclip.begin_window_lease,
@@ -189,7 +189,7 @@ class APIServerTests(unittest.TestCase):
 
     def test_window_closing_route_releases_the_specific_browser_window(self):
         app = create_app(
-            autoclip.Handler,
+            autoclip.AppRoutes,
             token=autoclip.TOKEN,
             quit_event=autoclip.QUIT,
             begin_window_lease=autoclip.begin_window_lease,
@@ -211,6 +211,24 @@ class APIServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), {"ok": True})
         close_lease.assert_called_once_with("window-close-route")
+
+    def test_shared_config_route_is_served_by_fastapi(self):
+        app = create_app(
+            autoclip.AppRoutes,
+            token=autoclip.TOKEN,
+            quit_event=autoclip.QUIT,
+            begin_window_lease=autoclip.begin_window_lease,
+            end_window_lease=autoclip.end_window_lease,
+            find_clip_path=autoclip.find_clip_path,
+            clip_regex=autoclip.CLIP_RE,
+            product_name=autoclip.PRODUCT_NAME,
+            version=autoclip.APP_VERSION,
+        )
+        status, _headers, body = asyncio.run(asgi_request(app, path="/api/config"))
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["settings"], autoclip.CORE.default_settings)
+        self.assertNotIn("gemini_api_key", payload["ai"])
 
     def test_health_endpoint_reports_running_api(self):
         app = self.create_app()

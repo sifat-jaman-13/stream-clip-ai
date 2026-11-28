@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#282c34" />
+    <meta name="theme-color" content="#0f0f0f" />
     <meta name="description" content="StreamSnip AI — a local creator studio for stream capture, clip review, and publishing handoff." />
     <title>StreamSnip AI · Creator Studio</title>
     <link rel="icon" type="image/svg+xml" href="/dashboard/favicon.svg" />
@@ -13,23 +13,20 @@
     <script>
     try {
       const savedTheme = localStorage.getItem("streamsnip.theme") || "";
-      const aliases = { midnight: "github", graphite: "github", dark: "studio-dark", light: "studio-light", studio: "studio-light", odyssey: "odysseus" };
+      const aliases = { midnight: "github", graphite: "github", dark: "studio-dark", light: "studio-light", studio: "studio-light", odyssey: "odysseus-dark", odysseus: "odysseus-dark", odysseas: "odysseus-paper" };
       const resolvedTheme = aliases[savedTheme] || savedTheme;
-      document.documentElement.dataset.theme = ["odysseus", "studio-light", "studio-dark", "github", "nord", "odysseas"].includes(resolvedTheme) ? resolvedTheme : "odysseus";
+      document.documentElement.dataset.theme = ["studio-dark", "studio-light", "odysseus-dark", "odysseus-paper", "github", "nord", "ocean", "forest", "solarized", "rose-graphite", "ember", "slate"].includes(resolvedTheme) ? resolvedTheme : "studio-dark";
       const fontFamilies = {
-        "google-sans": '"Google Sans Flex", "Google Sans", "Segoe UI", Arial, sans-serif',
-        inter: '"Inter", Arial, sans-serif', roboto: '"Roboto", Arial, sans-serif',
-        "open-sans": '"Open Sans", Arial, sans-serif', montserrat: '"Montserrat", Arial, sans-serif',
-        poppins: '"Poppins", Arial, sans-serif', lato: '"Lato", Arial, sans-serif',
-        "nunito-sans": '"Nunito Sans", Arial, sans-serif', "dm-sans": '"DM Sans", Arial, sans-serif',
-        "ibm-plex-sans": '"IBM Plex Sans", Arial, sans-serif', "space-grotesk": '"Space Grotesk", Arial, sans-serif',
-        "fira-code": '"Fira Code", Consolas, monospace', "jetbrains-mono": '"JetBrains Mono", Consolas, monospace'
+        "jetbrains-mono": '"JetBrains Mono", Consolas, monospace',
+        manrope: 'Manrope, "Segoe UI", sans-serif',
+        inter: 'Inter, "Segoe UI", sans-serif'
       };
+      const validFontIds = ["jetbrains-mono", "manrope", "inter", "segoe-ui", "aptos", "arial", "tahoma", "verdana", "trebuchet-ms", "consolas", "georgia", "times-new-roman"];
       const savedFont = localStorage.getItem("streamsnip.font");
-      const defaultFont = !savedFont || savedFont === "google-sans" ? "jetbrains-mono" : savedFont;
+      const defaultFont = savedFont && validFontIds.includes(savedFont) ? savedFont : "jetbrains-mono";
       if (defaultFont !== savedFont) localStorage.setItem("streamsnip.font", defaultFont);
       document.documentElement.style.setProperty("--font-family", fontFamilies[defaultFont] || fontFamilies["jetbrains-mono"]);
-    } catch { document.documentElement.dataset.theme = "odysseus"; }
+    } catch { document.documentElement.dataset.theme = "studio-dark"; }
     </script>
   </head>
   <body>

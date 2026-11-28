@@ -21,8 +21,7 @@ def test_zernio_connections_module_is_in_all_windows_and_python_packages():
 
     root = Path(__file__).resolve().parents[1]
     assert '"zernio_connections"' in (root / "pyproject.toml").read_text(encoding="utf-8")
-    assert "zernio_connections" in (root / "AutoClip.spec").read_text(encoding="utf-8")
-    native_installer = (root / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
+    native_installer = (root / "installer" / "StreamSnipAI.iss").read_text(encoding="utf-8")
     assert "zernio_connections.py" in native_installer
     assert "zernio_connections.py" in (root / "installer" / "setup_windows.ps1").read_text(encoding="utf-8")
 
@@ -120,7 +119,10 @@ def test_one_clip_reaches_only_explicitly_selected_accounts_across_connections(m
         def publish_one(self, path, schedule_minutes=None, accounts=None, caption_override=None):
             platform, account_id = next(iter(accounts.items()))
             calls.append((Path(path), self.api_key, platform, account_id))
-            return {"failed_platforms": []}
+            return {
+                "failed_platforms": [],
+                "successful_destinations": [f"{platform}:{account_id}"],
+            }
 
     from pathlib import Path
 
@@ -173,7 +175,10 @@ def test_five_connections_preserve_explicit_order_deduplicate_and_share_clip_met
         def publish_one(self, path, schedule_minutes=None, accounts=None, caption_override=None):
             platform, account_id = next(iter(accounts.items()))
             calls.append((Path(path), self.api_key, schedule_minutes, platform, account_id, caption_override))
-            return {"failed_platforms": []}
+            return {
+                "failed_platforms": [],
+                "successful_destinations": [f"{platform}:{account_id}"],
+            }
 
     from pathlib import Path
 
@@ -253,7 +258,10 @@ def test_failed_destination_does_not_stop_other_selected_accounts(monkeypatch, t
             calls.append((self.api_key, platform, account_id))
             if account_id == "fails":
                 raise RuntimeError("destination rejected the post")
-            return {"failed_platforms": []}
+            return {
+                "failed_platforms": [],
+                "successful_destinations": [f"{platform}:{account_id}"],
+            }
 
     monkeypatch.setattr(zc, "ZernioPublisher", FakePublisher)
     publisher = zc.ZernioMultiPublisher(lambda _message: None, [{
@@ -272,6 +280,37 @@ def test_failed_destination_does_not_stop_other_selected_accounts(monkeypatch, t
     ]
     assert result["succeeded"] == ["workspace-1:first", "workspace-1:last"]
     assert [item["ref"] for item in result["failed"]] == ["workspace-1:fails"]
+
+def test_multi_publisher_requires_explicit_destination_acceptance(monkeypatch, tmp_path):
+    callbacks = []
+
+    class FakePublisher:
+        def __init__(self, log, config, on_success=None):
+            pass
+
+        def publish_one(self, path, schedule_minutes=None, accounts=None, caption_override=None):
+            return {"failed_platforms": [], "delivery_records": []}
+
+    monkeypatch.setattr(zc, "ZernioPublisher", FakePublisher)
+    publisher = zc.ZernioMultiPublisher(
+        lambda _message: None,
+        [{
+            "id": "connection-1",
+            "api_key": "test-key",
+            "accounts": [account("yt-1", "youtube")],
+        }],
+        on_success=lambda *args: callbacks.append(("posted", args)),
+        on_scheduled=lambda *args: callbacks.append(("scheduled", args)),
+    )
+    video = tmp_path / "unconfirmed.mp4"
+    video.write_bytes(b"video")
+
+    import pytest
+    with pytest.raises(RuntimeError, match="did not confirm"):
+        publisher.publish_one(video, schedule_minutes=5)
+
+    assert callbacks == []
+
 
 def test_multi_publisher_records_zernio_scheduling_separately(monkeypatch, tmp_path):
     scheduled = []
@@ -349,6 +388,10 @@ def test_one_account_rate_limit_does_not_stop_other_accounts(monkeypatch, tmp_pa
                     },
                     headers={"Retry-After": "86400"},
                 )
+            return {
+                "failed_platforms": [],
+                "successful_destinations": [f"{platform}:{account_id}"],
+            }
 
     monkeypatch.setattr(zc, "ZernioPublisher", FakePublisher)
     publisher = zc.ZernioMultiPublisher(

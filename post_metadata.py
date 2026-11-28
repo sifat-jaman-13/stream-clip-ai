@@ -305,6 +305,11 @@ def _validate_description_structure(description):
     match = re.match(r'^\s*[“"](.+?)[”"]', text, flags=re.S)
     if match:
         parts = text.split("\n\n", 1)
+        quote_word_count = len(match.group(1).split())
+        if quote_word_count > 15:
+            raise AIProviderError(
+                "The opening quote is a transcript dump; use one short verbatim line of at most 15 words."
+            )
         follow_up = parts[1].strip() if len(parts) == 2 else ""
         word_count = len(follow_up.split())
         if word_count < 10 or word_count > 25:
@@ -354,6 +359,11 @@ def _validate_transcript_grounding(title, description, transcript):
         )
 
     title_tokens = _grounding_tokens(title)
+    title_word_count = len(str(title or "").split())
+    if title_word_count > 12:
+        raise AIProviderError(
+            "The title is a transcript dump; write one short headline, not a list of speech fragments."
+        )
     if len(title_tokens.intersection(source_tokens)) < 2:
         raise AIProviderError(
             "The title does not contain at least two concrete details supported by this clip's transcript."
@@ -688,11 +698,16 @@ def build_transcript_fallback(transcript, creator_credit=""):
         selected_line,
         flags=re.I,
     ))
+    # Long ASR fragments are not reliable headlines. If a candidate is longer
+    # than a short spoken hook, keep the clip in review instead of publishing a
+    # transcript dump as its title.
     title_confident = bool(
         selected_line
+        and len(selected_line.split()) <= 12
         and (len(set(selected_words)) >= 3 or short_complete_reaction)
         and not re.search(r"\b(?:more than|less than)\s+thanks\b", selected_line, flags=re.I)
         and not any(term in selected_line.lower() for term in ("leave a like", "subscribe", "today's episode"))
+        and "****" not in selected_line
     )
 
     if title_confident:
@@ -703,22 +718,21 @@ def build_transcript_fallback(transcript, creator_credit=""):
         }[match.group(1)], title)
         if len(title) > 95:
             title = title[:92].rsplit(" ", 1)[0].rstrip(" .,:;!?-") + "..."
-    elif topics:
-        title = _fallback_title_case("A Conversation About " + topics[0])
     else:
         title = "A Stream Moment Needs Review"
 
-    if len(topics) >= 2:
+    if title_confident and len(topics) >= 2:
         description_context = f"The exchange also brings up {topics[0]} and {topics[1]}."
-    elif topics:
+    elif title_confident and topics:
         description_context = (
             f"The transcript mentions {topics[0]}, but the surrounding wording is unclear. "
             "Review the clip for the full context."
         )
     else:
+        # Never expose a low-confidence ASR dump as public description text.
         description_context = (
-            "The available transcript does not provide enough clear context. "
-            "Review the clip before posting."
+            "The speech transcript is too fragmented to identify this moment reliably. "
+            "Review the video and edit this description before publishing."
         )
 
     if title_confident:

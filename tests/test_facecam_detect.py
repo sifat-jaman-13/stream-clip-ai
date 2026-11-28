@@ -79,48 +79,20 @@ class FacecamDetectionTests(unittest.TestCase):
 
 
 
-    def test_any_physical_gpu_requires_the_gpu_helper_instead_of_using_opencv_cpu(self):
-        frames = [facecam_detect.np.zeros((facecam_detect.BH, facecam_detect.BW, 3), dtype=facecam_detect.np.uint8)]
-        with patch.object(facecam_detect, "_gpu_helper_path", return_value=None), \
-             patch.object(facecam_detect, "_physical_gpu_present", return_value=True):
-            with self.assertRaisesRegex(RuntimeError, "CPU fallback is disabled"):
-                facecam_detect._run_face_inference_batch(frames)
-
-    def test_cpu_detector_is_selected_only_when_no_physical_gpu_exists(self):
-        frames = [facecam_detect.np.zeros((facecam_detect.BH, facecam_detect.BW, 3), dtype=facecam_detect.np.uint8)]
-        with patch.object(facecam_detect, "_gpu_helper_path", return_value=None), \
-             patch.object(facecam_detect, "_physical_gpu_present", return_value=False):
-            self.assertIsNone(facecam_detect._run_face_inference_batch(frames))
-
-    def test_windows_gpu_probe_matches_single_backslash_pci_device_ids(self):
-        with patch.object(facecam_detect.shutil, "which", return_value="powershell.exe"), \
-             patch.object(facecam_detect.subprocess, "run",
-                          return_value=subprocess.CompletedProcess([], 0, stdout="true", stderr="")) as run:
-            facecam_detect._physical_gpu_cache = None
-            try:
-                self.assertTrue(facecam_detect._physical_gpu_present())
-            finally:
-                facecam_detect._physical_gpu_cache = None
-        command = run.call_args.args[0][-1]
-        self.assertIn(r"PCI\VEN_*", command)
-        self.assertNotIn(r"PCI\\VEN_*", command)
-
-    def test_face_detection_uses_one_gpu_helper_batch_and_reports_its_device(self):
+    def test_facecam_detection_uses_opencv_yunet_without_a_compiled_sidecar(self):
         frames = [
             facecam_detect.np.zeros((facecam_detect.BH, facecam_detect.BW, 3), dtype=facecam_detect.np.uint8),
             facecam_detect.np.zeros((facecam_detect.BH, facecam_detect.BW, 3), dtype=facecam_detect.np.uint8),
         ]
-        payload = {"device": "GPU (DirectML)", "faces": [[], [[12, 20, 50, 60, 0.93]]]}
-        helper = Path("FacecamInference.exe")
-        with patch.object(facecam_detect, "_gpu_helper_path", return_value=helper), \
-             patch.object(facecam_detect.subprocess, "run",
-                          return_value=subprocess.CompletedProcess([], 0, stdout=__import__("json").dumps(payload), stderr="")) as run:
-            result = facecam_detect._run_face_inference_batch(frames)
-        self.assertEqual(result["device"], "GPU (DirectML)")
-        self.assertEqual(len(result["faces"]), 2)
-        self.assertEqual(result["faces"][1][0][4], 0.93)
-        run.assert_called_once()
-        self.assertIn("--manifest", run.call_args.args[0])
+        with (
+            patch.object(facecam_detect, "candidates", return_value=([], 0.0)),
+            patch.object(facecam_detect, "borderless_face", return_value=None),
+        ):
+            result = facecam_detect.detect_from_frames(frames)
+        self.assertFalse(result["found"])
+        self.assertEqual(result["inference_device"], "CPU (OpenCV YuNet)")
+        self.assertNotIn("DirectML", str(result))
+
 
 if __name__ == "__main__":
     unittest.main()

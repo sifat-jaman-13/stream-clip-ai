@@ -1,4 +1,4 @@
-﻿# StreamSnip AI User Guide
+# StreamSnip AI User Guide
 
 This guide covers installation, first capture, creator monitoring, clip review, publishing, settings, storage, and troubleshooting.
 
@@ -6,13 +6,13 @@ This guide covers installation, first capture, creator monitoring, clip review, 
 
 StreamSnip AI is a **native Windows creator studio** for turning supported Twitch and YouTube live streams, recorded VODs, and local videos into short-form clips. It connects capture, creator monitoring, local transcription, AI-assisted highlight selection, facecam-aware framing, animated captions, clip review, post metadata, and controlled publishing.
 
-The installed desktop app is **WinUI 3**. A supervised local Python engine performs media work with Streamlink, FFmpeg, Faster-Whisper, OpenCV/YuNet, and the AI provider you configure. The React/Vite dashboard in `dashboard/` is a separate browser-oriented frontend; it is not the installed WinUI shell.
+The installed desktop app uses FastAPI + React/TypeScript + pywebview. FastAPI is the single local backend, React/Vite is the single application interface, and pywebview hosts that same React build in a Windows window using WebView2. Media work stays in Python with Streamlink, FFmpeg, Faster-Whisper, OpenCV/YuNet, and the AI provider you configure.
 
 **Important:** opening Live Studio does not start recording. You choose a source, configure the session, and press **Start capture** yourself. StreamSnip does not automatically publish clips.
 
 ## Screenshots
 
-Screenshots below are from the **4.0.10 native Windows Release build**.
+Screenshots below show the React Creator Studio interface.
 
 <p align="center">
   <img src="assets/product/dashboard.png" width="100%" alt="StreamSnip AI 4.0.10 Dashboard in Studio Dark with the session rundown, local engine status, recent clips and creator monitors">
@@ -58,11 +58,11 @@ You do **not** need to install Python or FFmpeg globally before using the packag
 ### Download and verify
 
 1. Open [the latest GitHub release](https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest).
-2. Download `StreamSnipAI-Native-Setup.exe` and its matching `.sha256` file into the same folder.
+2. Download `StreamSnipAI-Setup.exe` and its matching `.sha256` file into the same folder.
 3. Open PowerShell in that folder and run:
 
 ```powershell
-$installer = '.\StreamSnipAI-Native-Setup.exe'
+$installer = '.\StreamSnipAI-Setup.exe'
 $checksum = "$installer.sha256"
 $expected = ((Get-Content -LiteralPath $checksum -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
 $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -382,11 +382,11 @@ npm run lint
 npm run build
 cd ..
 
-.\build_native_installer.ps1
+.\build_installer.ps1
 python -m pytest -q
 ```
 
-The build script creates the dashboard bundle, publishes the self-contained `win-x64` WinUI 3 app, compiles the Inno Setup installer, and writes the installer plus SHA-256 sidecar under `dist\installer\`.
+The build script runs React lint and Vite production build, packages the pywebview shell with PyInstaller, compiles the Inno Setup installer, and writes StreamSnipAI-Setup.exe plus its SHA-256 sidecar under dist\installer\.
 
 For contribution rules and project design constraints, read [CONTRIBUTING.md](../CONTRIBUTING.md), [PRODUCT.md](../PRODUCT.md), and [DESIGN.md](../DESIGN.md).
 

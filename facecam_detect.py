@@ -240,147 +240,6 @@ class Faces:
         return [] if out is None else [(float(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[14])) for r in out]
 
 
-def _gpu_helper_path():
-    """Find the packaged DirectML YuNet helper in an install or a developer build."""
-    root = Path(__file__).resolve().parent
-    candidates = [
-        root / "facecam-inference" / "FacecamInference.exe",
-        root / "tools" / "FacecamInference" / "bin" / "Release" /
-        "net10.0-windows10.0.17763.0" / "win-x64" / "FacecamInference.exe",
-        root / "dist" / "FacecamInference" / "FacecamInference.exe",
-        root.parent / "facecam-inference" / "FacecamInference.exe",
-    ]
-    return next((candidate for candidate in candidates if candidate.is_file()), None)
-
-
-def _nvidia_gpu_present():
-    """Use the engine's shared NVIDIA hardware probe when it is available."""
-    app = sys.modules.get("autoclip")
-    probe = getattr(app, "nvidia_gpu_present", None)
-    if callable(probe):
-        return bool(probe())
-    executable = shutil.which("nvidia-smi")
-    if not executable:
-        return False
-    try:
-        result = subprocess.run(
-            [executable, "-L"], capture_output=True, text=True, timeout=6,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        return result.returncode == 0 and "GPU " in (result.stdout or "")
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-_physical_gpu_cache = None
-
-
-def _physical_gpu_present():
-    """Detect any physical PCI graphics adapter so CPU is never chosen on a GPU PC."""
-    global _physical_gpu_cache
-    if _physical_gpu_cache is not None:
-        return _physical_gpu_cache
-    if os.name != "nt":
-        _physical_gpu_cache = _nvidia_gpu_present()
-        return _physical_gpu_cache
-
-    powershell = shutil.which("powershell.exe")
-    if not powershell:
-        system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-        candidate = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-        powershell = str(candidate) if candidate.is_file() else None
-    if not powershell:
-        raise RuntimeError(
-            "Could not check for a physical GPU on this Windows PC. CPU fallback is disabled."
-        )
-
-    query = (
-        "$ErrorActionPreference='Stop'; "
-        "$gpus = @(Get-CimInstance -ClassName Win32_VideoController | "
-        "Where-Object { $_.PNPDeviceID -like 'PCI\\VEN_*' -and "
-        "$_.Name -notmatch 'Microsoft Basic Display|Microsoft Remote Display|Parsec Virtual' }); "
-        "if ($gpus.Count -gt 0) { 'true' } else { 'false' }"
-    )
-    try:
-        result = subprocess.run(
-            [powershell, "-NoProfile", "-NonInteractive", "-Command", query],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(
-            "Could not determine whether a physical GPU is installed. CPU fallback is disabled."
-        ) from exc
-    answer = (result.stdout or "").strip().lower()
-    if result.returncode != 0 or answer not in {"true", "false"}:
-        detail = (result.stderr or result.stdout or "Windows GPU query failed").strip()
-        raise RuntimeError(
-            "Could not determine whether a physical GPU is installed. CPU fallback is disabled. "
-            + detail[-500:]
-        )
-    _physical_gpu_cache = answer == "true"
-    return _physical_gpu_cache
-
-
-def _run_face_inference_batch(images):
-    """Run all YuNet inputs in one helper session; GPU failure never falls back to CPU."""
-    helper = _gpu_helper_path()
-    if helper is None:
-        if _physical_gpu_present():
-            raise RuntimeError(
-                "A physical GPU is installed, but the DirectML facecam inference helper is missing. "
-                "CPU fallback is disabled. Repair or update the StreamSnip AI installation."
-            )
-        return None
-
-    if not MODEL.is_file():
-        raise FileNotFoundError(f"Face model missing: {MODEL}")
-    if not images:
-        return {"device": "GPU helper · no frames", "faces": []}
-
-    with tempfile.TemporaryDirectory(prefix="streamsnip-facecam-gpu-") as folder:
-        manifest_paths = []
-        for index, image in enumerate(images):
-            if image is None or image.size == 0:
-                raise ValueError("A facecam inference frame is empty.")
-            output = Path(folder) / f"frame-{index:04d}.png"
-            if not cv2.imwrite(str(output), image):
-                raise RuntimeError("Could not prepare a frame for GPU facecam inference.")
-            manifest_paths.append(str(output))
-        manifest = Path(folder) / "frames.json"
-        manifest.write_text(json.dumps(manifest_paths), encoding="utf-8")
-        try:
-            completed = subprocess.run(
-                [str(helper), "--model", str(MODEL), "--manifest", str(manifest)],
-                capture_output=True, text=True, timeout=max(90, len(images) * 2),
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("GPU facecam inference timed out; CPU fallback is disabled.") from exc
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "DirectML inference failed").strip()
-            raise RuntimeError("GPU facecam inference failed; CPU fallback is disabled. " + detail[-900:])
-        try:
-            payload = json.loads(completed.stdout)
-        except (TypeError, ValueError) as exc:
-            raise RuntimeError("The GPU facecam helper returned invalid results.") from exc
-        faces = payload.get("faces")
-        if not isinstance(faces, list) or len(faces) != len(images):
-            raise RuntimeError("The GPU facecam helper returned an incomplete frame batch.")
-        normalized = []
-        for frame_faces in faces:
-            if not isinstance(frame_faces, list):
-                raise RuntimeError("The GPU facecam helper returned an invalid detection list.")
-            normalized.append([
-                tuple(float(value) for value in face[:5])
-                for face in frame_faces
-                if isinstance(face, list) and len(face) >= 5
-            ])
-        return {"device": str(payload.get("device") or "GPU (DirectML)"), "faces": normalized}
-
-
 MIN_LIVE = 0.35      # a channel logo, drawn avatar or still picture does not change between frames; a real webcam always does a little
 
 
@@ -493,81 +352,73 @@ def _build_gpu_facecam_batch(frames, cands):
 
 
 def detect_from_frames(frames):
+    """Detect facecam regions using the existing OpenCV YuNet model."""
     gray = _gray_small(frames)
     cands, game_motion = candidates(gray)
-    gpu_batch = _build_gpu_facecam_batch(frames, cands)
+    faces = Faces()
     scored = []
-    inference_device = "CPU (OpenCV)"
+    for candidate in cands:
+        if not is_live(candidate['calm']):
+            continue
+        rate = face_rate(frames, candidate, faces)
+        candidate['faces'] = rate
+        area = candidate['w'] * candidate['h'] / float(W * H)
+        score = (
+            rate * .6 + candidate['border'] * .3
+            + min(candidate['contrast'] / 40.0, 1) * .1
+            + min(area / .12, 1) * .12
+        )
+        if rate >= .35 and 0.015 <= area <= 0.32:
+            scored.append((score, candidate))
 
-    if gpu_batch is None:
-        # No supported NVIDIA GPU: keep the original OpenCV CPU detector.
-        faces = Faces()
-        for c in cands:
-            if not is_live(c['calm']):
-                continue
-            rate = face_rate(frames, c, faces)
-            c['faces'] = rate
-            area = c['w'] * c['h'] / float(W * H)
-            score = rate * .6 + c['border'] * .3 + min(c['contrast'] / 40.0, 1) * .1 + min(area / .12, 1) * .12
-            if rate >= .35 and 0.015 <= area <= 0.32:
-                scored.append((score, c))
-        bf = borderless_face(frames, faces)
-    else:
-        batch, candidate_indices, candidate_sizes, full_indices = gpu_batch
-        inference_device = batch["device"]
-        detections = batch["faces"]
-        for candidate_index, c in enumerate(cands):
-            if not is_live(c['calm']):
-                continue
-            hits = 0
-            for frame_index in range(len(frames)):
-                index = candidate_indices.get((candidate_index, frame_index))
-                if index is None:
-                    continue
-                crop_width, crop_height = candidate_sizes[(candidate_index, frame_index)]
-                min_width, min_height = .16 * crop_width, .16 * crop_height
-                if any(face[2] >= min_width and face[3] >= min_height
-                       for face in detections[index]):
-                    hits += 1
-            rate = hits / float(len(frames))
-            c['faces'] = rate
-            area = c['w'] * c['h'] / float(W * H)
-            score = rate * .6 + c['border'] * .3 + min(c['contrast'] / 40.0, 1) * .1 + min(area / .12, 1) * .12
-            if rate >= .35 and 0.015 <= area <= 0.32:
-                scored.append((score, c))
-        full_detections = [detections[index] for index in full_indices]
-        bf = _borderless_face_from_detections(full_detections)
-
+    borderless = borderless_face(frames, faces)
+    inference_device = "CPU (OpenCV YuNet)"
     if scored:
-        score, c = max(scored, key=lambda t: t[0])
-        for _, o in sorted(scored, key=lambda t: -t[1]['w'] * t[1]['h']):
-            area_o = o['w'] * o['h'] / float(W * H)
-            inside = (o['x0'] <= c['x0'] + 2 and o['y0'] <= c['y0'] + 2 and
-                      o['x0'] + o['w'] >= c['x0'] + c['w'] - 2 and
-                      o['y0'] + o['h'] >= c['y0'] + c['h'] - 2)
-            if o is not c and inside and area_o <= .28 and o['border'] >= max(.6, c['border'] - .35) and o['faces'] >= .85 * c['faces'] and o['w'] * o['h'] <= 6 * c['w'] * c['h']:
-                c = o
+        score, candidate = max(scored, key=lambda item: item[0])
+        for _, other in sorted(scored, key=lambda item: -item[1]['w'] * item[1]['h']):
+            area = other['w'] * other['h'] / float(W * H)
+            inside = (
+                other['x0'] <= candidate['x0'] + 2
+                and other['y0'] <= candidate['y0'] + 2
+                and other['x0'] + other['w'] >= candidate['x0'] + candidate['w'] - 2
+                and other['y0'] + other['h'] >= candidate['y0'] + candidate['h'] - 2
+            )
+            if (
+                other is not candidate and inside and area <= .28
+                and other['border'] >= max(.6, candidate['border'] - .35)
+                and other['faces'] >= .85 * candidate['faces']
+                and other['w'] * other['h'] <= 6 * candidate['w'] * candidate['h']
+            ):
+                candidate = other
                 break
         return {
-            'found': True, 'method': 'border+face', 'confidence': round(min(1.0, score), 2),
-            'corner': c['corner'], 'inference_device': inference_device,
-            'cam': {'x': round(c['x0'] / W, 4), 'y': round(c['y0'] / H, 4),
-                    'w': round(c['w'] / W, 4), 'h': round(c['h'] / H, 4)},
-            'face_rate': round(c['faces'], 2), 'border': round(c['border'], 2),
-            'calm': round(c['calm'], 1), 'game_motion': round(game_motion, 1)
+            'found': True, 'method': 'border+face',
+            'confidence': round(min(1.0, score), 2),
+            'corner': candidate['corner'], 'inference_device': inference_device,
+            'cam': {
+                'x': round(candidate['x0'] / W, 4),
+                'y': round(candidate['y0'] / H, 4),
+                'w': round(candidate['w'] / W, 4),
+                'h': round(candidate['h'] / H, 4),
+            },
+            'face_rate': round(candidate['faces'], 2),
+            'border': round(candidate['border'], 2),
+            'calm': round(candidate['calm'], 1),
+            'game_motion': round(game_motion, 1),
         }
-    if bf:
-        rate, (x, y, w, h) = bf
+    if borderless:
+        rate, (x, y, width, height) = borderless
         return {
-            'found': True, 'method': 'face-only', 'confidence': round(min(.85, rate * .8), 2),
+            'found': True, 'method': 'face-only',
+            'confidence': round(min(.85, rate * .8), 2),
             'inference_device': inference_device,
-            'cam': {'x': round(x, 4), 'y': round(y, 4), 'w': round(w, 4), 'h': round(h, 4)},
-            'face_rate': round(rate, 2), 'game_motion': round(game_motion, 1)
+            'cam': {'x': round(x, 4), 'y': round(y, 4), 'w': round(width, 4), 'h': round(height, 4)},
+            'face_rate': round(rate, 2), 'game_motion': round(game_motion, 1),
         }
     return {
         'found': False, 'confidence': 0.0, 'inference_device': inference_device,
         'game_motion': round(game_motion, 1),
-        'reason': 'no rectangle with a steady border holds a face, and no face sits in the same corner spot in most frames'
+        'reason': 'no rectangle with a steady border holds a face, and no face sits in the same corner spot in most frames',
     }
 
 

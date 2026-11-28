@@ -124,7 +124,12 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
         visibility: workspace.publishing.visibility || "public",
       });
       setDraftOverrides({});
-      showToast("success", "Zernio connections saved", "New or replaced keys were verified. Existing connections and account selections were kept.");
+      try {
+        const discovered = await workspace.fetchAccounts();
+        showToast("success", "Zernio keys saved", String(discovered.length) + " supported account(s) discovered. Existing account selections were kept.");
+      } catch (error) {
+        showToast("info", "Zernio keys saved", "Account discovery could not complete. Use Refresh all accounts to retry. " + (error instanceof Error ? error.message : ""));
+      }
     } catch (error) {
       showToast("error", "Could not save Zernio connections", error instanceof Error ? error.message : "Check the API keys and try again.");
     } finally { setSaving(false); }
@@ -178,19 +183,25 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
     }
   };
 
+  const lastConfiguredIndex = drafts.reduce(
+    (last, draft, index) => draft.saved || draft.apiKey.trim() ? index : last,
+    -1,
+  );
+  const visibleDrafts = drafts.slice(0, Math.min(5, lastConfiguredIndex + 2));
+
   return (
     <section className="zernio-multi panel">
       <div className="panel-heading">
         <div>
-          <h2>Five Zernio connections</h2>
-          <p>Each slot works the same way: save its API key, discover its connected accounts, then choose which destinations can receive clips.</p>
+          <h2>Zernio connections</h2>
+          <p>Save each API key, discover its connected social accounts, then choose which destinations can receive clips. Add connections only as you need them.</p>
         </div>
         <div className="zernio-connection-actions">
           <button className="button button-secondary button-small" type="button" onClick={() => void refreshAccounts()} disabled={refreshing || !remoteConnections.length}>
             <RefreshCw size={14} className={refreshing ? "zernio-spin" : ""} />{refreshing ? "Discovering…" : "Refresh all accounts"}
           </button>
           <button className="button button-primary button-small" type="button" onClick={() => void saveConnections()} disabled={saving}>
-            <ShieldCheck size={14} />{saving ? "Verifying…" : "Save & discover"}
+            <ShieldCheck size={14} />{saving ? "Saving…" : "Save keys & discover"}
           </button>
         </div>
       </div>
@@ -207,7 +218,8 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
       </div>
 
       <div className="zernio-connection-grid">
-        {drafts.map((draft, index) => {
+        {visibleDrafts.map((draft) => {
+          const index = draft.slotNumber - 1;
           const accounts = accountGroups.get(draft.id) || [];
           const savedConnection = remoteConnections.find((item) => item.id === draft.id);
           const isSaved = Boolean(draft.saved && savedConnection?.api_key_set);
@@ -301,7 +313,7 @@ export default function MultiZernioConnections({ workspace }: { workspace: Works
               ) : isSaved ? (
                 <div className="zernio-empty-accounts">No supported Facebook, Instagram or YouTube accounts returned for this API key. Refresh to check again.</div>
               ) : (
-                <div className="zernio-empty-accounts">Paste a key, then choose Save & discover to identify this key's accounts.</div>
+                <div className="zernio-empty-accounts">Add an API key, then choose Save keys & discover to find this connection's accounts.</div>
               )}
             </div>
           );

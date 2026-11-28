@@ -9,8 +9,8 @@ The Python application remains responsible for capture, creator monitoring, tran
 - **Dashboard** - engine status, current session, recent clips, and creator activity.
 - **Live Studio** - choose a Twitch/YouTube live source or a local video/VOD. Configure Capture, AI provider, Transcription, and Captions before starting.
 - **Creators** - manage independent live monitors and recorded-VOD folder watchers.
-- **Clip library** - search, preview, inspect, edit metadata, and prepare clips.
-- **Published** - review clips recorded in the local Posted registry.
+- **Clip library** - browse a responsive portrait-first card grid, hover for a muted preview, open the large player with caption and metadata, edit post copy, and use per-clip or bulk review actions.
+- **Scheduled** - review provider-confirmed scheduled posts and completed publishing history.
 - **Hype words** - edit the phrase list used by local highlight scoring.
 - **Publishing** - configure Zernio accounts or prepare a manual upload in the system browser.
 - **Settings** - manage application-wide storage and appearance. Session-specific processing settings belong in Live Studio.

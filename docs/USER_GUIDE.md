@@ -35,7 +35,7 @@ Screenshots below show the React Creator Studio interface.
     <tr>
       <td width="50%">
         <p align="center"><strong>Clip Library</strong></p>
-        <img src="assets/product/clip-library.png" width="100%" alt="StreamSnip AI Clip Library in Studio Dark with Ready to review and Scheduled tabs">
+        <img src="assets/product/clip-library.png" width="100%" alt="StreamSnip AI Clip Library in Studio Dark with portrait-first clip cards, inline video preview, selection, and quick actions">
       </td>
       <td width="50%">
         <p align="center"><strong>Publisher</strong></p>
@@ -206,7 +206,9 @@ Creator monitoring, VOD folder watching, and Live Studio capture are separate co
 
 ## Clip Library and Scheduled
 
-**Clip Library** is for generated clips that are ready for review. Use the filters and clip inspector to preview a video and correct its title and description. Every ready clip has a **Post** action that submits it through Zernio immediately.
+**Clip Library** is for generated clips that are ready for review. It uses a responsive, portrait-first card grid rather than the older compact row list. Each card shows the video preview, title, creator/source, date, file size, and available status. On desktop, hover a card to play a muted preview; select the play control or card preview to open the larger player and its post-copy and metadata panel.
+
+Use each card's actions to copy the title and description, download the MP4, reveal the file in its folder, edit the title or description, or delete that clip. **Post** submits the selected clip through Zernio immediately; **Schedule** opens the scheduling flow. Select multiple cards to use the bulk actions. The large preview also provides the video, post copy, download, and metadata-edit controls.
 
 **Scheduled** is the combined publishing-history view. Clips accepted by Zernio for future publishing appear with a **Scheduled** status; clips that have already been published appear with a **Posted** status. A clip leaves Clip Library only after Zernio confirms at least one destination. Failed requests are not marked as scheduled or posted.
 
@@ -236,7 +238,7 @@ StreamSnip AI records a destination as scheduled or published only after Zernio 
 | Dashboard | Session state, processing rundown, recent clips, creator activity, and engine events |
 | Live Studio | Source, capture, AI provider, transcription, and caption setup |
 | Creators | Independent channel monitors and recorded-VOD folder watching |
-| Clip Library | Find, preview, and review rendered clips and metadata |
+| Clip Library | Portrait-first cards, inline and expanded previews, metadata editing, quick actions, and bulk review |
 | Scheduled | Zernio-confirmed scheduled posts and completed publishing history |
 | Hype words | Manage local highlight phrases used by the Hook Words scoring option |
 | Publisher | Five Zernio API-key slots, account discovery, and destination controls |

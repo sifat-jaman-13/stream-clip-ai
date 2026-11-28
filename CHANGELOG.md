@@ -1,10 +1,20 @@
 ## [4.1.0] - 2026-11-28
 
 ### Added
+- Restore the responsive, portrait-first Clip Library card experience from the stronger 2.x web interface.
+- Add muted hover previews, prominent play controls, an expanded video-preview and metadata modal, and per-clip copy, download, reveal-folder, edit, delete, Post, and Schedule actions.
+- Retain page selection, bulk review/deletion, pagination, and the existing Zernio publishing and scheduling workflow.
 - Add confirmed, per-connection Zernio disconnect actions that clear only the chosen connection.
 
 ### Fixed
+- Deleting one clip card now clears stale bulk selection before opening its confirmation, preventing an unintended multi-clip delete.
 - Preserve explicit selected-account order while publishing the same clip to selected destinations across Zernio connections.
+- Update the README, frontend guide, and user guide to describe the current card-based Clip Library and Scheduled workspace.
+
+### Verification
+- Python regression suite: 353 tests and 17 subtests passed.
+- Dashboard lint and production build passed; Windows x64 installer build passed.
+- GitHub Tests, CodeQL (Python and JavaScript/TypeScript), and Windows installer workflows passed for the release commit.
 
 ## [4.0.16] - 2026-11-28
 

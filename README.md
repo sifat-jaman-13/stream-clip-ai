@@ -50,7 +50,7 @@ Screenshots below show the React Creator Studio interface.
     <tr>
       <td width="50%">
         <p align="center"><strong>Clip Library</strong></p>
-        <img src="docs/assets/product/clip-library.png" width="100%" alt="StreamSnip AI Clip Library in Studio Dark with Ready to review and Scheduled tabs">
+        <img src="docs/assets/product/clip-library.png" width="100%" alt="StreamSnip AI Clip Library in Studio Dark with portrait-first clip cards, inline video preview, selection, and quick actions">
       </td>
       <td width="50%">
         <p align="center"><strong>Publisher</strong></p>
@@ -93,7 +93,7 @@ The installer is currently unsigned, so Windows SmartScreen may show a publisher
 4. **Configure.** Set Capture, AI provider, Transcription, and Captions in Live Studio before recording.
 5. **Start.** Press Start capture. Follow the actual status and progress in Live Studio or Dashboard.
 6. **Stop.** Press Stop capture when you are finished. Allow active work to stop gracefully.
-7. **Review.** Open Clip Library, preview the MP4, and correct its title, description, and tags.
+7. **Review.** Open Clip Library and browse the portrait-first clip cards. Hover a card for a muted preview, open its large player to inspect the video and post copy, and edit the title or description before posting.
 8. **Publish if wanted.** Open Publisher, connect up to five Zernio API keys, and enable the destinations you want. Use **Post** on a clip for immediate publishing or **Auto schedule** to queue every ready clip.
 
 See the [complete user guide](docs/USER_GUIDE.md) for detailed setup, each setting, creator monitoring, publishing, storage, and troubleshooting.
@@ -136,7 +136,7 @@ JetBrains Mono remains the default UI font. The other bundled fonts are Manrope 
 | Dashboard | Session status, processing rundown, recent clips, creator activity, and engine events |
 | Live Studio | Source selection and all pre-capture settings |
 | Creators | Independent Twitch/YouTube monitors and recorded-VOD folder watching |
-| Clip Library | Find, preview, and review generated clips and metadata |
+| Clip Library | Browse portrait-first cards, preview clips inline or in the large player, edit metadata, copy post copy, download, reveal files, and bulk manage clips |
 | Scheduled | Zernio-confirmed scheduled posts and completed publishing history |
 | Hype words | Local phrases used by the Hook Words scoring option |
 | Publisher | Five Zernio API-key slots, account discovery, and destination controls |

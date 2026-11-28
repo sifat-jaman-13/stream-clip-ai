@@ -227,7 +227,12 @@ def create_app(
     def serve_clip(name: str, request: Request):
         if clip_regex.fullmatch(name):
             clip_path = find_clip_path(name)
-        elif re.fullmatch(r"[A-Za-z0-9_-]+\.txt", name):
+        elif (
+            len(name) <= 255
+            and name.endswith(".txt")
+            and len(name) > 4
+            and all(char.isascii() and (char.isalnum() or char in "_-") for char in name[:-4])
+        ):
             source = find_clip_path(Path(name).stem + ".mp4")
             clip_path = source.with_suffix(".txt") if source else None
         else:

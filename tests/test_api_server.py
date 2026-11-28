@@ -262,6 +262,17 @@ class APIServerTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertIn(b"local", body.lower())
 
+    def test_clip_text_route_rejects_oversized_untrusted_names_without_path_lookup(self):
+        lookup = MagicMock(return_value=None)
+        app = self.create_app(find_clip_path=lookup)
+        oversized_name = ("a" * 512) + ".txt"
+
+        status, _headers, body = asyncio.run(asgi_request(app, path=f"/clips/{oversized_name}"))
+
+        self.assertEqual(status, 404)
+        self.assertEqual(json.loads(body), {"error": "not found"})
+        lookup.assert_not_called()
+
     def test_clip_range_requests_stream_only_the_requested_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             clip = Path(directory) / "sample.mp4"

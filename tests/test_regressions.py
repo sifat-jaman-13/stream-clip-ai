@@ -955,6 +955,118 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(request.call_args.kwargs["headers"]["x-api-key"], "anthropic-private-key")
         self.assertEqual(request.call_args.kwargs["headers"]["anthropic-version"], "2023-06-01")
 
+    def test_ai_settings_store_provider_keys_in_dpapi_backed_store_not_json(self):
+        class MemoryCredentialStore:
+            values = {}
+
+            def set(self, provider, name, value):
+                self.values[(provider, name)] = value
+
+            def get(self, provider, name):
+                return self.values.get((provider, name), "")
+
+            def delete(self, provider, name):
+                return self.values.pop((provider, name), None) is not None
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            store = MemoryCredentialStore()
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path), \
+                 patch.object(autoclip, "_credential_store_for", return_value=store):
+                saved = autoclip.save_ai_settings({
+                    "provider": "anthropic",
+                    "openai_api_base": "https://api.openai.com/v1",
+                    "openai_model": "gpt-test",
+                    "openai_api_key": "openai-private-key",
+                    "anthropic_api_base": "https://api.anthropic.com",
+                    "anthropic_model": "claude-test",
+                    "anthropic_api_key": "anthropic-private-key",
+                })
+                loaded = autoclip.load_ai_settings()
+                stored = path.read_text(encoding="utf-8")
+
+        self.assertTrue(saved["openai_key_set"])
+        self.assertTrue(saved["anthropic_key_set"])
+        self.assertEqual(saved["provider"], "anthropic")
+        self.assertEqual(loaded["openai_api_key"], "openai-private-key")
+        self.assertEqual(loaded["anthropic_api_key"], "anthropic-private-key")
+        self.assertEqual(loaded["openai_model"], "gpt-test")
+        self.assertEqual(loaded["anthropic_model"], "claude-test")
+        self.assertNotIn("openai-private-key", stored)
+        self.assertNotIn("anthropic-private-key", stored)
+        self.assertEqual(store.get("ai", "openai_api_key"), "openai-private-key")
+        self.assertEqual(store.get("ai", "anthropic_api_key"), "anthropic-private-key")
+
+    def test_ai_settings_migrate_legacy_plaintext_keys_and_scrub_json(self):
+        class MemoryCredentialStore:
+            values = {}
+
+            def set(self, provider, name, value):
+                self.values[(provider, name)] = value
+
+            def get(self, provider, name):
+                return self.values.get((provider, name), "")
+
+            def delete(self, provider, name):
+                return self.values.pop((provider, name), None) is not None
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai_settings.json"
+            path.write_text(json.dumps({
+                "provider": "gemini",
+                "gemini_model": "gemini-test",
+                "gemini_api_key": "legacy-gemini-secret",
+                "huggingface_token": "legacy-hf-secret",
+            }), encoding="utf-8")
+            store = MemoryCredentialStore()
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path), \
+                 patch.object(autoclip, "_credential_store_for", return_value=store):
+                loaded = autoclip.load_ai_settings()
+                stored = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(loaded["gemini_api_key"], "legacy-gemini-secret")
+        self.assertEqual(loaded["huggingface_token"], "legacy-hf-secret")
+        self.assertEqual(loaded["gemini_model"], "gemini-test")
+        self.assertNotIn("gemini_api_key", stored)
+        self.assertNotIn("huggingface_token", stored)
+        self.assertEqual(store.get("ai", "gemini_api_key"), "legacy-gemini-secret")
+        self.assertEqual(store.get("ai", "huggingface_token"), "legacy-hf-secret")
+
+    def test_runtime_log_redacts_credential_values_and_token_shapes(self):
+        secret = "arbitrary-private-provider-key"
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "streamsnip.log"
+            with patch.object(autoclip, "RUNTIME_LOG", log_path), \
+                 patch.object(autoclip, "_RUNTIME_LOG_SECRET_VALUES", {secret}):
+                autoclip.append_runtime_log(
+                    "12:34:56",
+                    f"request failed api_key={secret}; Authorization: Bearer ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
+                )
+            stored = log_path.read_text(encoding="utf-8")
+
+        self.assertNotIn(secret, stored)
+        self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", stored)
+        self.assertIn("[REDACTED]", stored)
+
+        engine = object.__new__(autoclip.Core)
+        engine.lock = threading.RLock()
+        engine.logs = []
+        engine.log_id = 0
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(autoclip, "RUNTIME_LOG", Path(directory) / "streamsnip.log"), \
+                 patch.object(autoclip, "_RUNTIME_LOG_SECRET_VALUES", {secret}):
+                engine.push(f"publisher failure: {secret}")
+                self.assertNotIn(secret, engine.logs[0][2])
+                self.assertNotIn(secret, autoclip.RUNTIME_LOG.read_text(encoding="utf-8"))
+
+    def test_gemini_cache_identifier_is_hmac_keyed_and_process_local(self):
+        secret = "gemini-provider-private-key"
+        first = ai_highlights._gemini_cache_id(secret)
+        with patch.object(ai_highlights, "_GEMINI_CACHE_HMAC_KEY", b"x" * 32):
+            second = ai_highlights._gemini_cache_id(secret)
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(first, __import__("hashlib").sha256(secret.encode("utf-8")).hexdigest())
+
     def test_ai_settings_migrate_legacy_hook_scoring_to_gemini(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ai_settings.json"
@@ -964,9 +1076,21 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(settings["provider"], "gemini")
 
     def test_ai_settings_store_openai_and_anthropic_keys_as_private_credentials(self):
+        class MemoryCredentialStore:
+            def __init__(self):
+                self.values = {}
+            def set(self, provider, name, value):
+                self.values[(provider, name)] = value
+            def get(self, provider, name):
+                return self.values.get((provider, name), "")
+            def delete(self, provider, name):
+                return self.values.pop((provider, name), None) is not None
+
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ai_settings.json"
-            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+            store = MemoryCredentialStore()
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path), \
+                 patch.object(autoclip, "_credential_store_for", return_value=store):
                 saved = autoclip.save_ai_settings({
                     "provider": "anthropic",
                     "openai_api_base": "https://api.openai.com/v1",
@@ -985,8 +1109,10 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(loaded["anthropic_model"], "claude-test")
         self.assertNotIn("openai-private-key", str(saved))
         self.assertNotIn("anthropic-private-key", str(saved))
-        self.assertIn("openai-private-key", stored)
-        self.assertIn("anthropic-private-key", stored)
+        self.assertNotIn("openai-private-key", stored)
+        self.assertNotIn("anthropic-private-key", stored)
+        self.assertEqual(store.get("ai", "openai_api_key"), "openai-private-key")
+        self.assertEqual(store.get("ai", "anthropic_api_key"), "anthropic-private-key")
 
     def test_creator_monitor_accepts_twitch_and_youtube_but_rejects_lookalike_hosts(self):
         core = object.__new__(autoclip.Core)
@@ -1120,7 +1246,7 @@ class RegressionTests(unittest.TestCase):
         selected = "gemini-3.1-flash-lite"
         alternate = "gemini-3.8-flash"
         key = "selected-model-order-test"
-        cache_id = __import__("hashlib").sha256(key.encode("utf-8")).hexdigest()
+        cache_id = ai_highlights._gemini_cache_id(key)
         calls = []
 
         def fake_request(url, payload=None, headers=None, timeout=90):
@@ -2866,9 +2992,17 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(urlopen.call_args.args[0].get_header("Content-type"), "application/json")
 
     def test_ai_settings_keep_api_keys_out_of_public_status(self):
+        class MemoryCredentialStore:
+            values = {}
+            def set(self, provider, name, value): self.values[(provider, name)] = value
+            def get(self, provider, name): return self.values.get((provider, name), "")
+            def delete(self, provider, name): return self.values.pop((provider, name), None) is not None
+
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ai_settings.json"
-            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+            store = MemoryCredentialStore()
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path), \
+                 patch.object(autoclip, "_credential_store_for", return_value=store):
                 saved = autoclip.save_ai_settings({
                     "provider": "gemini", "gemini_api_key": "secret",
                     "custom_api_base": "https://free-provider.example/v1",
@@ -2886,8 +3020,10 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(saved["custom_api_base"], "https://free-provider.example/v1")
             self.assertEqual(saved["custom_api_model"], "free-model")
             self.assertNotIn("secret", str(saved))
-            self.assertIn("secret", stored)
-            self.assertIn("custom-secret", stored)
+            self.assertNotIn("secret", stored)
+            self.assertNotIn("custom-secret", stored)
+            self.assertEqual(store.get("ai", "gemini_api_key"), "secret")
+            self.assertEqual(store.get("ai", "custom_api_key"), "custom-secret")
 
     def test_pywebview_installer_tracks_owned_dependencies_and_keeps_user_python(self):
         root = Path(__file__).resolve().parents[1]
@@ -2976,9 +3112,17 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(autoclip.load_ai_settings()["huggingface_setup_completed"], "false")
 
     def test_ai_settings_can_clear_saved_credentials(self):
+        class MemoryCredentialStore:
+            values = {}
+            def set(self, provider, name, value): self.values[(provider, name)] = value
+            def get(self, provider, name): return self.values.get((provider, name), "")
+            def delete(self, provider, name): return self.values.pop((provider, name), None) is not None
+
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ai_settings.json"
-            with patch.object(autoclip, "AI_SETTINGS_FILE", path):
+            store = MemoryCredentialStore()
+            with patch.object(autoclip, "AI_SETTINGS_FILE", path), \
+                 patch.object(autoclip, "_credential_store_for", return_value=store):
                 autoclip.save_ai_settings({
                     "provider": "gemini",
                     "gemini_api_key": "gemini-secret",
@@ -2993,6 +3137,8 @@ class RegressionTests(unittest.TestCase):
             self.assertFalse(cleared["huggingface_token_set"])
             self.assertNotIn("gemini-secret", stored)
             self.assertNotIn("hf-secret", stored)
+            self.assertEqual(store.get("ai", "gemini_api_key"), "")
+            self.assertEqual(store.get("ai", "huggingface_token"), "")
             self.assertNotEqual(__import__("os").environ.get("HF_TOKEN"), "hf-secret")
             self.assertNotEqual(__import__("os").environ.get("HUGGING_FACE_HUB_TOKEN"), "hf-secret")
 

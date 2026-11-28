@@ -371,7 +371,6 @@ class ZernioPublisher:
                         "path": str(path.resolve()),
                         "size": stat.st_size,
                         "mtime_ns": stat.st_mtime_ns,
-                        "credential_fingerprint": hashlib.sha256(self.api_key.encode("utf-8")).hexdigest(),
                         "content": content,
                         "platforms": platforms,
                         "schedule_minutes": self.schedule_minutes,

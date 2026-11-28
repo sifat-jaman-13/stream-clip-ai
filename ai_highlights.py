@@ -7,10 +7,24 @@ import urllib.request
 import queue
 import threading
 import hashlib
+import hmac
+import secrets
 import time
 
 _GEMINI_MODEL_CACHE = {}
 _GEMINI_ACTIVE_CACHE = {}
+_GEMINI_CACHE_HMAC_KEY = secrets.token_bytes(32)
+
+
+def _gemini_cache_id(secret):
+    """Derive a process-local opaque cache key without storing a raw secret hash."""
+    return hmac.new(
+        _GEMINI_CACHE_HMAC_KEY,
+        str(secret).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 RETIRED_GEMINI_MODELS = {"gemini-2.5-flash"}
 GEMINI_ATTEMPTS_PER_MODEL = 3
@@ -287,7 +301,7 @@ def _gemini(prompt, config):
     selected = _gemini_model_order(selected)[0]
     if not key:
         raise AIProviderError("Add a Gemini API key in AI settings.")
-    cache_id = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    cache_id = _gemini_cache_id(key)
     cached_models = config.get("_gemini_fallback_models")
     if cached_models is None:
         try:

@@ -32,7 +32,11 @@ StreamSnip AI is designed as a single-user local application.
 - The app is not designed to be exposed directly to the public internet or an untrusted LAN.
 - Hosted AI and Zernio send data to third-party services only when those features are selected/configured.
 
-Users are responsible for protecting local runtime files such as `ai_settings.json`, `publishing.json`, and `zernio.json`. If a credential appears in logs, screenshots, exported sessions, or public commits, revoke and rotate it immediately.
+- AI-provider and Zernio API credentials are stored in the Windows DPAPI-backed credential store in `streamsnip.db`; they are not written to the AI preferences JSON or publishing settings JSON.
+- When upgrading from a version that stored AI-provider keys in `ai_settings.json`, the current engine migrates those values into DPAPI storage and removes the plaintext keys after the encrypted write succeeds.
+- `ai_settings.json` contains non-secret provider preferences. Local databases, settings, recordings, clips, and runtime logs should still be protected as private user data.
+- Current runtime logging redacts registered credentials and common token formats before log entries are displayed or persisted. Logs created by older app builds may still contain earlier diagnostic text.
+- If a credential is found in an old log, screenshot, export, or public commit, revoke and rotate it immediately.
 
 ## Disclosure
 

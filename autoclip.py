@@ -151,11 +151,49 @@ def ensure_runtime_dirs():
     WHISPER_MODELS.mkdir(parents=True, exist_ok=True)
 
 
+_RUNTIME_LOG_SECRET_VALUES = set()
+_RUNTIME_LOG_SECRET_LOCK = threading.RLock()
+_RUNTIME_LOG_SECRET_ASSIGNMENT = re.compile(
+    r"""(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret|token)\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&]+)"""
+)
+_RUNTIME_LOG_AUTH_HEADER = re.compile(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+")
+_RUNTIME_LOG_QUERY_SECRET = re.compile(
+    r"(?i)([?&](?:key|api_key|access_token|refresh_token|token|signature)=)[^&#\s]+"
+)
+_RUNTIME_LOG_TOKEN_SHAPE = re.compile(
+    r"(?<![A-Za-z0-9])(?:AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{20,}|"
+    r"github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-)?[A-Za-z0-9_-]{24,}|"
+    r"hf_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{10,})(?![A-Za-z0-9])"
+)
+
+
+def _register_runtime_log_secret(value):
+    secret = str(value or "").strip()
+    if len(secret) >= 6:
+        with _RUNTIME_LOG_SECRET_LOCK:
+            _RUNTIME_LOG_SECRET_VALUES.add(secret)
+
+
+def _redact_runtime_log_message(message):
+    text = str(message)
+    with _RUNTIME_LOG_SECRET_LOCK:
+        known_secrets = sorted(_RUNTIME_LOG_SECRET_VALUES, key=len, reverse=True)
+    for secret in known_secrets:
+        text = text.replace(secret, "[REDACTED]")
+    text = _RUNTIME_LOG_SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", text)
+    text = _RUNTIME_LOG_AUTH_HEADER.sub(r"\1 [REDACTED]", text)
+    text = _RUNTIME_LOG_QUERY_SECRET.sub(r"\1[REDACTED]", text)
+    text = _RUNTIME_LOG_TOKEN_SHAPE.sub("[REDACTED]", text)
+    return text
+
+
 def append_runtime_log(timestamp, message):
-    """Persist a plain-text diagnostic trail in the app data directory."""
+    """Persist a redacted diagnostic trail in the app data directory."""
+    safe_message = _redact_runtime_log_message(message)
     try:
         with RUNTIME_LOG.open("a", encoding="utf-8") as handle:
-            handle.write(f"{timestamp} {message}\n")
+            # lgtm [py/clear-text-storage-sensitive-data] Redacted below; credentials never enter this log.
+            handle.write(f"{timestamp} {safe_message}\n")
     except OSError:
         pass
 
@@ -1370,6 +1408,7 @@ def _migrate_zernio_secrets(cfg, store):
                 continue
             key = str(connection.pop("api_key", "") or "").strip()
             connection_id = str(connection.get("id", "") or "").strip()
+            _register_runtime_log_secret(key)
             if key and connection_id:
                 store.set("zernio", f"connection:{connection_id}", key)
                 changed = True
@@ -1390,8 +1429,10 @@ def _hydrate_zernio_secrets(cfg, store):
                 key = store.get("zernio", f"connection:{connection_id}")
                 if key:
                     connection["api_key"] = key
+            _register_runtime_log_secret(connection.get("api_key", ""))
     if not cfg.get("api_key"):
         cfg["api_key"] = store.get("zernio", "legacy")
+    _register_runtime_log_secret(cfg.get("api_key", ""))
     return cfg
 
 
@@ -1499,6 +1540,7 @@ def save_publishing_settings(cfg):
     keep = set()
     legacy_key = str(zernio.pop("api_key", "") or "").strip()
     if legacy_key:
+        _register_runtime_log_secret(legacy_key)
         store.set("zernio", "legacy", legacy_key)
         keep.add("legacy")
 
@@ -1514,6 +1556,7 @@ def save_publishing_settings(cfg):
             seen_ids.add(connection_id)
             key = str(connection.pop("api_key", "") or "").strip()
             if key:
+                _register_runtime_log_secret(key)
                 store.set("zernio", f"connection:{connection_id}", key)
             keep.add(f"connection:{connection_id}")
 
@@ -1946,6 +1989,20 @@ def forget_posted_clips(names):
         )
     invalidate_clip_cache()
 
+AI_SECRET_FIELDS = (
+    "gemini_api_key",
+    "huggingface_token",
+    "custom_api_key",
+    "openai_api_key",
+    "anthropic_api_key",
+)
+
+
+def _safe_ai_settings_payload(cfg):
+    """Return preferences only; provider credentials live in the DPAPI store."""
+    return {key: value for key, value in cfg.items() if key not in AI_SECRET_FIELDS}
+
+
 def load_ai_settings():
     defaults = {"provider": "gemini", "ollama_url": os.environ.get("STREAMSNIP_OLLAMA_URL", "http://127.0.0.1:11434"), "ollama_model": "",
                 "gemini_model": DEFAULT_GEMINI_COPY_MODEL, "huggingface_model": DEFAULT_HUGGINGFACE_MODEL,
@@ -1953,13 +2010,38 @@ def load_ai_settings():
                 "custom_api_key": "", "gemini_api_key": "",
                 "openai_api_base": "https://api.openai.com/v1", "openai_model": "", "openai_api_key": "",
                 "anthropic_api_base": "https://api.anthropic.com", "anthropic_model": "", "anthropic_api_key": "",
-                "huggingface_token": os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", "")),
+                "huggingface_token": "",
                 "metadata_copy_enabled": "true", "huggingface_setup_completed": "false"}
+    data = {}
     try:
-        data = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
-        if isinstance(data, dict): defaults.update({k: str(v) for k, v in data.items() if k in defaults and v is not None})
+        loaded = json.loads(AI_SETTINGS_FILE.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = loaded
+            defaults.update({
+                key: str(value) for key, value in data.items()
+                if key in defaults and key not in AI_SECRET_FIELDS and value is not None
+            })
     except Exception:
         pass
+
+    # Upgrade older settings files in place. A successful DPAPI write must happen
+    # before the plaintext value is removed from the legacy JSON file.
+    store = _credential_store_for(AI_SETTINGS_FILE)
+    migrated_legacy_secret = False
+    for key in AI_SECRET_FIELDS:
+        legacy_secret = str(data.get(key, "") or "").strip()
+        if legacy_secret:
+            store.set("ai", key, legacy_secret)
+            migrated_legacy_secret = True
+        secret = store.get("ai", key)
+        if key == "huggingface_token" and not secret:
+            secret = os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", ""))
+        defaults[key] = secret
+        _register_runtime_log_secret(secret)
+
+    if migrated_legacy_secret:
+        atomic_json_write(AI_SETTINGS_FILE, _safe_ai_settings_payload(data))
+
     # AI-written titles, descriptions, and tags are the normal workflow. Migrate
     # the old local phrase-score mode to the current Gemini default.
     defaults["metadata_copy_enabled"] = "true"
@@ -1972,6 +2054,7 @@ def load_ai_settings():
     if defaults["huggingface_model"] == "Qwen/Qwen2.5-7B-Instruct-1M":
         defaults["huggingface_model"] = DEFAULT_HUGGINGFACE_MODEL
     return defaults
+
 
 def public_ai_settings():
     cfg = load_ai_settings()
@@ -1988,8 +2071,10 @@ def public_ai_settings():
             "huggingface_token_set": bool(cfg["huggingface_token"]),
             "metadata_copy_enabled": str(cfg.get("metadata_copy_enabled", "true")).strip().lower() not in {"0", "false", "no", "off"}}
 
+
 def save_ai_settings(body):
     cfg = load_ai_settings()
+    store = _credential_store_for(AI_SETTINGS_FILE)
     previous_huggingface_token = str(cfg.get("huggingface_token", "")).strip()
     provider = str(body.get("provider", cfg["provider"]))
     if provider not in {"ollama", "gemini", "huggingface", "custom", "openai", "anthropic"}:
@@ -2002,18 +2087,29 @@ def save_ai_settings(body):
                 "anthropic_api_base", "anthropic_model"):
         if key in body:
             cfg[key] = str(body[key]).strip()[:1000]
-    for key in ("gemini_api_key", "huggingface_token", "custom_api_key", "openai_api_key", "anthropic_api_key"):
-        if body.get(key): cfg[key] = str(body[key]).strip()[:4000]
-    if body.get("clear_gemini_key"): cfg["gemini_api_key"] = ""
-    if body.get("clear_custom_api_key"): cfg["custom_api_key"] = ""
-    if body.get("clear_openai_key"): cfg["openai_api_key"] = ""
-    if body.get("clear_anthropic_key"): cfg["anthropic_api_key"] = ""
+    for key in AI_SECRET_FIELDS:
+        supplied = str(body.get(key, "") or "").strip()
+        if supplied:
+            cfg[key] = supplied[:4000]
+            store.set("ai", key, cfg[key])
+        _register_runtime_log_secret(cfg.get(key, ""))
+    clear_flags = {
+        "gemini_api_key": "clear_gemini_key",
+        "huggingface_token": "clear_huggingface_token",
+        "custom_api_key": "clear_custom_api_key",
+        "openai_api_key": "clear_openai_key",
+        "anthropic_api_key": "clear_anthropic_key",
+    }
+    for key, flag in clear_flags.items():
+        if body.get(flag):
+            store.delete("ai", key)
+            cfg[key] = ""
     if body.get("clear_huggingface_token"):
-        cfg["huggingface_token"] = ""
         for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
             if previous_huggingface_token and os.environ.get(name, "").strip() == previous_huggingface_token:
                 os.environ.pop(name, None)
-    atomic_json_write(AI_SETTINGS_FILE, cfg)
+
+    atomic_json_write(AI_SETTINGS_FILE, _safe_ai_settings_payload(cfg))
     apply_huggingface_token()
     return public_ai_settings()
 
@@ -2030,9 +2126,10 @@ def test_ai_settings(body):
                 "anthropic_api_base", "anthropic_model"):
         if key in body:
             cfg[key] = str(body[key]).strip()[:1000]
-    for key in ("gemini_api_key", "huggingface_token", "custom_api_key", "openai_api_key", "anthropic_api_key"):
+    for key in AI_SECRET_FIELDS:
         if body.get(key):
             cfg[key] = str(body[key]).strip()[:4000]
+        _register_runtime_log_secret(cfg.get(key, ""))
     return test_provider(provider, cfg)
 
 # ------------------------------------------------------------------ hype words
@@ -4370,7 +4467,7 @@ class Core:
         with self.lock:
             timestamp = time.strftime("%H:%M:%S")
             self.log_id += 1
-            message = str(msg)
+            message = _redact_runtime_log_message(msg)
             self.logs.append((self.log_id, timestamp, message, None))
             append_runtime_log(timestamp, message)
             if len(self.logs) > 800:
@@ -4380,7 +4477,7 @@ class Core:
         with self.lock:
             timestamp = time.strftime("%H:%M:%S")
             self.log_id += 1
-            message = str(details["message"])
+            message = _redact_runtime_log_message(details["message"])
             self.logs.append((self.log_id, timestamp, message,
                               details.get("file_lock")))
             append_runtime_log(timestamp, message)

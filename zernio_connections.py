@@ -13,7 +13,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
-from zernio_poster import ZernioPublisher
+from zernio_poster import ZernioPublisher, _notify_delivery_callback
 
 
 SUPPORTED_ZERNIO_PLATFORMS = {"facebook", "instagram", "youtube"}
@@ -357,31 +357,51 @@ class ZernioMultiPublisher:
                 item["ref"] = account_ref(connection_id, str(item.get("id", "")))
                 all_accounts.append(item)
 
-        eligible = {
+        # Persistent posting_enabled controls automatic posts. An explicit list
+        # comes from the user's current per-account checkboxes and is authoritative
+        # for this manual publish, even before those preferences are saved.
+        available = {
             item["ref"]: item for item in all_accounts
-            if item.get("id") and _is_enabled(item)
+            if item.get("id")
             and item.get("platform") in SUPPORTED_ZERNIO_PLATFORMS
+            and item.get("is_active", True)
+            and item.get("provider_enabled", True)
+            and not item.get("rate_limited", False)
+        }
+        default_enabled = {
+            key: item for key, item in available.items() if _is_enabled(item)
         }
         if requested is None:
-            return list(eligible.values())
+            return list(default_enabled.values())
         if isinstance(requested, list):
-            chosen = set()
+            chosen = []
+            seen = set()
             for item in requested:
+                ref = ""
                 if isinstance(item, dict):
                     conn_id = str(item.get("connection_id", ""))
                     acc_id = str(item.get("account_id") or item.get("id") or "")
                     if conn_id and acc_id:
-                        chosen.add(account_ref(conn_id, acc_id))
+                        ref = account_ref(conn_id, acc_id)
                 elif isinstance(item, str):
-                    chosen.add(item)
-            return [eligible[key] for key in chosen if key in eligible]
+                    ref = item
+                if ref and ref not in seen:
+                    chosen.append(ref)
+                    seen.add(ref)
+            return [available[key] for key in chosen if key in available]
         if isinstance(requested, dict):
-            chosen = {
-                account_ref(str(item.get("connection_id", "")), str(item.get("id", "")))
-                for item in all_accounts
-                if item.get("id") and requested.get(item.get("platform")) == item.get("id")
-            }
-            return [eligible[key] for key in chosen if key in eligible]
+            matches = {}
+            for item in all_accounts:
+                platform = str(item.get("platform", ""))
+                if (item.get("id") and requested.get(platform) == item.get("id")
+                        and item["ref"] in available):
+                    matches.setdefault(platform, []).append(item)
+            # The legacy platform->account map has no connection identity. Refuse
+            # ambiguous duplicate IDs rather than sending to multiple API slots.
+            return [
+                rows[0] for platform, rows in matches.items()
+                if len(rows) == 1
+            ]
         return []
 
     def publish_one(self, path, schedule_minutes=None, accounts=None, account_refs=None,
@@ -395,6 +415,8 @@ class ZernioMultiPublisher:
 
         successes = []
         failures = []
+        posted_records = []
+        scheduled_records = []
         workspace_throttled = False
         for account_index, account in enumerate(selected):
             connection_id = account["connection_id"]
@@ -423,6 +445,66 @@ class ZernioMultiPublisher:
                 )
                 if isinstance(publish_result, dict) and publish_result.get("failed_platforms"):
                     raise RuntimeError("Zernio reported a failed destination.")
+
+                returned_records = (
+                    publish_result.get("delivery_records", [])
+                    if isinstance(publish_result, dict) else []
+                )
+                if isinstance(returned_records, list) and returned_records:
+                    for raw_record in returned_records:
+                        if not isinstance(raw_record, dict):
+                            continue
+                        record = dict(raw_record)
+                        record["connection_id"] = connection_id
+                        record["account_id"] = str(record.get("account_id") or account_id)
+                        record["platform"] = str(record.get("platform") or platform).lower()
+                        status = str(record.get("status") or "").strip().lower()
+                        if status == "published":
+                            posted_records.append(record)
+                        elif status in {"scheduled", "queued", "pending", "processing", "submitted"}:
+                            scheduled_records.append(record)
+                else:
+                    # Compatibility for older ZernioPublisher adapters and test doubles.
+                    scheduled_destinations = (
+                        publish_result.get("scheduled_destinations", [])
+                        if isinstance(publish_result, dict) else []
+                    )
+                    if isinstance(scheduled_destinations, list) and scheduled_destinations:
+                        scheduled_records.append({
+                            "connection_id": connection_id,
+                            "account_id": account_id,
+                            "platform": platform,
+                            "post_id": str(publish_result.get("post_id") or ""),
+                            "scheduled_for": publish_result.get("scheduled_for"),
+                            "published_at": None,
+                            "status": "scheduled",
+                        })
+                    else:
+                        successful_destinations = (
+                            publish_result.get("successful_destinations", [])
+                            if isinstance(publish_result, dict) else []
+                        )
+                        status = "published" if (
+                            isinstance(successful_destinations, list) and successful_destinations
+                        ) or not schedule_minutes else "scheduled"
+                        target_record = {
+                            "connection_id": connection_id,
+                            "account_id": account_id,
+                            "platform": platform,
+                            "post_id": str(publish_result.get("post_id") or "")
+                                if isinstance(publish_result, dict) else "",
+                            "scheduled_for": (
+                                publish_result.get("scheduled_for")
+                                if isinstance(publish_result, dict) else None
+                            ),
+                            "published_at": (
+                                publish_result.get("published_at")
+                                if isinstance(publish_result, dict) else None
+                            ),
+                            "status": status,
+                        }
+                        (posted_records if status == "published" else scheduled_records).append(target_record)
+
                 successes.append(account)
                 if callable(self.on_account_success):
                     try:
@@ -473,18 +555,50 @@ class ZernioMultiPublisher:
             f"Zernio multi-account result: {len(successes)} succeeded, "
             f"{len(failures)} failed."
         )
-        if successes:
+        if posted_records and callable(self.on_success):
             destinations = sorted({
-                f"{item.get('platform')}:{item.get('id')}"
-                for item in successes if item.get("platform") and item.get("id")
+                f"{item['platform']}:{item['account_id']}"
+                for item in posted_records
             })
-            callback = self.on_scheduled if schedule_minutes else self.on_success
+            try:
+                _notify_delivery_callback(self.on_success, Path(path), destinations, posted_records)
+            except Exception as callback_error:
+                self.log(f"Could not update the local posted registry: {callback_error}")
+
+        if scheduled_records and callable(self.on_scheduled):
+            destinations = sorted({
+                f"{item['platform']}:{item['account_id']}"
+                for item in scheduled_records
+            })
+            try:
+                _notify_delivery_callback(self.on_scheduled, Path(path), destinations, scheduled_records)
+            except Exception as callback_error:
+                self.log(f"Could not update the local scheduled registry: {callback_error}")
+
+        if successes and not posted_records and not scheduled_records:
+            # Defensive compatibility for adapters which report success without
+            # destination metadata. The provider accepted the request, so keep
+            # the account-level outcome visible rather than dropping the clip.
+            state = "scheduled" if schedule_minutes else "published"
+            records = [{
+                "connection_id": item["connection_id"],
+                "account_id": str(item.get("id") or ""),
+                "platform": str(item.get("platform") or ""),
+                "post_id": "",
+                "scheduled_for": None,
+                "published_at": None,
+                "status": state,
+            } for item in successes]
+            destinations = sorted({
+                f"{item['platform']}:{item['account_id']}" for item in records
+            })
+            callback = self.on_scheduled if state == "scheduled" else self.on_success
             if callable(callback):
                 try:
-                    callback(Path(path), destinations)
+                    _notify_delivery_callback(callback, Path(path), destinations, records)
                 except Exception as callback_error:
-                    label = "scheduled" if schedule_minutes else "published"
-                    self.log(f"Could not update the local {label} registry: {callback_error}")
+                    self.log(f"Could not update the local {state} registry: {callback_error}")
+
         if failures and not successes and not workspace_throttled:
             details = "; ".join(
                 f"{item.get('platform')} {item.get('username') or item.get('id')}: {error}"
@@ -498,6 +612,8 @@ class ZernioMultiPublisher:
                 for item, error in failures
             ],
             "workspace_rate_limited": workspace_throttled,
+            "posted_records": posted_records,
+            "scheduled_records": scheduled_records,
         }
 
     def submit(self, video_path):

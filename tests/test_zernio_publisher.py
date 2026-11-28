@@ -168,6 +168,48 @@ def test_partial_schedule_records_only_confirmed_scheduled_destinations(tmp_path
     assert scheduled == [("clip.mp4", ["instagram:ig-1"])]
 
 
+def test_nested_zernio_account_id_confirms_scheduled_destination_and_returns_delivery_record(tmp_path):
+    video = tmp_path / "nested-account.mp4"
+    video.write_bytes(b"successfully rendered video")
+    scheduled = []
+    publisher = ZernioPublisher(
+        lambda _message: None,
+        {"enabled": True, "api_key": "test-key"},
+        on_scheduled=lambda path, destinations, records=None:
+            scheduled.append((path.name, destinations, records)),
+    )
+    publisher._upload = lambda _path: "https://media.example/nested-account.mp4"
+    publisher._json_request = lambda *_args, **_kwargs: {
+        "data": {
+            "post": {
+                "_id": "zernio-post-123",
+                "status": "scheduled",
+                "scheduledFor": "2026-11-28T02:19:14.000Z",
+                "platforms": [{
+                    "platform": "instagram",
+                    "accountId": {
+                        "_id": "ig-1",
+                        "username": "creator",
+                    },
+                    "status": "pending",
+                    "scheduledFor": "2026-11-28T02:19:14.000Z",
+                }],
+            }
+        }
+    }
+
+    result = publisher.publish_one(
+        video, accounts={"instagram": "ig-1"}, schedule_minutes=5,
+    )
+
+    assert result["scheduled_destinations"] == ["instagram:ig-1"]
+    assert result["post_id"] == "zernio-post-123"
+    assert scheduled[0][0:2] == ("nested-account.mp4", ["instagram:ig-1"])
+    assert scheduled[0][2][0]["account_id"] == "ig-1"
+    assert scheduled[0][2][0]["post_id"] == "zernio-post-123"
+    assert scheduled[0][2][0]["scheduled_for"] == "2026-11-28T02:19:14.000Z"
+
+
 def test_post_idempotency_key_is_attached_and_kept_stable_for_retry(monkeypatch, tmp_path):
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"video")

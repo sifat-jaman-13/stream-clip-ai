@@ -219,6 +219,22 @@ public sealed partial class MainPage
         editor.Children.Add(actions);
         root.Children.Add(editor);
 
+        var framingPreviewPlayer = CreateOutputPreviewPlayer();
+        var framingPreviewStatus = ThemeText(
+            "Render a sample after adjusting the facecam and game regions. The preview uses the selected export aspect ratio and final FFmpeg framing filter.",
+            11, false, "MutedTextBrush");
+        framingPreviewStatus.TextWrapping = TextWrapping.Wrap;
+        root.Children.Add(CreatePanel(
+            "Actual output framing preview",
+            OutputFormatDescription(),
+            Vertical(
+                framingPreviewPlayer,
+                ActionRow(CreateAsyncButton(
+                    "Preview final framing",
+                    async () => await RenderActualClipPreviewAsync(framingPreviewPlayer, framingPreviewStatus),
+                    primary: true)),
+                framingPreviewStatus)));
+
         UpdateFramingValues();
         UpdateFramingOverlay();
         return root;

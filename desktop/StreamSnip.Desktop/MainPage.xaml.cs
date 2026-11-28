@@ -463,15 +463,42 @@ public sealed partial class MainPage : Page
 		{
 			long since = _state?.LastId ?? _lastLogId;
 			string currentPage = _currentPage;
-			bool flag = ((currentPage == "clips" || currentPage == "published") ? true : false);
-			int offset = (flag ? _clipOffset : 0);
-			string tab = ((_currentPage == "published") ? "scheduled" : _clipTab);
-			foreach (LogItem item in (_state = JsonSerializer.Deserialize<EngineState>((await _engine.GetJsonAsync($"/api/state?since={since}&clip_offset={offset}&clip_tab={tab}", _shutdown.Token)).ToJsonString(), JsonOptions) ?? new EngineState()).Logs.OrderBy((LogItem x) => x.Id))
+			bool onClipPage = currentPage == "clips" || currentPage == "published";
+			int offset = onClipPage ? _clipOffset : 0;
+			string tab = currentPage == "published" ? "scheduled" : _clipTab;
+			bool includeClips = onClipPage && (
+				forceRender ||
+				!string.Equals(_lastClipDataTab, tab, StringComparison.Ordinal) ||
+				DateTime.UtcNow - _lastClipDataRefreshUtc >= TimeSpan.FromSeconds(12));
+			string include = includeClips ? "1" : "0";
+			var response = await _engine.GetJsonAsync(
+				$"/api/state?since={since}&clip_offset={offset}&clip_tab={tab}&include_clips={include}",
+				_shutdown.Token);
+			var previousClips = _state?.Clips ?? [];
+			var nextState = JsonSerializer.Deserialize<EngineState>(response.ToJsonString(), JsonOptions)
+				?? new EngineState();
+			bool clipDataChanged = false;
+			if (includeClips)
+			{
+				_lastClipDataTab = tab;
+				_lastClipDataRefreshUtc = DateTime.UtcNow;
+				clipDataChanged = previousClips.Count != nextState.Clips.Count ||
+					!previousClips.SequenceEqual(nextState.Clips);
+			}
+			else
+			{
+				nextState = nextState with { Clips = previousClips };
+			}
+			_state = nextState;
+			foreach (LogItem item in _state.Logs.OrderBy((LogItem x) => x.Id))
 			{
 				if (item.Id > _lastLogId)
 				{
 					_activity.Add(item);
 					_lastLogId = Math.Max(_lastLogId, item.Id);
+					const string thumbnailReadyPrefix = "Clip thumbnail ready: ";
+					if (item.Message.StartsWith(thumbnailReadyPrefix, StringComparison.Ordinal))
+						RefreshClipThumbnail(item.Message[thumbnailReadyPrefix.Length..].Trim());
 				}
 			}
 			if (_activity.Count > 500)
@@ -486,7 +513,7 @@ public sealed partial class MainPage : Page
 			}
 			else
 			{
-				UpdateVisiblePageState();
+				UpdateVisiblePageState(clipDataChanged);
 			}
 		}
 		catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
@@ -529,16 +556,16 @@ public sealed partial class MainPage : Page
 		{
 			try
 			{
-				using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1800));
+				using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(3600));
 				var tick = 0;
 				while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
 				{
 					tick++;
-					var refreshCreators = true;
+					var refreshCreators = tick % 3 == 0;
 					if (!DispatcherQueue.TryEnqueue(() =>
 					{
 						_ = RefreshStateAsync();
-						if (refreshCreators)
+						if (refreshCreators && (_currentPage == "live" || _currentPage == "creators"))
 							_ = RefreshCreatorsForPollingAsync();
 					}))
 						break;
@@ -598,7 +625,7 @@ public sealed partial class MainPage : Page
 		}
 	}
 
-	private void UpdateVisiblePageState()
+	private void UpdateVisiblePageState(bool clipDataChanged = true)
 	{
 		PageTitleText.Text = GetPageTitle(_currentPage);
 		if (_currentPage == "overview")
@@ -619,7 +646,7 @@ public sealed partial class MainPage : Page
 		string currentPage = _currentPage;
 		if ((currentPage == "clips" || currentPage == "published") ? true : false)
 		{
-			UpdateClipLibraryState();
+			UpdateClipLibraryState(clipDataChanged);
 		}
 		// Activity and Creators are rebuilt only when their own source data changes.
 		// Their refresh workers compare snapshots before touching the visual tree.
@@ -761,6 +788,8 @@ private void UpdateSidebarSelection()
         if (page == "clips") _clipTab = "clips";
         if (page == "published") _clipTab = "scheduled";
         RenderCurrentPage();
+        if (page is "clips" or "published")
+            _ = RefreshStateAsync();
     }
 
 	private static string GetPageTitle(string page)
@@ -929,6 +958,141 @@ private void UpdateSidebarSelection()
 	{
 		NavigateTo("help");
 	}
+
+    private Brush DialogBrush(string key)
+    {
+        return Application.Current.Resources[key] as Brush
+            ?? throw new InvalidOperationException($"Theme resource '{key}' is missing.");
+    }
+
+    private Style CreateDialogButtonStyle(string backgroundKey, string foregroundKey, string borderKey)
+    {
+        var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, DialogBrush(backgroundKey)));
+        style.Setters.Add(new Setter(Control.ForegroundProperty, DialogBrush(foregroundKey)));
+        style.Setters.Add(new Setter(Control.BorderBrushProperty, DialogBrush(borderKey)));
+        style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+        style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(18, 10, 18, 10)));
+        style.Setters.Add(new Setter(Control.MinHeightProperty, 42.0));
+        style.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(8)));
+        style.Setters.Add(new Setter(Control.FontFamilyProperty, CurrentFont));
+        return style;
+    }
+
+    private void ApplyDialogContentPalette(object? node)
+    {
+        if (node is null) return;
+
+        var primary = DialogBrush("PrimaryTextBrush");
+        var body = DialogBrush("BodyTextBrush");
+        var muted = DialogBrush("MutedTextBrush");
+        var surface = DialogBrush("SurfaceSoftBrush");
+        var line = DialogBrush("LineBrush");
+
+        switch (node)
+        {
+            case TextBlock text:
+                text.Foreground = text.FontWeight.Weight >= Microsoft.UI.Text.FontWeights.SemiBold.Weight
+                    ? primary : body;
+                text.FontFamily = CurrentFont;
+                break;
+            case TextBox textBox:
+                textBox.Background = surface;
+                textBox.Foreground = primary;
+                textBox.BorderBrush = line;
+                textBox.PlaceholderForeground = muted;
+                textBox.FontFamily = CurrentFont;
+                break;
+            case PasswordBox password:
+                password.Background = surface;
+                password.Foreground = primary;
+                password.BorderBrush = line;
+                password.Resources["TextControlPlaceholderForeground"] = muted;
+                password.Resources["TextControlPlaceholderForegroundPointerOver"] = muted;
+                password.Resources["TextControlPlaceholderForegroundFocused"] = muted;
+                password.Resources["TextControlPlaceholderForegroundDisabled"] = body;
+                password.FontFamily = CurrentFont;
+                break;
+            case ComboBox combo:
+                combo.Background = surface;
+                combo.Foreground = primary;
+                combo.BorderBrush = line;
+                combo.FontFamily = CurrentFont;
+                break;
+            case CheckBox check:
+                check.Foreground = body;
+                check.FontFamily = CurrentFont;
+                break;
+            case RadioButton radio:
+                radio.Foreground = body;
+                radio.FontFamily = CurrentFont;
+                break;
+            case Button button:
+                button.Background = surface;
+                button.Foreground = primary;
+                button.BorderBrush = line;
+                button.BorderThickness = new Thickness(1);
+                button.FontFamily = CurrentFont;
+                break;
+        }
+
+        switch (node)
+        {
+            case Panel panel:
+                foreach (var child in panel.Children)
+                    ApplyDialogContentPalette(child);
+                break;
+            case Border border when border.Child is not null:
+                ApplyDialogContentPalette(border.Child);
+                break;
+            case ContentControl contentControl when contentControl.Content is DependencyObject child:
+                ApplyDialogContentPalette(child);
+                break;
+            case ItemsControl itemsControl:
+                foreach (var item in itemsControl.Items)
+                    if (item is DependencyObject itemNode)
+                        ApplyDialogContentPalette(itemNode);
+                break;
+        }
+    }
+
+    private async Task<ContentDialogResult> ShowThemedDialogAsync(ContentDialog dialog)
+    {
+        var palette = Themes.FirstOrDefault(item => item.Id == _theme) ?? Themes[0];
+        dialog.RequestedTheme = palette.IsLight ? ElementTheme.Light : ElementTheme.Dark;
+        dialog.Background = DialogBrush("SurfaceBrush");
+        dialog.Foreground = DialogBrush("PrimaryTextBrush");
+        dialog.BorderBrush = DialogBrush("LineBrush");
+        dialog.BorderThickness = new Thickness(1);
+        dialog.PrimaryButtonStyle = CreateDialogButtonStyle("AccentBrush", "AccentInkBrush", "AccentBrush");
+        dialog.SecondaryButtonStyle = CreateDialogButtonStyle("SurfaceSoftBrush", "PrimaryTextBrush", "LineBrush");
+        dialog.CloseButtonStyle = CreateDialogButtonStyle("SurfaceSoftBrush", "PrimaryTextBrush", "LineBrush");
+
+        // WinUI's stock ContentDialog template has its own theme resources.
+        // Override them locally so it cannot silently fall back to Windows' palette.
+        dialog.Resources["ContentDialogBackground"] = DialogBrush("SurfaceBrush");
+        dialog.Resources["ContentDialogForeground"] = DialogBrush("PrimaryTextBrush");
+        dialog.Resources["ContentDialogBorderBrush"] = DialogBrush("LineBrush");
+        dialog.Resources["ContentDialogSeparatorBackground"] = DialogBrush("LineBrush");
+
+        if (dialog.Title is string title)
+        {
+            dialog.Title = new TextBlock
+            {
+                Text = title,
+                Foreground = DialogBrush("PrimaryTextBrush"),
+                FontFamily = CurrentFont,
+                FontSize = ScaledFontSize(18),
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap
+            };
+        }
+
+        if (dialog.Content is DependencyObject content)
+            ApplyDialogContentPalette(content);
+
+        return await dialog.ShowAsync();
+    }
 
 	private async void QuitButton_Click(object sender, RoutedEventArgs e)
 	{
@@ -1159,10 +1323,11 @@ private void UpdateSidebarSelection()
 		SetResourceBrush("MutedTextBrush", themePalette.MutedText);
 		SetResourceBrush("LineBrush", themePalette.Line);
 		string accent = IsValidAccent(_customAccent) ? _customAccent : themePalette.Accent;
+        var accentText = EnsureTextContrastAcross(accent, 4.5, themePalette.App, themePalette.Surface, themePalette.Soft, themePalette.Hover);
 		SetResourceBrush("AccentBrush", accent);
 		SetResourceBrush("AccentSoftBrush", BlendHex(accent, themePalette.Surface, 0.16));
 		SetResourceBrush("AccentInkBrush", AccentTextHex(accent));
-		SetResourceBrush("AccentTextBrush", themePalette.AccentText);
+		SetResourceBrush("AccentTextBrush", accentText);
 		SetResourceBrush("SuccessBrush", themePalette.Success);
 		SetResourceBrush("WarningBrush", themePalette.Warning);
 		SetResourceBrush("DangerBrush", themePalette.Danger);
@@ -1187,7 +1352,7 @@ private void UpdateSidebarSelection()
 		SetResourceBrush("TextControlBackgroundDisabled", themePalette.Soft);
 		SetResourceBrush("TextControlBorderBrush", themePalette.Line);
 		SetResourceBrush("TextControlBorderBrushPointerOver", themePalette.Line);
-		SetResourceBrush("TextControlBorderBrushFocused", themePalette.AccentText);
+		SetResourceBrush("TextControlBorderBrushFocused", accentText);
 		SetResourceBrush("TextControlBorderBrushDisabled", themePalette.Line);
 
 		// Buttons must remain legible when WinUI moves between normal/hover/pressed/disabled.
@@ -1234,7 +1399,7 @@ private void UpdateSidebarSelection()
         SetResourceBrush("ComboBoxBackgroundDisabled", themePalette.Soft);
         SetResourceBrush("ComboBoxBackgroundFocused", themePalette.Surface);
         SetResourceBrush("ComboBoxBackgroundUnfocused", themePalette.Soft);
-        SetResourceBrush("ComboBoxBackgroundBorderBrushFocused", themePalette.AccentText);
+        SetResourceBrush("ComboBoxBackgroundBorderBrushFocused", accentText);
         SetResourceBrush("ComboBoxBackgroundBorderBrushUnfocused", themePalette.Line);
         SetResourceBrush("ComboBoxBorderBrush", themePalette.Line);
         SetResourceBrush("ComboBoxBorderBrushPointerOver", themePalette.Line);
@@ -1252,19 +1417,19 @@ private void UpdateSidebarSelection()
         SetResourceBrush("ComboBoxItemBackgroundPointerOver", themePalette.Hover);
         SetResourceBrush("ComboBoxItemBackgroundPressed", themePalette.Soft);
         SetResourceBrush("ComboBoxItemBackgroundDisabled", themePalette.Soft);
-        SetResourceBrush("ComboBoxItemBackgroundSelected", BlendHex(themePalette.Accent, themePalette.Surface, 0.14));
-        SetResourceBrush("ComboBoxItemBackgroundSelectedUnfocused", BlendHex(themePalette.Accent, themePalette.Surface, 0.14));
-        SetResourceBrush("ComboBoxItemBackgroundSelectedPointerOver", BlendHex(themePalette.Accent, themePalette.Surface, 0.18));
-        SetResourceBrush("ComboBoxItemBackgroundSelectedPressed", BlendHex(themePalette.Accent, themePalette.Surface, 0.2));
+        SetResourceBrush("ComboBoxItemBackgroundSelected", BlendHex(accent, themePalette.Surface, 0.14));
+        SetResourceBrush("ComboBoxItemBackgroundSelectedUnfocused", BlendHex(accent, themePalette.Surface, 0.14));
+        SetResourceBrush("ComboBoxItemBackgroundSelectedPointerOver", BlendHex(accent, themePalette.Surface, 0.18));
+        SetResourceBrush("ComboBoxItemBackgroundSelectedPressed", BlendHex(accent, themePalette.Surface, 0.2));
         SetResourceBrush("ComboBoxItemBackgroundSelectedDisabled", themePalette.Soft);
         SetResourceBrush("ComboBoxItemBorderBrush", themePalette.Line);
         SetResourceBrush("ComboBoxItemBorderBrushPointerOver", themePalette.Line);
         SetResourceBrush("ComboBoxItemBorderBrushPressed", themePalette.Line);
         SetResourceBrush("ComboBoxItemBorderBrushDisabled", themePalette.Line);
-        SetResourceBrush("ComboBoxItemBorderBrushSelected", themePalette.AccentText);
+        SetResourceBrush("ComboBoxItemBorderBrushSelected", accentText);
         SetResourceBrush("ComboBoxItemBorderBrushSelectedUnfocused", themePalette.Line);
-        SetResourceBrush("ComboBoxItemBorderBrushSelectedPointerOver", themePalette.AccentText);
-        SetResourceBrush("ComboBoxItemBorderBrushSelectedPressed", themePalette.AccentText);
+        SetResourceBrush("ComboBoxItemBorderBrushSelectedPointerOver", accentText);
+        SetResourceBrush("ComboBoxItemBorderBrushSelectedPressed", accentText);
         SetResourceBrush("ComboBoxItemBorderBrushSelectedDisabled", themePalette.Line);
 
         // CheckBox and radio states are also template-owned and must not fall back to OS colors.
@@ -1278,12 +1443,12 @@ private void UpdateSidebarSelection()
         foreach (var state in new[] { "", "PointerOver", "Pressed" })
         {
             SetResourceBrush("CheckBoxBackgroundUnchecked" + state, state.Length == 0 ? themePalette.Surface : themePalette.Hover);
-            SetResourceBrush("CheckBoxBackgroundChecked" + state, themePalette.Accent);
-            SetResourceBrush("CheckBoxBackgroundIndeterminate" + state, themePalette.Accent);
+            SetResourceBrush("CheckBoxBackgroundChecked" + state, BlendHex(accent, themePalette.Surface, 0.16));
+            SetResourceBrush("CheckBoxBackgroundIndeterminate" + state, BlendHex(accent, themePalette.Surface, 0.16));
             SetResourceBrush("CheckBoxBorderBrushUnchecked" + state, state.Length == 0 ? themePalette.Line : themePalette.BodyText);
-            SetResourceBrush("CheckBoxBorderBrushChecked" + state, themePalette.Accent);
-            SetResourceBrush("CheckBoxCheckGlyphForegroundChecked" + state, AccentTextHex(accent));
-            SetResourceBrush("CheckBoxCheckGlyphForegroundIndeterminate" + state, AccentTextHex(accent));
+            SetResourceBrush("CheckBoxBorderBrushChecked" + state, accent);
+            SetResourceBrush("CheckBoxCheckGlyphForegroundChecked" + state, accentText);
+            SetResourceBrush("CheckBoxCheckGlyphForegroundIndeterminate" + state, accentText);
         }
         SetResourceBrush("CheckBoxBackgroundUncheckedDisabled", themePalette.Soft);
         SetResourceBrush("CheckBoxBackgroundCheckedDisabled", themePalette.Soft);
@@ -1304,16 +1469,16 @@ private void UpdateSidebarSelection()
         SetResourceBrush("RadioButtonBorderBrushPointerOver", themePalette.BodyText);
         SetResourceBrush("RadioButtonBorderBrushPressed", themePalette.BodyText);
         SetResourceBrush("RadioButtonBorderBrushDisabled", themePalette.Line);
-        SetResourceBrush("RadioButtonOuterEllipseCheckedFill", themePalette.Accent);
-        SetResourceBrush("RadioButtonOuterEllipseCheckedStroke", themePalette.Accent);
+        SetResourceBrush("RadioButtonOuterEllipseCheckedFill", accent);
+        SetResourceBrush("RadioButtonOuterEllipseCheckedStroke", accent);
         SetResourceBrush("RadioButtonOuterEllipseFill", themePalette.Surface);
         SetResourceBrush("RadioButtonOuterEllipseStroke", themePalette.Line);
         SetResourceBrush("RadioButtonCheckGlyphFill", AccentTextHex(accent));
         SetResourceBrush("ProgressBarBackground", themePalette.Soft);
-        SetResourceBrush("ProgressBarForeground", themePalette.Accent);
+        SetResourceBrush("ProgressBarForeground", accent);
         SetResourceBrush("ToggleSwitchContentForeground", themePalette.BodyText);
         SetResourceBrush("ToggleSwitchContentForegroundDisabled", themePalette.BodyText);
-        SetResourceBrush("ToggleSwitchFillOn", themePalette.Accent);
+        SetResourceBrush("ToggleSwitchFillOn", accent);
         SetResourceBrush("ToggleSwitchFillOff", themePalette.Line);
         SetResourceBrush("ToggleSwitchFillOnDisabled", themePalette.Soft);
         SetResourceBrush("ToggleSwitchFillOffDisabled", themePalette.Soft);
@@ -1336,7 +1501,7 @@ private void UpdateSidebarSelection()
 		SetResourceBrush("TabViewItemIconForeground", themePalette.BodyText);
         SetResourceBrush("TabViewItemIconForegroundPressed", themePalette.PrimaryText);
 		SetResourceBrush("TabViewItemIconForegroundPointerOver", themePalette.PrimaryText);
-		SetResourceBrush("TabViewItemIconForegroundSelected", themePalette.AccentText);
+		SetResourceBrush("TabViewItemIconForegroundSelected", accentText);
 		SetResourceBrush("TabViewItemIconForegroundDisabled", themePalette.BodyText);
 
         // Palette changes are applied through the live app/page/theme dictionaries.
@@ -1757,7 +1922,7 @@ private static string EnsureTextContrast(string foreground, string background, d
 		{
 			"transcriber_provider", "transcriber_command", "transcriber_language", "model",
 			"compute_device", "cpu_threads", "language", "clips_per_chunk", "chunk_min",
-			"pre", "post", "min_score", "capture_bitrate_kbps", "delete_rec",
+			"clip_duration", "min_score", "capture_bitrate_kbps", "delete_rec",
 			"layout", "output_format"
 		})
 		{
@@ -1774,9 +1939,9 @@ private static string EnsureTextContrast(string foreground, string background, d
             ? System.Globalization.StringInfo.GetNextTextElement(trimmed).ToUpperInvariant()
             : "C";
 
-        var label = Txt(initial, Math.Max(12, size * 0.38), true);
+        var label = Txt(initial, Math.Max(14, size * 0.44), true);
         label.TextAlignment = TextAlignment.Center;
-        label.HorizontalAlignment = HorizontalAlignment.Stretch;
+        label.HorizontalAlignment = HorizontalAlignment.Center;
         label.VerticalAlignment = VerticalAlignment.Center;
         label.TextWrapping = TextWrapping.NoWrap;
         label.Margin = new Thickness(0);
@@ -1789,8 +1954,8 @@ private static string EnsureTextContrast(string foreground, string background, d
             Height = size - 2,
             MinWidth = size - 2,
             MinHeight = size - 2,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
         };
         content.Children.Add(label);
         Grid.SetRow(label, 0);
@@ -1897,6 +2062,48 @@ private static string EnsureTextContrast(string foreground, string background, d
 
 	private Button CreateButton(string label, Action action, bool primary = false, bool danger = false)
 	{
+		return CreateButtonCore(label, button =>
+		{
+			button.Click += (_, _) => action();
+		}, primary, danger);
+	}
+
+	private Button CreateAsyncButton(
+		string label,
+		Func<Task> action,
+		bool primary = false,
+		bool danger = false,
+		string errorTitle = "Action failed")
+	{
+		return CreateButtonCore(label, button =>
+		{
+			button.Click += async (_, _) =>
+			{
+				if (!button.IsEnabled)
+					return;
+				button.IsEnabled = false;
+				try
+				{
+					await action();
+				}
+				catch (Exception ex)
+				{
+					await ShowErrorAsync(errorTitle, ex.Message);
+				}
+				finally
+				{
+					button.IsEnabled = true;
+				}
+			};
+		}, primary, danger);
+	}
+
+	private Button CreateButtonCore(
+		string label,
+		Action<Button> attachHandler,
+		bool primary,
+		bool danger)
+	{
 		Button button = new Button();
 		button.Content = label;
 		button.FontFamily = CurrentFont;
@@ -1921,12 +2128,8 @@ private static string EnsureTextContrast(string foreground, string background, d
 		button.BorderBrush = Application.Current.Resources[danger ? "DangerBrush" : "LineBrush"] as Brush;
 		button.BorderThickness = new Thickness(1.0);
 		button.HorizontalAlignment = HorizontalAlignment.Left;
-		Button button3 = button;
-		button3.Click += (object _, RoutedEventArgs _) =>
-		{
-			action();
-		};
-		return button3;
+		attachHandler(button);
+		return button;
 	}
 
 	private TextBox Input(string text = "", string placeholder = "", bool multiline = false)

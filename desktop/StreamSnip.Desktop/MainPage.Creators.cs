@@ -35,11 +35,11 @@ public sealed partial class MainPage
         foreach (var creator in _creators.OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase))
         {
             var details = new StackPanel { Spacing = 5 };
-            details.Children.Add(Txt(creator.Name, 14, true));
-            details.Children.Add(ThemeText(creator.Target, 10, false, "MutedTextBrush"));
+            details.Children.Add(Txt(creator.Name, 16, true, "PrimaryTextBrush"));
+            details.Children.Add(ThemeText(creator.Target, 12, false, "MutedTextBrush"));
             details.Children.Add(ThemeText(
                 $"Live clips  {creator.LiveClips:N0}     VOD clips  {creator.VodClips:N0}     Pending VODs  {creator.VodPending:N0}",
-                10, false, "MutedTextBrush"));
+                12, false, "BodyTextBrush"));
 
             var statuses = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             if (creator.CaptureActive)
@@ -69,14 +69,14 @@ public sealed partial class MainPage
                 actions.Children.Add(CreateButton("Stop capture", async () => await CreatorActionAsync(
                     "Could not stop capture", "/api/creators/stop-capture", creator.Id, new JsonObject { ["force"] = false }), danger: true));
 
-            actions.Children.Add(CreateButton("Open folders", async () =>
+            actions.Children.Add(CreateButton("Open creator folder", async () =>
             {
                 try
                 {
                     await PostAsync("/api/creators/open", new JsonObject
                     {
                         ["id"] = creator.Id,
-                        ["folder"] = "live_clips"
+                        ["folder"] = "root"
                     });
                 }
                 catch (Exception ex) { await ShowErrorAsync("Could not open creator folder", ex.Message); }
@@ -92,16 +92,16 @@ public sealed partial class MainPage
                     CloseButtonText = "Cancel",
                     DefaultButton = ContentDialogButton.Close
                 };
-                if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+                if (await ShowThemedDialogAsync(dialog) != ContentDialogResult.Primary) return;
                 await CreatorActionAsync("Could not remove creator", "/api/creators/remove", creator.Id);
             }, danger: true));
 
             var row = new Grid { ColumnSpacing = 14, Padding = new Thickness(15) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var avatar = CreateCreatorAvatar(
-                creator.Name, size: 38, active: creator.Running || creator.CaptureActive);
+                creator.Name, size: 42, active: creator.Running || creator.CaptureActive);
             Grid.SetRow(avatar, 0);
             Grid.SetColumn(avatar, 0);
             row.Children.Add(avatar);
@@ -201,7 +201,7 @@ public sealed partial class MainPage
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowThemedDialogAsync(dialog) != ContentDialogResult.Primary) return;
         if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(target.Text))
         {
             await ShowErrorAsync("Creator details required", "Enter both a creator name and a Twitch or YouTube channel URL.");

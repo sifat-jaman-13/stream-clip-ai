@@ -15,6 +15,7 @@ public sealed class EngineSupervisor : IAsyncDisposable
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly Process _process;
+    private readonly ProcessTreeJob _processJob;
     private readonly ConcurrentQueue<string> _outputTail = new();
     private readonly TaskCompletionSource<Uri> _endpoint =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -30,9 +31,10 @@ public sealed class EngineSupervisor : IAsyncDisposable
     public int? ProcessId => _process.HasExited ? null : _process.Id;
     public Uri? BaseAddress { get; private set; }
 
-    private EngineSupervisor(Process process)
+    private EngineSupervisor(Process process, ProcessTreeJob processJob)
     {
         _process = process;
+        _processJob = processJob;
         _process.OutputDataReceived += (_, e) => HandleOutput(e.Data);
         _process.ErrorDataReceived += (_, e) =>
         {
@@ -98,13 +100,18 @@ public sealed class EngineSupervisor : IAsyncDisposable
                 start.Environment["PATH"] = ffmpegDirectory + Path.PathSeparator + start.Environment["PATH"];
         }
 
+        // The job handle is created before Python starts. Once assigned, the engine
+        // and every descendant it launches belong to the desktop-owned process tree.
+        // Windows kills that tree automatically if this app exits or crashes.
+        var processJob = ProcessTreeJob.Create();
         var process = new Process { StartInfo = start, EnableRaisingEvents = true };
-        var supervisor = new EngineSupervisor(process);
+        var supervisor = new EngineSupervisor(process, processJob);
         try
         {
             if (!process.Start())
                 throw new InvalidOperationException("Windows could not start the StreamSnip Python engine.");
 
+            supervisor._processJob.Assign(process);
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
@@ -368,6 +375,7 @@ public sealed class EngineSupervisor : IAsyncDisposable
             }
         }
         _http?.Dispose();
+        _processJob.Dispose();
         _process.Dispose();
         _lifetime.Dispose();
     }

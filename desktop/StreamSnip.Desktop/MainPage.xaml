@@ -273,7 +273,7 @@
                     <TextBlock x:Name="FooterSeparatorText" Text="·" Foreground="{ThemeResource LineBrush}" />
                     <TextBlock x:Name="FooterLocalMessageText" Text="Capture and rendering stay on this PC" FontSize="12" Foreground="{ThemeResource MutedTextBrush}" />
                 </StackPanel>
-                <TextBlock x:Name="FooterVersionText" Grid.Column="2" Text="StreamSnip AI  ·  4.0.16" FontSize="14" Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center" />
+                <TextBlock x:Name="FooterVersionText" Grid.Column="2" Text="StreamSnip AI  ·  4.1.0" FontSize="14" Foreground="{ThemeResource MutedTextBrush}" VerticalAlignment="Center" />
             </Grid>
         </Grid>
     </Grid>

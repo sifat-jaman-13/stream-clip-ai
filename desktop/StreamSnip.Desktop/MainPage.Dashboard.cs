@@ -569,23 +569,27 @@ public sealed partial class MainPage
 
         foreach (var creator in creators)
         {
-            var row = new Grid { ColumnSpacing = 10, Padding = new Thickness(0, 11, 0, 11), MinHeight = 58 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+            var row = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 12, 0, 12), MinHeight = 68 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var avatar = CreateCreatorAvatar(
-                creator.Name, size: 32, active: creator.Running || creator.CaptureActive);
+                creator.Name, size: 36, active: creator.Running || creator.CaptureActive);
             Grid.SetRow(avatar, 0);
             Grid.SetColumn(avatar, 0);
             row.Children.Add(avatar);
 
             var captureActive = creator.CaptureActive;
-            var copy = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            copy.Children.Add(Txt(creator.Name, 11, true));
+            var copy = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+            copy.Children.Add(Txt(creator.Name, 14, true, "PrimaryTextBrush"));
+            var statusDescription = captureActive
+                ? "Recording in Live Studio"
+                : creator.Status.Length > 0 ? creator.Status
+                : creator.Phase.Length > 0 ? creator.Phase : "Saved source";
             copy.Children.Add(ThemeText(
-                captureActive ? "Recording in Live Studio" : creator.Status.Length > 0 ? creator.Status : creator.Phase.Length > 0 ? creator.Phase : "Saved source",
-                10, false, "MutedTextBrush"));
+                statusDescription,
+                12, false, captureActive || creator.Running ? "SuccessTextBrush" : "BodyTextBrush"));
             Grid.SetColumn(copy, 1);
             row.Children.Add(copy);
 
@@ -708,14 +712,23 @@ public sealed partial class MainPage
     {
         var statusBrush = Application.Current.Resources[brushKey] as Brush
             ?? Application.Current.Resources["MutedTextBrush"] as Brush;
+        var textBrushKey = brushKey switch
+        {
+            "AccentBrush" => "AccentTextBrush",
+            "SuccessBrush" => "SuccessTextBrush",
+            "WarningBrush" => "WarningTextBrush",
+            "DangerBrush" => "DangerTextBrush",
+            _ => brushKey
+        };
         return new Border
         {
             CornerRadius = new CornerRadius(99),
             Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
             BorderBrush = statusBrush,
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(9, 4, 9, 4),
-            Child = ThemeText(text, 10, true, brushKey),
+            Padding = new Thickness(10, 5, 10, 5),
+            MinHeight = 30,
+            Child = ThemeText(text, 12, true, textBrushKey),
             VerticalAlignment = VerticalAlignment.Center
         };
     }

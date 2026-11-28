@@ -77,6 +77,7 @@ class NativeInstallerSetupTests(unittest.TestCase):
         installer = (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
         for source in (
             'Source: "..\\autoclip.py"',
+            'Source: "..\\secret_store.py"',
             'Source: "..\\requirements.txt"',
             'Source: "setup_windows.ps1"',
             'Source: "python315_support.ps1"',

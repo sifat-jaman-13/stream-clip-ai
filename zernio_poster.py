@@ -5,6 +5,7 @@ settings or environment variables. They must never be logged or committed.
 """
 import datetime as _dt
 import hashlib
+import inspect
 import json
 import os
 import pathlib
@@ -39,6 +40,26 @@ class ZernioAPIError(RuntimeError):
 
 def _truthy(value):
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _zernio_account_id(value):
+    """Normalize Zernio account IDs returned as strings or populated objects."""
+    if isinstance(value, dict):
+        value = value.get("_id") or value.get("id") or value.get("accountId")
+    return str(value or "").strip()
+
+
+def _notify_delivery_callback(callback, path, destinations, records):
+    """Pass delivery details to new callbacks while preserving two-argument integrations."""
+    if not callable(callback):
+        return
+    try:
+        signature = inspect.signature(callback)
+        signature.bind(path, destinations, records)
+    except (TypeError, ValueError):
+        callback(path, destinations)
+    else:
+        callback(path, destinations, records)
 
 
 class ZernioPublisher:
@@ -413,50 +434,114 @@ class ZernioPublisher:
             post = data.get("post") if isinstance(data.get("post"), dict) else root.get("post", {})
             post = post if isinstance(post, dict) else {}
             state = str(post.get("status") or "").strip().lower()
+            post_id = str(post.get("_id") or post.get("id") or "")
+            post_scheduled_for = post.get("scheduledFor") or post.get("scheduled_for")
+            post_published_at = post.get("publishedAt") or post.get("published_at")
             destination_rows = post.get("platforms") if isinstance(post.get("platforms"), list) else []
             successful = []
             successful_destinations = []
             scheduled_destinations = []
+            successful_records = []
+            scheduled_records = []
             failed = []
             for target in platforms:
-                match = next((row for row in destination_rows
-                              if isinstance(row, dict)
-                              and str(row.get("accountId") or row.get("account_id") or "") == target["accountId"]
-                              and str(row.get("platform") or "").lower() == target["platform"]), None)
+                candidates = [
+                    row for row in destination_rows
+                    if isinstance(row, dict)
+                    and str(row.get("platform") or "").strip().lower() == target["platform"]
+                ]
+                match = next((
+                    row for row in candidates
+                    if _zernio_account_id(row.get("accountId") or row.get("account_id"))
+                    == target["accountId"]
+                ), None)
+                # Some Zernio POST envelopes omit accountId on a destination row.
+                # A platform-only match is safe when this request has one target
+                # for that platform (the multi-connection publisher submits each
+                # account independently).
+                if match is None and len(candidates) == 1 and sum(
+                    item["platform"] == target["platform"] for item in platforms
+                ) == 1:
+                    match = candidates[0]
+
                 status = str((match or {}).get("status") or "").strip().lower()
+                record = {
+                    "account_id": target["accountId"],
+                    "platform": target["platform"],
+                    "post_id": post_id,
+                    "scheduled_for": (
+                        (match or {}).get("scheduledFor")
+                        or (match or {}).get("scheduled_for")
+                        or post_scheduled_for
+                    ),
+                    "published_at": (
+                        (match or {}).get("publishedAt")
+                        or (match or {}).get("published_at")
+                        or post_published_at
+                    ),
+                    "status": status or state,
+                }
                 if state in {"published", "partial"} and status == "published":
                     successful.append(target["platform"])
-                    successful_destinations.append(f"{target['platform']}:{target['accountId']}")
-                elif state in {"scheduled", "queued", "pending", "draft", "processing", "partial"} and status in {"scheduled", "queued", "pending", "processing", "submitted"}:
+                    destination = f"{target['platform']}:{target['accountId']}"
+                    successful_destinations.append(destination)
+                    successful_records.append(record)
+                elif state in {"scheduled", "queued", "pending", "draft", "processing", "partial"} and status in {
+                    "scheduled", "queued", "pending", "processing", "submitted",
+                }:
                     scheduled_destinations.append(f"{target['platform']}:{target['accountId']}")
+                    scheduled_records.append(record)
                 else:
-                    detail = (match or {}).get("errorMessage") or (match or {}).get("error") or (match or {}).get("errorCategory") or f"Destination status: {status or 'missing'}; post status: {state or 'missing'}."
-                    failed.append({"platform": target["platform"], "account_id": target["accountId"],
-                                   "status": status or "unknown", "error": str(detail)[:500]})
-            summary = {"post_id": str(post.get("id") or post.get("_id") or ""), "post_status": state,
-                       "successful_platforms": successful, "successful_destinations": successful_destinations,
-                       "scheduled_destinations": scheduled_destinations,
-                       "failed_platforms": failed, "scheduled": bool(self.schedule_minutes)}
-            targets = ", ".join(p["platform"] for p in platforms)
+                    detail = (
+                        (match or {}).get("errorMessage")
+                        or (match or {}).get("error")
+                        or (match or {}).get("errorCategory")
+                        or f"Destination status: {status or 'missing'}; post status: {state or 'missing'}."
+                    )
+                    failed.append({
+                        "platform": target["platform"],
+                        "account_id": target["accountId"],
+                        "status": status or "unknown",
+                        "error": str(detail)[:500],
+                    })
+
+            delivery_records = successful_records + scheduled_records
+            summary = {
+                "post_id": post_id,
+                "post_status": state,
+                "scheduled_for": post_scheduled_for,
+                "published_at": post_published_at,
+                "successful_platforms": successful,
+                "successful_destinations": successful_destinations,
+                "scheduled_destinations": scheduled_destinations,
+                "delivery_records": delivery_records,
+                "failed_platforms": failed,
+                "scheduled": bool(scheduled_destinations),
+            }
+            targets_label = ", ".join(p["platform"] for p in platforms)
             suffix = f" ({self.schedule_minutes} min delay)" if self.schedule_minutes else ""
-            self.log(f"Zernio: {path.name} {state or 'unknown'} to {targets}{suffix}.")
-            if not self.schedule_minutes and successful and callable(self.on_success):
+            self.log(f"Zernio: {path.name} {state or 'unknown'} to {targets_label}{suffix}.")
+            if successful and callable(self.on_success):
                 try:
-                    self.on_success(path, successful_destinations)
+                    _notify_delivery_callback(
+                        self.on_success, path, successful_destinations, successful_records
+                    )
                 except Exception as callback_error:
                     self.log(f"Zernio Posted status update failed for {path.name}: {callback_error}")
-            if self.schedule_minutes and scheduled_destinations and callable(self.on_scheduled):
+            if scheduled_destinations and callable(self.on_scheduled):
                 try:
-                    self.on_scheduled(path, scheduled_destinations)
+                    _notify_delivery_callback(
+                        self.on_scheduled, path, scheduled_destinations, scheduled_records
+                    )
                 except Exception as callback_error:
                     self.log(f"Zernio Scheduled status update failed for {path.name}: {callback_error}")
             if failed:
                 details = "; ".join(f"{item['platform']}: {item['error']}" for item in failed)
                 raise RuntimeError(f"Zernio post {state or 'unknown'}; destination failure: {details}")
-            if not summary["scheduled"] and not successful:
-                raise RuntimeError(f"Zernio did not confirm a published destination (post status: {state or 'missing'}).")
-            if summary["scheduled"] and not scheduled_destinations:
-                raise RuntimeError(f"Zernio did not confirm a scheduled destination (post status: {state or 'missing'}).")
+            if not successful and not scheduled_destinations:
+                raise RuntimeError(
+                    f"Zernio did not confirm a published or scheduled destination (post status: {state or 'missing'})."
+                )
             return summary
         except Exception as e:
             self.log(f"Zernio error for {path.name}: {e}")

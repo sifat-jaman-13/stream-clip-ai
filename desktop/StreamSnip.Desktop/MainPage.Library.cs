@@ -2,7 +2,11 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Media.Core;
+using Windows.Media.Playback;
+using Windows.Storage.Pickers;
+using Windows.Storage;
 
 namespace StreamSnip_Desktop;
 
@@ -18,19 +22,29 @@ public sealed partial class MainPage
     private TextBox? _clipTitleInput;
     private TextBox? _clipDescriptionInput;
     private MediaPlayerElement? _clipPlayer;
+    private Border? _clipInspectorCard;
+    private Border? _clipListSection;
+    private Grid? _clipLibraryLayout;
+    private readonly Dictionary<string, Button> _clipRowButtons = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Image> _clipThumbnailImages = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<MediaPlayer> _clipHoverPlayers = [];
     private TextBlock? _clipLibraryCount;
     private TextBlock? _clipPageInfo;
     private Button? _clipPreviousButton;
     private Button? _clipNextButton;
     private TextBox? _clipSearchInput;
     private bool _clipPublished;
+    private bool _zernioSyncInProgress;
+    private DateTime _lastZernioSyncUtc = DateTime.MinValue;
+    private DateTime _lastClipDataRefreshUtc = DateTime.MinValue;
+    private string _lastClipDataTab = "";
 
     private void RenderClipLibraryPage(bool published)
     {
         _clipPublished = published;
         _clipTab = published ? "scheduled" : "clips";
         AddPageHeading(
-            published ? "Scheduled" : "Clip library",
+            published ? "Scheduled & Posted" : "Clip library",
             published
                 ? "Zernio posts accepted for future publishing and clips already sent successfully."
                 : "Review generated clips, edit their post metadata, and publish or schedule them with Zernio.");
@@ -49,14 +63,19 @@ public sealed partial class MainPage
         toolbar.Children.Add(search);
         var autoScheduleButton = CreateButton("Auto schedule", async () => await AutoScheduleClipsAsync(), primary: !published);
         autoScheduleButton.Visibility = published ? Visibility.Collapsed : Visibility.Visible;
+        var syncButton = CreateButton(
+            "Sync with Zernio",
+            async () => await SyncZernioPostsAsync(showResult: true));
+        syncButton.Visibility = published ? Visibility.Visible : Visibility.Collapsed;
         var actions = ActionRow(
             CreateButton("Ready to review", () => NavigateTo("clips"), primary: !published),
             CreateButton("Scheduled", () => NavigateTo("published"), primary: published),
             autoScheduleButton,
-            CreateButton("Open clips folder", async () =>
+            syncButton,
+            CreateButton("Open creator folders", async () =>
             {
-                try { await PostAsync("/api/open_folder", new JsonObject()); }
-                catch (Exception ex) { await ShowErrorAsync("Could not open clips folder", ex.Message); }
+                try { await PostAsync("/api/creators/open-root", new JsonObject()); }
+                catch (Exception ex) { await ShowErrorAsync("Could not open creator folders", ex.Message); }
             }));
         Grid.SetColumn(actions, 1);
         toolbar.Children.Add(actions);
@@ -83,9 +102,10 @@ public sealed partial class MainPage
         PageHost.Children.Add(_clipSelectionBar);
         UpdateClipSelectionBar();
 
-        var layout = new Grid { ColumnSpacing = 15 };
-        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
+        var layout = new Grid { ColumnSpacing = 16 };
         layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(360) });
+        _clipLibraryLayout = layout;
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -135,8 +155,68 @@ public sealed partial class MainPage
         var pagination = ActionRow(_clipPreviousButton, _clipNextButton, _clipPageInfo);
         listPanel.Children.Add(pagination);
 
+        var preview = BuildClipInspector(_selectedClip, published);
+
+        _clipListSection = CreateCompactLibraryPanel(
+            published ? "Scheduled & Posted clips" : "Ready to review",
+            "Your newest MP4 files and their post details.",
+            listPanel);
+        _clipInspectorCard = CreateCompactLibraryPanel(
+            "Clip details",
+            "Preview, edit, and publish this video.",
+            preview);
+        layout.Children.Add(_clipListSection);
+        layout.Children.Add(_clipInspectorCard);
+
+        layout.SizeChanged += (_, args) => UpdateClipLibraryLayout(args.NewSize.Width);
+        layout.Loaded += (_, _) => UpdateClipLibraryLayout(layout.ActualWidth);
+        PageHost.Children.Add(layout);
+    }
+
+    private static Border CreateCompactLibraryPanel(
+        string title,
+        string description,
+        UIElement content)
+    {
+        var stack = new StackPanel { Spacing = 10 };
+        stack.Children.Add(Txt(title, 14, true));
+        if (!string.IsNullOrWhiteSpace(description))
+            stack.Children.Add(ThemeText(description, 10, false, "MutedTextBrush"));
+        stack.Children.Add(content);
+        return new Border
+        {
+            Background = Application.Current.Resources["SurfaceBrush"] as Brush,
+            BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(14),
+            Child = stack
+        };
+    }
+
+    private void UpdateClipLibraryLayout(double width)
+    {
+        if (_clipLibraryLayout is null || _clipListSection is null || _clipInspectorCard is null)
+            return;
+
+        var hasSelection = _selectedClip is not null;
+        var stacked = hasSelection && width < 860;
+        _clipInspectorCard.Visibility = hasSelection ? Visibility.Visible : Visibility.Collapsed;
+        _clipLibraryLayout.ColumnSpacing = hasSelection && !stacked ? 16 : 0;
+        _clipLibraryLayout.RowSpacing = stacked ? 14 : 0;
+
+        Grid.SetColumn(_clipListSection, 0);
+        Grid.SetRow(_clipListSection, 0);
+        Grid.SetColumnSpan(_clipListSection, !hasSelection || stacked ? 2 : 1);
+        Grid.SetColumn(_clipInspectorCard, stacked ? 0 : 1);
+        Grid.SetRow(_clipInspectorCard, stacked ? 1 : 0);
+        Grid.SetColumnSpan(_clipInspectorCard, stacked ? 2 : 1);
+    }
+
+    private StackPanel BuildClipInspector(ClipItem? clip, bool published)
+    {
         var preview = new StackPanel { Spacing = 10 };
-        if (_selectedClip is null)
+        if (clip is null)
         {
             preview.Children.Add(Txt("Select a clip to review", 14, true));
             preview.Children.Add(ThemeText("Preview video, edit title and description, or open the original file location.", 10, false, "MutedTextBrush"));
@@ -173,75 +253,183 @@ public sealed partial class MainPage
         }
         else
         {
-            preview.Children.Add(Txt("Clip preview", 13, true));
+            preview.Children.Add(Txt("Clip preview", 12, true));
             _clipPlayer = new MediaPlayerElement
             {
                 AreTransportControlsEnabled = true,
                 AutoPlay = false,
-                MinHeight = 235,
-                MaxHeight = 360,
+                MinHeight = 180,
+                MaxHeight = 250,
                 Stretch = Stretch.Uniform
             };
             if (_engine?.BaseAddress is Uri baseAddress)
             {
-                var clipUri = new Uri(baseAddress, "clips/" + Uri.EscapeDataString(_selectedClip.Name));
+                var clipUri = new Uri(baseAddress, "clips/" + Uri.EscapeDataString(clip.Name));
                 _clipPlayer.Source = MediaSource.CreateFromUri(clipUri);
             }
             preview.Children.Add(_clipPlayer);
-            preview.Children.Add(ThemeText(_selectedClip.Name, 10, false, "MutedTextBrush"));
+            preview.Children.Add(ThemeText(clip.Name, 10, false, "MutedTextBrush"));
 
             _clipTitleInput = Input(
-                string.IsNullOrWhiteSpace(_selectedClip.Title) ? _selectedClip.Name : _selectedClip.Title,
+                string.IsNullOrWhiteSpace(clip.Title) ? clip.Name : clip.Title,
                 "Post title");
             AddLabeled(preview, "Post title", _clipTitleInput);
-            _clipDescriptionInput = Input(_selectedClip.Description, "Post description", multiline: true);
+            _clipDescriptionInput = Input(clip.Description, "Post description", multiline: true);
             AddLabeled(preview, "Post description", _clipDescriptionInput);
 
             var previewActions = new StackPanel { Spacing = 8 };
-            var postSelected = CreateButton("Post via Zernio", async () => await PostClipViaZernioAsync(_selectedClip), primary: false);
-            postSelected.IsEnabled = !published && !_selectedClip.Posted && !_selectedClip.Scheduled;
+            var postSelected = CreateButton("Post via Zernio", async () => await PostClipViaZernioAsync(clip), primary: false);
+            postSelected.IsEnabled = !published && !clip.Posted && !clip.Scheduled;
             previewActions.Children.Add(ActionRow(
                 CreateButton("Save details", async () => await SaveSelectedClipMetadataAsync(), primary: true),
                 postSelected));
             previewActions.Children.Add(ActionRow(
+                CreateButton("Copy caption", async () => await CopySelectedClipCaptionAsync()),
+                CreateButton("Download video", async () => await DownloadSelectedClipAsync())));
+            previewActions.Children.Add(ActionRow(
                 CreateButton("Show in folder", async () =>
                 {
-                    try { await PostAsync("/api/reveal", new JsonObject { ["name"] = _selectedClip.Name }); }
+                    try { await PostAsync("/api/reveal", new JsonObject { ["name"] = clip.Name }); }
                     catch (Exception ex) { await ShowErrorAsync("Could not reveal clip", ex.Message); }
                 }),
                 CreateButton("Delete clip", async () => await DeleteSelectedClipAsync(), danger: true)));
             preview.Children.Add(previewActions);
         }
 
-        var listSection = CreatePanel(
-            published ? "Scheduled clips" : "Ready to review",
-            "Your newest MP4 files and their TXT-backed post metadata.",
-            listPanel);
-        var inspector = CreatePanel("Inspector", "Native Windows video preview and editable post metadata.", preview);
-        layout.Children.Add(listSection);
-        layout.Children.Add(inspector);
+        return preview;
+    }
 
-        void ApplyLibraryBreakpoint(double width)
+    private void UpdateClipInspector(ClipItem? clip, bool published)
+    {
+        if (_clipInspectorCard?.Child is not StackPanel panel)
+            return;
+
+        _clipPlayer?.Source = null;
+        _clipPlayer = null;
+        var replacement = BuildClipInspector(clip, published);
+        if (panel.Children.Count == 0)
+            panel.Children.Add(replacement);
+        else
         {
-            var stacked = width < 860;
-            layout.ColumnSpacing = stacked ? 0 : 15;
-            layout.RowSpacing = stacked ? 16 : 0;
-            Grid.SetColumn(listSection, 0);
-            Grid.SetRow(listSection, 0);
-            Grid.SetColumnSpan(listSection, stacked ? 2 : 1);
-            Grid.SetColumn(inspector, stacked ? 0 : 1);
-            Grid.SetRow(inspector, stacked ? 1 : 0);
-            Grid.SetColumnSpan(inspector, stacked ? 2 : 1);
+            panel.Children.RemoveAt(panel.Children.Count - 1);
+            panel.Children.Add(replacement);
+        }
+    }
+
+    private void RefreshClipThumbnail(string clipName)
+    {
+        if (!_clipThumbnailImages.TryGetValue(clipName, out var image) ||
+            _engine?.BaseAddress is not Uri baseAddress)
+            return;
+        try
+        {
+            image.Source = null;
+            image.Source = new BitmapImage(new Uri(
+                baseAddress,
+                "clip-thumbnails/" + Uri.EscapeDataString(clipName) + "?v=" + DateTime.UtcNow.Ticks));
+        }
+        catch { }
+    }
+
+    private void UpdateClipRowSelectionStyles()
+    {
+        foreach (var pair in _clipRowButtons)
+        {
+            var selected = string.Equals(
+                pair.Key, _selectedClip?.Name, StringComparison.OrdinalIgnoreCase);
+            pair.Value.Background = Application.Current.Resources[
+                selected ? "AccentSoftBrush" : "SurfaceSoftBrush"] as Brush;
+            pair.Value.BorderBrush = Application.Current.Resources[
+                selected ? "AccentBrush" : "LineBrush"] as Brush;
+        }
+    }
+
+    private async Task SyncZernioPostsAsync(bool showResult)
+    {
+        if (_zernioSyncInProgress || _engine is null)
+            return;
+        _zernioSyncInProgress = true;
+        _lastZernioSyncUtc = DateTime.UtcNow;
+        try
+        {
+            var result = await PostAsync("/api/publishing/sync-posts", new JsonObject());
+            var message = result["message"]?.ToString() ?? "Zernio post statuses synchronized.";
+            if (showResult)
+                await DialogResultAsync("Zernio sync complete", message);
+            await RefreshStateAsync(forceRender: true);
+        }
+        catch (Exception ex)
+        {
+            if (showResult)
+                await ShowErrorAsync("Could not sync Zernio posts", ex.Message);
+        }
+        finally
+        {
+            _zernioSyncInProgress = false;
+        }
+    }
+
+    private async Task CopySelectedClipCaptionAsync()
+    {
+        if (_selectedClip is null) return;
+        var caption = !string.IsNullOrWhiteSpace(_selectedClip.Caption)
+            ? _selectedClip.Caption
+            : string.Join("\n\n", new[]
+            {
+                _selectedClip.Title,
+                _selectedClip.Description
+            }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        if (string.IsNullOrWhiteSpace(caption))
+        {
+            await ShowErrorAsync("Nothing to copy", "This clip does not have caption text yet.");
+            return;
         }
 
-        layout.SizeChanged += (_, args) => ApplyLibraryBreakpoint(args.NewSize.Width);
-        layout.Loaded += (_, _) => ApplyLibraryBreakpoint(layout.ActualWidth);
-        PageHost.Children.Add(layout);
+        var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        package.SetText(caption);
+        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+        Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
+        await DialogResultAsync("Caption copied", "The clip title, description, and caption text are on your clipboard.");
+    }
+
+    private async Task DownloadSelectedClipAsync()
+    {
+        if (_selectedClip is null || _engine?.BaseAddress is not Uri baseAddress)
+            return;
+        try
+        {
+            var picker = new FileSavePicker
+            {
+                SuggestedStartLocation = PickerLocationId.Downloads,
+                SuggestedFileName = Path.GetFileName(_selectedClip.Name)
+            };
+            picker.FileTypeChoices.Add("MP4 video", new List<string> { ".mp4" });
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance!);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+            var destination = await picker.PickSaveFileAsync();
+            if (destination is null) return;
+
+            var clipUri = new Uri(baseAddress, "clips/" + Uri.EscapeDataString(_selectedClip.Name));
+            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+            using var response = await client.GetAsync(
+                clipUri, HttpCompletionOption.ResponseHeadersRead, _shutdown.Token);
+            response.EnsureSuccessStatusCode();
+            await using var input = await response.Content.ReadAsStreamAsync(_shutdown.Token);
+            await using var output = await destination.OpenStreamForWriteAsync();
+            output.SetLength(0);
+            await input.CopyToAsync(output, 1024 * 1024, _shutdown.Token);
+            await output.FlushAsync(_shutdown.Token);
+            await DialogResultAsync("Video downloaded", destination.Path);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not download clip", ex.Message);
+        }
     }
 
     private StackPanel? _clipRowsHost;
 
-    private void UpdateClipLibraryState()
+    private void UpdateClipLibraryState(bool refreshRows = true)
     {
         if (_clipRowsHost is null) return;
         var published = _clipPublished;
@@ -257,13 +445,21 @@ public sealed partial class MainPage
             _clipPreviousButton.IsEnabled = _clipOffset > 0;
         if (_clipNextButton is not null)
             _clipNextButton.IsEnabled = _clipOffset + pageSize < total;
-        RefreshClipRows(published);
+        if (refreshRows)
+            RefreshClipRows(published);
     }
 
     private void RefreshClipRows(bool published)
     {
         if (_clipRowsHost is null) return;
         _clipRowsHost.Children.Clear();
+        _clipRowButtons.Clear();
+        _clipThumbnailImages.Clear();
+        foreach (var player in _clipHoverPlayers)
+        {
+            try { player.Pause(); player.Source = null; player.Dispose(); } catch { }
+        }
+        _clipHoverPlayers.Clear();
         var clips = _state?.Clips ?? [];
         var filtered = clips.Where(clip =>
             string.IsNullOrWhiteSpace(_clipSearch) ||
@@ -288,18 +484,81 @@ public sealed partial class MainPage
         foreach (var clip in filtered)
         {
             var selected = _selectedClip?.Name == clip.Name;
-            var copy = new StackPanel { Spacing = 3 };
+            var copy = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
             copy.Children.Add(Txt(
                 string.IsNullOrWhiteSpace(clip.Title) ? clip.Name : clip.Title,
-                10, true));
+                11, true));
             copy.Children.Add(ThemeText(
-                $"{(clip.Posted ? "Posted" : clip.Scheduled ? "Scheduled" : "Ready to post")}  ·  {(string.IsNullOrWhiteSpace(clip.CreatorName) ? clip.Source : clip.CreatorName)}  ·  {FormatSize(clip.SizeMb)}",
+                $"{(clip.Scheduled ? "Scheduled" : clip.Posted ? "Posted" : "Ready to post")}  ?  {(string.IsNullOrWhiteSpace(clip.CreatorName) ? clip.Source : clip.CreatorName)}  ?  {FormatSize(clip.SizeMb)}",
                 10, false, "MutedTextBrush"));
             copy.Children.Add(ThemeText(FormatClipDate(clip.ModifiedAt), 10, false, "MutedTextBrush"));
 
+            var thumbnailGrid = new Grid { Width = 124, Height = 70 };
+            thumbnailGrid.Children.Add(new PathIcon
+            {
+                Data = CreateVideoIconGeometry(),
+                Width = 24,
+                Height = 24,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
+            });
+            Image? thumbnailImage = null;
+            Uri? clipUri = null;
+            if (_engine?.BaseAddress is Uri thumbnailBase)
+            {
+                clipUri = new Uri(thumbnailBase, "clips/" + Uri.EscapeDataString(clip.Name));
+                thumbnailImage = new Image
+                {
+                    Width = 124,
+                    Height = 70,
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Source = new BitmapImage(new Uri(
+                        thumbnailBase,
+                        "clip-thumbnails/" + Uri.EscapeDataString(clip.Name)))
+                };
+                thumbnailGrid.Children.Add(thumbnailImage);
+                _clipThumbnailImages[clip.Name] = thumbnailImage;
+            }
+
+            // Match the v4.0.9 web card: video starts only while the card is
+            // hovered, never for all 60 clips at initial gallery render.
+            var hoverPlayerElement = new MediaPlayerElement
+            {
+                Width = 124,
+                Height = 70,
+                AreTransportControlsEnabled = false,
+                AutoPlay = false,
+                Stretch = Stretch.UniformToFill,
+                Visibility = Visibility.Collapsed,
+                IsHitTestVisible = false
+            };
+            thumbnailGrid.Children.Add(hoverPlayerElement);
+            MediaPlayer? hoverMediaPlayer = null;
+            var thumbnailFrame = new Border
+            {
+                Width = 124,
+                Height = 70,
+                CornerRadius = new CornerRadius(8),
+                Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
+                BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
+                BorderThickness = new Thickness(1),
+                Child = thumbnailGrid
+            };
+            var cardContent = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 12,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            cardContent.Children.Add(thumbnailFrame);
+            cardContent.Children.Add(copy);
+
             var choose = new Button
             {
-                Content = copy,
+                Content = cardContent,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Background = Application.Current.Resources[selected ? "AccentSoftBrush" : "SurfaceSoftBrush"] as Brush,
                 BorderBrush = Application.Current.Resources[selected ? "AccentBrush" : "LineBrush"] as Brush,
@@ -310,9 +569,55 @@ public sealed partial class MainPage
             };
             choose.Click += (_, _) =>
             {
+                if (string.Equals(_selectedClip?.Name, clip.Name, StringComparison.OrdinalIgnoreCase))
+                    return;
                 _selectedClip = clip;
-                RenderClipLibraryPage(published);
+                UpdateClipRowSelectionStyles();
+                UpdateClipInspector(clip, published);
+                UpdateClipLibraryLayout(_clipLibraryLayout?.ActualWidth ?? 0);
             };
+            choose.PointerEntered += (_, _) =>
+            {
+                if (clipUri is null)
+                    return;
+                try
+                {
+                    thumbnailImage?.SetValue(UIElement.VisibilityProperty, Visibility.Collapsed);
+                    if (hoverMediaPlayer is null)
+                    {
+                        hoverMediaPlayer = new MediaPlayer
+                        {
+                            IsMuted = true,
+                            IsLoopingEnabled = true
+                        };
+                        hoverPlayerElement.SetMediaPlayer(hoverMediaPlayer);
+                        _clipHoverPlayers.Add(hoverMediaPlayer);
+                    }
+                    hoverPlayerElement.Visibility = Visibility.Visible;
+                    hoverMediaPlayer.Source = MediaSource.CreateFromUri(clipUri);
+                    hoverMediaPlayer.Play();
+                }
+                catch
+                {
+                    hoverPlayerElement.Visibility = Visibility.Collapsed;
+                    if (thumbnailImage is not null)
+                        thumbnailImage.Visibility = Visibility.Visible;
+                }
+            };
+            choose.PointerExited += (_, _) =>
+            {
+                try
+                {
+                    hoverMediaPlayer?.Pause();
+                    if (hoverMediaPlayer is not null)
+                        hoverMediaPlayer.Source = null;
+                }
+                catch { }
+                hoverPlayerElement.Visibility = Visibility.Collapsed;
+                if (thumbnailImage is not null)
+                    thumbnailImage.Visibility = Visibility.Visible;
+            };
+            _clipRowButtons[clip.Name] = choose;
             var selectedCheck = new CheckBox
             {
                 IsChecked = _selectedClipNames.Contains(clip.Name),
@@ -339,6 +644,7 @@ public sealed partial class MainPage
         }
         UpdateClipSelectionBar();
         UpdateClipSelectPageCheck(filtered);
+        UpdateClipRowSelectionStyles();
     }
     private void ToggleClipSelection(string name, bool selected, bool published)
     {
@@ -400,7 +706,7 @@ public sealed partial class MainPage
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowThemedDialogAsync(dialog) != ContentDialogResult.Primary) return;
 
         try
         {
@@ -455,7 +761,7 @@ public sealed partial class MainPage
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowThemedDialogAsync(dialog) != ContentDialogResult.Primary) return;
         try
         {
             var array = new JsonArray();
@@ -483,7 +789,7 @@ public sealed partial class MainPage
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowThemedDialogAsync(dialog) != ContentDialogResult.Primary) return;
         try
         {
             await PostAsync("/api/delete_all", new JsonObject { ["clip_tab"] = tab });
@@ -543,7 +849,7 @@ public sealed partial class MainPage
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowThemedDialogAsync(dialog) != ContentDialogResult.Primary) return;
         try
         {
             await PostAsync("/api/delete", new JsonObject { ["name"] = name });

@@ -71,6 +71,186 @@ class NativeXamlContractTests(unittest.TestCase):
         ):
             self.assertIn(element, shell, element)
 
+    def test_zernio_connection_cards_expose_a_per_slot_disconnect_action(self):
+        manage = (DESKTOP / "MainPage.Manage.cs").read_text(encoding="utf-8")
+        self.assertIn("var disconnect = CreateAsyncButton(", manage)
+        self.assertIn('_engine.PostJsonAsync(', manage)
+        self.assertIn('"/api/publishing/disconnect"', manage)
+        self.assertIn("ResetDisconnectedPublishingSlot(connectionId);", manage)
+        self.assertIn("DisconnectPublishingConnectionAsync", manage)
+        self.assertIn("_zernioDisconnectButtons[id] = disconnect;", manage)
+        self.assertIn("disconnect.Visibility = isConnected ? Visibility.Visible : Visibility.Collapsed;", manage)
+        slot_start = manage.index("var slotActions = new List<UIElement>", manage.index("private async void RenderPublishingPage"))
+        slot_end = manage.index("slot.Children.Add(ActionRow(slotActions.ToArray()));", slot_start)
+        slot_actions = manage[slot_start:slot_end]
+        self.assertIn('CreateAsyncButton(\n                "Disconnect"', slot_actions)
+        self.assertIn("slotActions.Add(disconnect);", slot_actions)
+        self.assertIn("disconnect.Visibility = slotConnected ? Visibility.Visible : Visibility.Collapsed;", slot_actions)
+        self.assertNotIn('if (saved?["api_key_set"]?.GetValue<bool>() == true)', slot_actions)
+        disconnect_start = manage.index("private async Task DisconnectPublishingConnectionAsync")
+        disconnect_end = manage.index("private async Task LoadPublishingAccountsAsync", disconnect_start)
+        disconnect = manage[disconnect_start:disconnect_end]
+        self.assertNotIn("ContentDialog", disconnect)
+        self.assertNotIn("ShowThemedDialogAsync", disconnect)
+        self.assertNotIn("RenderCurrentPage(", disconnect)
+        self.assertNotIn("RefreshStateAsync(", disconnect)
+
+    def test_native_zernio_cards_keep_their_saved_physical_slot_ids(self):
+        manage = (DESKTOP / "MainPage.Manage.cs").read_text(encoding="utf-8")
+        self.assertIn("var savedConnectionSlots = new JsonObject?[5];", manage)
+        self.assertIn("GetZernioSlotNumber(connection[\"id\"]?.ToString())", manage)
+        self.assertIn("var saved = savedConnectionSlots[index];", manage)
+        self.assertIn('id = $"streamsnip-zernio-slot-{slotNumber}";', manage)
+        self.assertIn("private static int? GetZernioSlotNumber(string? connectionId)", manage)
+        self.assertIn('string.Equals(connectionId, $"streamsnip-zernio-slot-{slot}"', manage)
+        self.assertNotIn(
+            "var saved = index < savedConnections.Count ? savedConnections[index] : null;",
+            manage,
+        )
+        self.assertIn("GetZernioSlotNumber(id)", manage)
+        self.assertIn("GetZernioSlotNumber(connectionId)", manage)
+        self.assertIn("refreshAccountsButton.IsEnabled = slotConnected;", manage)
+        self.assertIn("refreshAccountsButton.Visibility = Visibility.Visible;", manage)
+        self.assertIn("refreshAccountsButton.IsEnabled = slotConnected;", manage)
+
+    def test_live_studio_prioritizes_real_framing_and_caption_previews(self):
+        live = (DESKTOP / "MainPage.Live.cs").read_text(encoding="utf-8")
+        framing = (DESKTOP / "MainPage.Framing.cs").read_text(encoding="utf-8")
+        preview = (DESKTOP / "MainPage.OutputPreview.cs").read_text(encoding="utf-8")
+
+        self.assertLess(live.index('Header = "Framing"'), live.index('Header = "Captions"'))
+        self.assertLess(live.index('Header = "Captions"'), live.index('Header = "Capture"'))
+        self.assertIn("DisplayMemberPath = nameof(CreatorItem.Name)", live)
+        self.assertIn("SelectedValuePath = nameof(CreatorItem.Id)", live)
+        self.assertNotIn("foreach (var creator in _creators.OrderBy", live)
+        self.assertIn('"/api/output-preview"', preview)
+        self.assertIn("MediaSource.CreateFromStorageFile(file)", preview)
+        self.assertIn("RenderActualClipPreviewAsync", framing)
+        self.assertIn("RenderActualClipPreviewAsync", live)
+        self.assertIn("OutputFormatDescription()", preview)
+        self.assertIn('"min_score" => 80', live)
+
+    def test_native_poller_throttles_clip_payloads_and_creator_requests(self):
+        source = (DESKTOP / "MainPage.xaml.cs").read_text(encoding="utf-8")
+        library = (DESKTOP / "MainPage.Library.cs").read_text(encoding="utf-8")
+        self.assertIn("include_clips={include}", source)
+        self.assertIn("TimeSpan.FromSeconds(12)", source)
+        self.assertIn("var previousClips = _state?.Clips ?? [];", source)
+        self.assertIn("nextState with { Clips = previousClips }", source)
+        self.assertIn("TimeSpan.FromMilliseconds(3600)", source)
+        self.assertIn("tick % 3 == 0", source)
+        self.assertIn('_currentPage == "live" || _currentPage == "creators"', source)
+        self.assertIn("UpdateClipLibraryState(clipDataChanged)", source)
+        navigate = source[source.index("private void NavigateTo(string page)"):source.index("private static string GetPageTitle")]
+        self.assertIn('_ = RefreshStateAsync();', navigate)
+        self.assertNotIn("SyncZernioPostsAsync(showResult: false)", library)
+        click = library[library.index("choose.Click +="):library.index("_clipRowButtons[clip.Name]")]
+        self.assertIn("UpdateClipInspector(clip, published)", click)
+        self.assertNotIn("RenderClipLibraryPage(published)", click)
+        self.assertIn("BuildClipInspector(clip, published)", library)
+        self.assertIn("_clipInspectorCard.Visibility = hasSelection ? Visibility.Visible : Visibility.Collapsed;", library)
+        self.assertIn("new GridLength(360)", library)
+        self.assertIn("CreateCompactLibraryPanel(", library)
+
+    def test_native_clip_library_has_video_thumbnails_player_and_caption_actions(self):
+        library = (DESKTOP / "MainPage.Library.cs").read_text(encoding="utf-8")
+        engine = (ROOT / "autoclip.py").read_text(encoding="utf-8")
+        self.assertIn('"clip-thumbnails/" + Uri.EscapeDataString(clip.Name)', library)
+        self.assertIn("new BitmapImage(new Uri(", library)
+        self.assertIn("MediaPlayerElement", library)
+        self.assertIn("AreTransportControlsEnabled = true", library)
+        self.assertIn("MediaSource.CreateFromUri(clipUri)", library)
+        self.assertIn("choose.PointerEntered", library)
+        self.assertIn("choose.PointerExited", library)
+        self.assertIn("hoverMediaPlayer.Play()", library)
+        self.assertIn("IsMuted = true", library)
+        self.assertIn('CreateButton("Copy caption"', library)
+        self.assertIn('CreateButton("Download video"', library)
+        self.assertIn("CopySelectedClipCaptionAsync", library)
+        self.assertIn("DownloadSelectedClipAsync", library)
+        self.assertIn('FileSavePicker', library)
+        self.assertIn('Clipboard.SetContent(package)', library)
+        self.assertIn('def clip_thumbnail_path(clip_path):', engine)
+        self.assertIn('path.startswith("/clip-thumbnails/")', engine)
+
+    def test_scheduled_page_syncs_zernio_without_submitting_or_rescheduling_posts(self):
+        library = (DESKTOP / "MainPage.Library.cs").read_text(encoding="utf-8")
+        engine = (ROOT / "autoclip.py").read_text(encoding="utf-8")
+        sync = engine[engine.index("def sync_zernio_posts(self):"):engine.index("def publishing_status(self):")]
+        self.assertIn("var syncButton = CreateButton(", library)
+        self.assertIn("\"Sync with Zernio\"", library)
+        self.assertIn('PostAsync("/api/publishing/sync-posts"', library)
+        self.assertIn('"/api/publishing/sync-posts"', engine)
+        self.assertIn('client._json_request("GET"', sync)
+        self.assertNotIn('client.publish_one(', sync)
+        self.assertNotIn('POST', sync)
+
+    def test_creator_storage_paths_are_not_editable_and_log_copy_download_use_engine_data_root(self):
+        manage = (DESKTOP / "MainPage.Manage.cs").read_text(encoding="utf-8")
+        settings_start = manage.index("private void RenderSettingsPage()")
+        settings_end = manage.index("private async Task<string?> PickFolderAsync()", settings_start)
+        settings = manage[settings_start:settings_end]
+        self.assertNotIn("Recordings folder", settings)
+        self.assertNotIn("Rendered clips folder", settings)
+        self.assertNotIn("Storage locations", settings)
+        self.assertIn("native-engine.json", manage)
+        self.assertIn('config?["data_root"]', manage)
+        self.assertIn('Path.Combine(dataRoot, "streamsnip.log")', manage)
+        self.assertIn("CopyRuntimeLogAsync", manage)
+        self.assertIn("Clipboard.SetContent(package)", manage)
+        self.assertIn("DownloadRuntimeLogAsync", manage)
+        library = (DESKTOP / "MainPage.Library.cs").read_text(encoding="utf-8")
+        self.assertIn('CreateButton("Open creator folders"', library)
+        self.assertIn('"/api/creators/open-root"', library)
+
+    def test_disconnect_uses_a_task_safe_button_handler(self):
+        manage = (DESKTOP / "MainPage.Manage.cs").read_text(encoding="utf-8")
+        source = (DESKTOP / "MainPage.xaml.cs").read_text(encoding="utf-8")
+        self.assertIn("var disconnect = CreateAsyncButton(", manage)
+        self.assertIn("private Button CreateAsyncButton(", source)
+        self.assertIn("await action();", source)
+        self.assertIn('await ShowErrorAsync(errorTitle, ex.Message);', source)
+
+    def test_disconnect_resets_only_that_slot_to_an_empty_api_key_form(self):
+        manage = (DESKTOP / "MainPage.Manage.cs").read_text(encoding="utf-8")
+        source = (DESKTOP / "MainPage.xaml.cs").read_text(encoding="utf-8")
+        self.assertIn("private void ResetDisconnectedPublishingSlot(string connectionId)", manage)
+        self.assertIn('password.Password = "";', manage)
+        self.assertIn('password.PlaceholderText = "Paste Zernio API key";', manage)
+        self.assertIn("disconnect.Visibility = Visibility.Collapsed;", manage)
+        self.assertIn('heading.Text = $"{slotNumber}. Zernio connection";', manage)
+        self.assertIn('label = "Zernio connection";', manage)
+        self.assertIn('slotLabel = "Zernio connection";', manage)
+        self.assertIn('ThemeText("Save this key to discover its connected accounts."', manage)
+        self.assertIn("ClearConnectionAccountSelections(connectionId);", manage)
+        self.assertIn("private void ClearConnectionAccountSelections(string connectionId)", manage)
+        self.assertIn("_zernioSlotHeadings[id] = heading;", manage)
+        self.assertIn("_zernioSlotHeadings.Clear();", manage)
+        self.assertIn("ClearConnectionAccountSelections(connectionId);", manage)
+
+    def test_native_engine_is_killed_with_desktop_process_tree(self):
+        job = (DESKTOP / "ProcessTreeJob.cs").read_text(encoding="utf-8")
+        supervisor = (DESKTOP / "EngineSupervisor.cs").read_text(encoding="utf-8")
+        self.assertIn("JobObjectLimitKillOnJobClose", job)
+        self.assertIn("0x00002000", job)
+        self.assertIn("SetInformationJobObject", job)
+        self.assertIn("AssignProcessToJobObject", job)
+        self.assertIn("ProcessTreeJob", supervisor)
+        self.assertIn("_processJob.Assign(process);", supervisor)
+        self.assertIn("_processJob.Dispose();", supervisor)
+
+    def test_manual_publishing_targets_only_checked_accounts_in_each_connection(self):
+        manage = (DESKTOP / "MainPage.Manage.cs").read_text(encoding="utf-8")
+        source = (DESKTOP / "MainPage.xaml.cs").read_text(encoding="utf-8")
+        selected_start = manage.index("private JsonArray BuildSelectedAccountMap()")
+        selected_end = manage.index("private sealed record AccountSelection", selected_start)
+        selection = manage[selected_start:selected_end]
+        self.assertIn("if (check.IsChecked != true", selection)
+        self.assertIn('"connection_id"', selection)
+        self.assertIn('"account_id"', selection)
+        self.assertIn('["account_ids"] = BuildSelectedAccountMap()', manage)
+        self.assertIn('path == "/api/publishing/disconnect"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
+
     def test_native_icons_use_vector_geometry_instead_of_optional_glyph_fonts(self):
         page = (DESKTOP / "MainPage.xaml").read_text(encoding="utf-8")
         source = (DESKTOP / "MainPage.xaml.cs").read_text(encoding="utf-8")
@@ -311,7 +491,7 @@ class NativeXamlContractTests(unittest.TestCase):
         framing = (DESKTOP / "MainPage.Framing.cs").read_text(encoding="utf-8")
         self.assertIn("_creators", live)
         self.assertIn("AddLiveCreatorPicker(sourcePanel);", live)
-        self.assertIn("foreach (var creator in _creators.OrderBy", live)
+        self.assertIn("_creators.OrderBy(item => item.Name", live)
         self.assertIn("SelectLiveCreatorAsync(creator)", live)
         self.assertIn("CreatorItem", live)
         self.assertIn("/api/creators/settings?id=", live)
@@ -383,9 +563,9 @@ class NativeXamlContractTests(unittest.TestCase):
         self.assertIn('"clips_per_chunk"', live)
         self.assertNotIn('"max_clips"', live)
         self.assertIn('AddLabeled(layoutField, "Video layout", layout, "Shared rendering preset for every creator.")', live)
-        self.assertIn('AddLabeled(formatField, "Output format", format, "Shared aspect ratio for every creator.")', live)
+        self.assertIn('AddLabeled(formatField, "Output format", format, "This exact aspect ratio is used by the final output preview.")', live)
         self.assertIn("AI provider, caption provider, video layout, output format, and clipping settings are shared defaults.", live)
-        self.assertIn("Using {selectedCreator.Name}'s own facecam/game framing, crop coordinates, subtitle styling, and profanity treatment.", live)
+        self.assertIn("_liveSelectedCreatorDetails.Text", live)
         self.assertIn('"Framing is saved separately for this creator. Video layout and output format are shared clipping defaults in the Capture tab.', framing)
         self.assertNotIn('SettingString("layout"', framing)
         self.assertNotIn('SettingString("output_format"', framing)
@@ -393,7 +573,7 @@ class NativeXamlContractTests(unittest.TestCase):
         shared_block = backend[backend.index('CREATOR_SHARED_SETTING_KEYS = ('):backend.index('def creator_profile_values')]
         for shared in ('transcriber_provider', 'transcriber_command', 'transcriber_language', 'model',
                        'compute_device', 'cpu_threads', 'language', 'clips_per_chunk', 'chunk_min',
-                       'pre', 'post', 'min_score', 'capture_bitrate_kbps', 'delete_rec', 'layout', 'output_format'):
+                       'clip_duration', 'min_score', 'capture_bitrate_kbps', 'delete_rec', 'layout', 'output_format'):
             self.assertIn(f'"{shared}"', shared_block)
         for personal in ('profanity_filter_enabled', 'profanity_filter_words', 'profanity_audio_mode'):
             self.assertNotIn(f'"{personal}"', shared_block)
@@ -437,8 +617,8 @@ class NativeXamlContractTests(unittest.TestCase):
 
     def test_each_creator_has_its_own_start_and_stop_controls(self):
         live = (DESKTOP / "MainPage.Live.cs").read_text(encoding="utf-8")
-        self.assertIn('creator.CaptureActive ? "Stop capture"', live)
-        self.assertIn('creator.Running ? "Stop live" : "Start live"', live)
+        self.assertIn('selected.CaptureActive ? "Stop capture"', live)
+        self.assertIn('selected.Running ? "Stop live" : "Start live"', live)
         self.assertIn('"/api/creators/start"', live)
         self.assertIn('"/api/creators/stop"', live)
         self.assertIn('"/api/creators/stop-capture"', live)
@@ -450,9 +630,9 @@ class NativeXamlContractTests(unittest.TestCase):
         live = (DESKTOP / "MainPage.Live.cs").read_text(encoding="utf-8")
         source = (DESKTOP / "MainPage.xaml.cs").read_text(encoding="utf-8")
         self.assertIn('private void UpdateLiveCreatorRows()', live)
-        self.assertIn('_liveCreatorDetailsById', live)
-        self.assertIn('_liveCreatorActionsById', live)
-        self.assertIn('action.Content = creator.CaptureStopping', live)
+        self.assertIn("_liveSelectedCreatorDetails", live)
+        self.assertIn("_liveSelectedCreatorAction", live)
+        self.assertIn("selected.CaptureStopping ?", live)
         poll = source[source.index('private async Task RefreshCreatorsForPollingAsync'):source.index('private async Task RunOnUIAsync')]
         self.assertIn('UpdateLiveCreatorRows();', poll)
         toggle = live[live.index('private async Task ToggleCreatorLiveAsync'):live.index('private async Task SelectLiveCreatorAsync')]
@@ -509,7 +689,8 @@ class NativeXamlContractTests(unittest.TestCase):
         self.assertIn("button.Foreground = new SolidColorBrush(ParseColor(", source)
         self.assertIn("selected ? theme.SidebarInk : theme.SidebarBody", source)
         self.assertIn("live ? theme.SidebarAccentText : theme.SidebarMuted", source)
-        self.assertIn('SetResourceBrush("AccentTextBrush", themePalette.AccentText);', source)
+        self.assertIn('var accentText = EnsureTextContrastAcross(accent, 4.5, themePalette.App, themePalette.Surface, themePalette.Soft, themePalette.Hover);', source)
+        self.assertIn('SetResourceBrush("AccentTextBrush", accentText);', source)
         self.assertIn('SetResourceBrush("SuccessTextBrush", themePalette.SuccessText);', source)
         self.assertIn('SetResourceBrush("WarningTextBrush", themePalette.WarningText);', source)
         self.assertIn('SetResourceBrush("DangerTextBrush", themePalette.DangerText);', source)
@@ -664,9 +845,31 @@ class NativeXamlContractTests(unittest.TestCase):
         framing = (DESKTOP / "MainPage.Framing.cs").read_text(encoding="utf-8")
         live = (DESKTOP / "MainPage.Live.cs").read_text(encoding="utf-8")
         self.assertIn('AddLabeled(layoutField, "Video layout", layout, "Shared rendering preset for every creator.")', live)
-        self.assertIn('AddLabeled(formatField, "Output format", format, "Shared aspect ratio for every creator.")', live)
+        self.assertIn('AddLabeled(formatField, "Output format", format, "This exact aspect ratio is used by the final output preview.")', live)
         self.assertIn('SetSetting("layout"', live)
         self.assertIn('SetSetting("output_format"', live)
+        self.assertIn('"Clip duration"', live)
+        self.assertIn('"clip_duration"', live)
+        self.assertIn('"The selected viral moment is the hook.', live)
+        self.assertNotIn('"Seconds before highlight"', live)
+        self.assertNotIn('"Seconds after highlight"', live)
         self.assertNotIn('SettingString("layout"', framing)
         self.assertNotIn('SettingString("output_format"', framing)
         self.assertIn('Framing is saved separately for this creator. Video layout and output format are shared clipping defaults in the Capture tab.', framing)
+
+    def test_creator_monitor_uses_readable_text_roles_and_centered_avatar_initials(self):
+        dashboard = (DESKTOP / "MainPage.Dashboard.cs").read_text(encoding="utf-8")
+        live = (DESKTOP / "MainPage.Live.cs").read_text(encoding="utf-8")
+        creators = (DESKTOP / "MainPage.Creators.cs").read_text(encoding="utf-8")
+        native = (DESKTOP / "MainPage.xaml.cs").read_text(encoding="utf-8")
+
+        self.assertIn('copy.Children.Add(Txt(creator.Name, 14, true, "PrimaryTextBrush"));', dashboard)
+        self.assertIn('12, false, captureActive || creator.Running ? "SuccessTextBrush" : "BodyTextBrush"', dashboard)
+        self.assertIn('Child = ThemeText(text, 12, true, textBrushKey)', dashboard)
+        self.assertIn('"SuccessBrush" => "SuccessTextBrush"', dashboard)
+        self.assertIn("DisplayMemberPath = nameof(CreatorItem.Name)", live)
+        self.assertIn("selected.CaptureActive || selected.Running", live)
+        self.assertIn('details.Children.Add(Txt(creator.Name, 16, true, "PrimaryTextBrush"));', creators)
+        self.assertIn('Math.Max(14, size * 0.44)', native)
+        self.assertIn('label.HorizontalAlignment = HorizontalAlignment.Center;', native)
+        self.assertIn('label.VerticalAlignment = VerticalAlignment.Center;', native)

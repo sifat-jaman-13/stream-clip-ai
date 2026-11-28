@@ -59,6 +59,7 @@ export interface PublishingStatus {
   provider: string;
   configured?: boolean;
   api_key_set?: boolean;
+  publishing_active?: boolean;
   available?: boolean;
   auto_post?: boolean;
   schedule_minutes?: number;
@@ -309,10 +310,16 @@ export function useWorkspace() {
     });
   }, []);
 
-  const fetchAccounts = useCallback(async () => {
-    const result = await apiPost<{ accounts: PublishingAccount[] }>("/api/publishing/accounts", { provider: "zernio" });
-    setAccounts(result.accounts || []);
-    return result.accounts || [];
+  const fetchAccounts = useCallback(async (connectionId?: string) => {
+    const result = await apiPost<{ accounts: PublishingAccount[] }>("/api/publishing/accounts", {
+      provider: "zernio",
+      ...(connectionId ? { connection_id: connectionId } : {}),
+    });
+    const freshAccounts = result.accounts || [];
+    setAccounts((current) => connectionId
+      ? [...current.filter((account) => account.connection_id !== connectionId), ...freshAccounts]
+      : freshAccounts);
+    return freshAccounts;
   }, []);
 
   const savePublishing = useCallback(async (payload: Record<string, any>) => {
@@ -324,6 +331,15 @@ export function useWorkspace() {
 
   const refreshPublishing = useCallback(async () => {
     const result = await apiGet<PublishingStatus>("/api/publishing/status");
+    setPublishing(result);
+    setAccounts(flattenPublishingAccounts(result));
+    return result;
+  }, []);
+
+  const disconnectPublishingConnection = useCallback(async (connectionId: string) => {
+    const result = await apiPost<PublishingStatus>("/api/publishing/disconnect", {
+      connection_id: connectionId,
+    });
     setPublishing(result);
     setAccounts(flattenPublishingAccounts(result));
     return result;
@@ -384,6 +400,7 @@ export function useWorkspace() {
     fetchAccounts,
     savePublishing,
     refreshPublishing,
+    disconnectPublishingConnection,
     setPublishingAccount,
     saveWords,
     setClipTab,

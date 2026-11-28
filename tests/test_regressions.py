@@ -95,7 +95,15 @@ class RegressionTests(unittest.TestCase):
             output.mkdir()
             clip = output / "finished_clip.mp4"
             clip.write_bytes(b"video")
-            with patch.object(autoclip, "OUT", output), patch.object(autoclip, "POSTED_FILE", root / "posted.json"), patch.object(autoclip, "SCHEDULED_FILE", root / "scheduled.json"), patch.object(autoclip, "CORE", None):
+            with patch.multiple(
+                autoclip,
+                _data_root=root,
+                DATABASE_FILE=root / "streamsnip.db",
+                OUT=output,
+                POSTED_FILE=root / "posted.json",
+                SCHEDULED_FILE=root / "scheduled.json",
+                CORE=None,
+            ):
                 autoclip.invalidate_clip_cache()
                 self.assertEqual(len(autoclip.list_clips(clip_tab="clips")), 1)
                 autoclip.record_zernio_scheduled(clip.name, ["instagram:account"])
@@ -116,10 +124,573 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(len(autoclip.list_clips(clip_tab="clips")), 1)
                 self.assertEqual(autoclip.list_clips(clip_tab="scheduled"), [])
 
+    def test_same_remote_post_visible_through_two_api_keys_keeps_one_delivery_row(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "out"
+            output.mkdir()
+            clip = output / "shared_post_clip.mp4"
+            clip.write_bytes(b"rendered mp4")
+            records = [{
+                "account_id": "ig-1", "platform": "instagram",
+                "post_id": "one-remote-post", "scheduled_for": None,
+                "published_at": "2026-11-28T02:13:00Z", "status": "published",
+            }]
+            with patch.multiple(
+                autoclip, _data_root=root, DATABASE_FILE=root / "streamsnip.db",
+                OUT=output, POSTED_FILE=root / "posted.json",
+                SCHEDULED_FILE=root / "scheduled.json", CORE=None,
+            ):
+                autoclip.invalidate_clip_cache()
+                autoclip.record_zernio_posted(
+                    clip.name,
+                    records=[{**records[0], "connection_id": "streamsnip-zernio-slot-3"}],
+                )
+                autoclip.record_zernio_posted(
+                    clip.name,
+                    records=[{**records[0], "connection_id": "streamsnip-zernio-slot-4"}],
+                )
+                with autoclip._database_connection() as db:
+                    rows = db.execute(
+                        """SELECT connection_id,post_id,account_id,platform,state
+                           FROM clip_deliveries WHERE clip_name=?""",
+                        (clip.name,),
+                    ).fetchall()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(
+                    (rows[0]["connection_id"], rows[0]["post_id"], rows[0]["account_id"],
+                     rows[0]["platform"], rows[0]["state"]),
+                    ("streamsnip-zernio-slot-3", "one-remote-post", "ig-1", "instagram", "posted"),
+                )
+
+    def test_per_destination_delivery_updates_keep_other_zernio_accounts_for_same_clip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "out"
+            output.mkdir()
+            clip = output / "multi_account_clip.mp4"
+            clip.write_bytes(b"rendered mp4")
+            with patch.multiple(
+                autoclip, _data_root=root, DATABASE_FILE=root / "streamsnip.db",
+                OUT=output, POSTED_FILE=root / "posted.json",
+                SCHEDULED_FILE=root / "scheduled.json", CORE=None,
+            ):
+                autoclip.invalidate_clip_cache()
+                autoclip.record_zernio_scheduled(
+                    clip.name,
+                    records=[{
+                        "connection_id": "slot-1", "account_id": "ig-1",
+                        "platform": "instagram", "post_id": "post-ig",
+                        "scheduled_for": "2026-11-28T02:20:00Z",
+                        "status": "pending",
+                    }],
+                )
+                autoclip.record_zernio_posted(
+                    clip.name,
+                    records=[{
+                        "connection_id": "slot-1", "account_id": "yt-1",
+                        "platform": "youtube", "post_id": "post-yt",
+                        "published_at": "2026-11-28T02:21:00Z",
+                        "status": "published",
+                    }],
+                )
+                with autoclip._database_connection() as db:
+                    rows = db.execute(
+                        """SELECT connection_id,account_id,platform,post_id,state,published_at
+                           FROM clip_deliveries WHERE clip_name=? ORDER BY platform""",
+                        (clip.name,),
+                    ).fetchall()
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(
+                    [(row["platform"], row["post_id"], row["state"]) for row in rows],
+                    [("instagram", "post-ig", "scheduled"), ("youtube", "post-yt", "posted")],
+                )
+                self.assertIsInstance(rows[1]["published_at"], float)
+                item = autoclip.list_clips(clip_tab="scheduled")[0]
+                self.assertTrue(item["scheduled"])
+                self.assertTrue(item["posted"])
+
+    def test_state_totals_use_file_index_without_loading_all_clip_metadata(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.session = {"started": None, "ended": None, "clips": 0, "chunks": 0}
+        core.engine = None
+        core.running = False
+        core.phase = "idle"
+        core.status = "Idle"
+        core.progress = 0
+        core.posting = {}
+        core.logs = []
+        core.log_id = 0
+        indexed = [
+            {"name": "posted.mp4"},
+            {"name": "scheduled.mp4"},
+            {"name": "posted-and-scheduled.mp4"},
+            {"name": "ready.mp4"},
+        ]
+        posted = {"posted.mp4": {}, "posted-and-scheduled.mp4": {}}
+        scheduled = {"scheduled.mp4": {}, "posted-and-scheduled.mp4": {}}
+
+        with patch.object(autoclip, "_clip_index", return_value=indexed):
+            with patch.object(autoclip, "load_posted_registry", return_value=posted):
+                with patch.object(autoclip, "load_scheduled_registry", return_value=scheduled):
+                    with patch.object(autoclip, "list_clips") as list_clips:
+                        state = core.state(0, clip_tab="scheduled", include_clips=False)
+                        self.assertEqual(state["clip_total"], 3)
+                        self.assertEqual(state["posted_total"], 2)
+                        self.assertEqual(state["scheduled_total"], 3)
+                        self.assertEqual(state["clips"], [])
+                        list_clips.assert_not_called()
+
+
+    def test_state_reuses_one_index_and_both_delivery_maps_for_visible_clip_page(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.session = {"started": None, "ended": None, "clips": 0, "chunks": 0}
+        core.engine = None
+        core.running = False
+        core.phase = "idle"
+        core.status = "Idle"
+        core.progress = 0
+        core.posting = {}
+        core.logs = []
+        core.log_id = 0
+        indexed = [{"name": "ready.mp4", "_path": "C:/clips/ready.mp4"}]
+        posted = {}
+        scheduled = {}
+        returned = [{"name": "ready.mp4", "title": "Ready"}]
+
+        with patch.object(autoclip, "_clip_index", return_value=indexed) as index_call:
+            with patch.object(autoclip, "load_posted_registry", return_value=posted) as posted_call:
+                with patch.object(autoclip, "load_scheduled_registry", return_value=scheduled) as scheduled_call:
+                    with patch.object(autoclip, "list_clips", return_value=returned) as list_call:
+                        state = core.state(0, clip_offset=0, clip_tab="clips", include_clips=True)
+
+        index_call.assert_called_once_with()
+        posted_call.assert_called_once_with()
+        scheduled_call.assert_called_once_with()
+        list_call.assert_called_once()
+        self.assertIs(list_call.call_args.kwargs["_indexed"], indexed)
+        self.assertIs(list_call.call_args.kwargs["_posted"], posted)
+        self.assertIs(list_call.call_args.kwargs["_scheduled"], scheduled)
+        self.assertEqual(state["clips"], returned)
+
+
+    def test_clip_metadata_page_batch_uses_one_database_connection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "out"
+            output.mkdir()
+            first = output / "first.mp4"
+            second = output / "second.mp4"
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+            with patch.multiple(
+                autoclip, _data_root=root, DATABASE_FILE=root / "streamsnip.db",
+                OUT=output, CORE=None,
+            ):
+                autoclip.save_clip_metadata(first, "First", "First description")
+                autoclip.save_clip_metadata(second, "Second", "Second description")
+                original = autoclip._database_connection
+                with patch.object(autoclip, "_database_connection", wraps=original) as factory:
+                    rows = autoclip.get_clip_metadata_many([first, second])
+                self.assertEqual(factory.call_count, 1)
+                self.assertEqual(rows[str(first.resolve())]["description"], "First description")
+                self.assertEqual(rows[str(second.resolve())]["description"], "Second description")
+
+    def test_clip_thumbnail_path_caches_a_real_rendered_frame(self):
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            clip = root / "actual_clip.mp4"
+            clip.write_bytes(b"rendered mp4")
+            calls = []
+
+            def fake_ffmpeg(command, **kwargs):
+                calls.append(command)
+                Path(command[-1]).write_bytes(b"jpeg-frame" * 300)
+                return SimpleNamespace(returncode=0, stderr="")
+
+            with patch.object(autoclip, "_data_root", root / "library"):
+                with patch.object(autoclip, "ffmpeg_exe", return_value="ffmpeg-test"):
+                    with patch.object(autoclip, "run", side_effect=fake_ffmpeg):
+                        first = autoclip.clip_thumbnail_path(clip)
+                        second = autoclip.clip_thumbnail_path(clip)
+            self.assertEqual(first, second)
+            self.assertTrue(first.is_file())
+            self.assertGreater(first.stat().st_size, 1024)
+            self.assertEqual(len(calls), 1)
+            self.assertIn("-frames:v", calls[0])
+            self.assertTrue(any(argument.startswith("scale=480:270:") for argument in calls[0]))
+
+    def test_zernio_sync_matches_nested_account_ids_and_local_video_media_urls(self):
+        posts = [
+            {
+                "_id": "post-published",
+                "status": "published",
+                "scheduledFor": "2026-11-28T02:12:00Z",
+                "publishedAt": "2026-11-28T02:13:00Z",
+                "mediaItems": [{"url": "https://media.zernio.com/multi_clip.mp4"}],
+                "platforms": [{
+                    "platform": "instagram",
+                    "accountId": {"_id": "ig-1", "username": "creator"},
+                    "status": "published",
+                    "publishedAt": "2026-11-28T02:13:00Z",
+                    "platformPostUrl": "https://instagram.com/reel/test",
+                }],
+            },
+            {
+                "_id": "post-scheduled",
+                "status": "scheduled",
+                "scheduledFor": "2026-11-28T02:20:00Z",
+                "mediaItems": [{"url": "https://media.zernio.com/multi_clip.mp4"}],
+                "platforms": [{
+                    "platform": "youtube",
+                    "accountId": {"_id": "yt-1"},
+                    "status": "pending",
+                }],
+            },
+            {
+                "_id": "post-failed",
+                "status": "failed",
+                "mediaItems": [{"url": "https://media.zernio.com/multi_clip.mp4"}],
+                "platforms": [{
+                    "platform": "facebook",
+                    "accountId": {"_id": "fb-1"},
+                    "status": "failed",
+                }],
+            },
+            {
+                "_id": "other-video",
+                "status": "published",
+                "mediaItems": [{"url": "https://media.zernio.com/not-local.mp4"}],
+                "platforms": [{
+                    "platform": "instagram", "accountId": {"_id": "ig-2"}, "status": "published",
+                }],
+            },
+        ]
+
+        result = autoclip.zernio_posts_to_local_deliveries(posts, "slot-1", {"multi_clip.mp4"})
+
+        assert set(result) == {"multi_clip.mp4"}
+        assert len(result["multi_clip.mp4"]["posted"]) == 1
+        assert len(result["multi_clip.mp4"]["scheduled"]) == 1
+        published = result["multi_clip.mp4"]["posted"][0]
+        assert (published["connection_id"], published["account_id"], published["post_id"]) == (
+            "slot-1", "ig-1", "post-published",
+        )
+        assert published["extra"]["platform_post_url"] == "https://instagram.com/reel/test"
+        scheduled = result["multi_clip.mp4"]["scheduled"][0]
+        assert (scheduled["account_id"], scheduled["post_id"], scheduled["status"]) == (
+            "yt-1", "post-scheduled", "pending",
+        )
+
+    def test_zernio_sync_endpoint_records_confirmed_remote_deliveries_without_reposting(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "out"
+            output.mkdir()
+            clip = output / "sync_clip.mp4"
+            clip.write_bytes(b"rendered mp4")
+            response = {
+                "posts": [{
+                    "_id": "post-sync",
+                    "status": "published",
+                    "scheduledFor": "2026-11-28T02:12:00Z",
+                    "publishedAt": "2026-11-28T02:13:00Z",
+                    "mediaItems": [{"url": "https://media.zernio.com/sync_clip.mp4"}],
+                    "platforms": [{
+                        "platform": "youtube",
+                        "accountId": {"_id": "yt-1"},
+                        "status": "published",
+                        "platformPostUrl": "https://youtube.com/watch?v=demo",
+                    }],
+                }],
+                "pagination": {"pages": 1, "total": 1},
+            }
+
+            class FakeZernioPublisher:
+                def __init__(self, *_args, **_kwargs):
+                    pass
+
+                def _json_request(self, method, url):
+                    self_method = method
+                    assert self_method == "GET"
+                    assert url.startswith("https://zernio.com/api/v1/posts?")
+                    assert "view=summary" not in url
+                    assert "limit=100" in url
+                    return response
+
+            with patch.multiple(
+                autoclip, _data_root=root, DATABASE_FILE=root / "streamsnip.db",
+                OUT=output, POSTED_FILE=root / "posted.json",
+                SCHEDULED_FILE=root / "scheduled.json", CORE=None,
+                ZernioPublisher=FakeZernioPublisher,
+            ):
+                autoclip.invalidate_clip_cache()
+                core = object.__new__(autoclip.Core)
+                core.publishing = {"zernio": {}}
+                core.push = lambda _message: None
+                core._configured_zernio_connections = lambda _cfg: [{
+                    "id": "slot-1", "api_key": "read-only-test-key",
+                }]
+                result = core.sync_zernio_posts()
+                self.assertEqual(result["clips_matched"], 1)
+                self.assertEqual(result["posted_destinations"], 1)
+                self.assertEqual(result["scheduled_destinations"], 0)
+                self.assertEqual(autoclip.list_clips(clip_tab="clips"), [])
+                self.assertEqual(autoclip.list_clips(clip_tab="posted")[0]["name"], clip.name)
+                with autoclip._database_connection() as db:
+                    rows = db.execute(
+                        "SELECT connection_id,account_id,post_id,state FROM clip_deliveries"
+                    ).fetchall()
+                self.assertEqual(
+                    [(row["connection_id"], row["account_id"], row["post_id"], row["state"]) for row in rows],
+                    [("slot-1", "yt-1", "post-sync", "posted")],
+                )
+
     def test_publishing_connections_reject_more_than_five_slots(self):
         core = object.__new__(autoclip.Core)
         with self.assertRaisesRegex(ValueError, "up to five"):
             core.publishing_connections_save({"connections": [{"id": f"slot-{index}"} for index in range(6)]})
+
+    def test_saving_unchanged_zernio_slots_does_not_retest_existing_keys_or_lose_accounts(self):
+        core = object.__new__(autoclip.Core)
+        core.push = MagicMock()
+        core.publishing = {"provider": "zernio", "zernio": {
+            "connections": [
+                {"id": "streamsnip-zernio-slot-3", "label": "Zernio connection 3",
+                 "api_key": "saved-key-3", "identity_user_id": "user-3",
+                 "accounts": [{"id": "ig-3", "platform": "instagram", "posting_enabled": True}]},
+                {"id": "streamsnip-zernio-slot-4", "label": "Zernio connection 4",
+                 "api_key": "saved-key-4", "identity_user_id": "user-4",
+                 "accounts": [{"id": "yt-4", "platform": "youtube", "posting_enabled": False}]},
+            ],
+            "auto_post": True, "schedule_minutes": 10, "visibility": "unlisted",
+        }}
+        core.zernio = core.publishing["zernio"]
+        core._make_publisher = MagicMock(return_value=object())
+        core.publishing_status = MagicMock(return_value={"configured": True})
+
+        with patch.object(autoclip, "ZernioPublisher") as zernio, patch.object(
+            autoclip, "save_publishing_settings"
+        ):
+            result = core.publishing_connections_save({
+                "connections": [
+                    {"id": "streamsnip-zernio-slot-3", "label": "Brand three",
+                     "accounts": [{"id": "ig-3", "posting_enabled": False}]},
+                    {"id": "streamsnip-zernio-slot-4", "label": "Brand four",
+                     "accounts": [{"id": "yt-4", "posting_enabled": True}]},
+                ],
+                "auto_post": True, "schedule_minutes": 10, "visibility": "unlisted",
+            })
+
+        zernio.assert_not_called()
+        saved = core.publishing["zernio"]["connections"]
+        self.assertEqual([item["id"] for item in saved], [
+            "streamsnip-zernio-slot-3", "streamsnip-zernio-slot-4",
+        ])
+        self.assertEqual([item["api_key"] for item in saved], ["saved-key-3", "saved-key-4"])
+        self.assertEqual([item["identity_user_id"] for item in saved], ["user-3", "user-4"])
+        self.assertEqual(saved[0]["accounts"][0]["posting_enabled"], False)
+        self.assertEqual(saved[1]["accounts"][0]["posting_enabled"], True)
+        self.assertEqual(result, {"configured": True})
+
+    def test_adding_a_new_zernio_key_only_tests_the_new_slot_and_preserves_four_others(self):
+        core = object.__new__(autoclip.Core)
+        core.push = MagicMock()
+        existing = [
+            {"id": f"streamsnip-zernio-slot-{index}", "label": f"Brand {index}",
+             "api_key": f"saved-key-{index}", "identity_user_id": f"user-{index}",
+             "accounts": [{"id": f"ig-{index}", "platform": "instagram", "posting_enabled": index != 1}]}
+            for index in range(1, 5)
+        ]
+        core.publishing = {"provider": "zernio", "zernio": {
+            "connections": existing, "auto_post": False, "schedule_minutes": 0,
+            "visibility": "public",
+        }}
+        core.zernio = core.publishing["zernio"]
+        core._make_publisher = MagicMock(return_value=object())
+        core.publishing_status = MagicMock(return_value={"configured": True})
+        fake_publisher = MagicMock()
+        fake_publisher.verify_identity.return_value = {"user_id": "user-5"}
+        fake_publisher.accounts.return_value = [{
+            "id": "fb-5", "platform": "facebook", "name": "Brand Five",
+            "is_active": True, "provider_enabled": True,
+        }]
+
+        with patch.object(autoclip, "ZernioPublisher", return_value=fake_publisher) as zernio, patch.object(
+            autoclip, "save_publishing_settings"
+        ):
+            core.publishing_connections_save({
+                "connections": [
+                    *[
+                        {"id": item["id"], "label": item["label"],
+                         "accounts": [{"id": item["accounts"][0]["id"],
+                                       "posting_enabled": item["accounts"][0]["posting_enabled"]}]}
+                        for item in existing
+                    ],
+                    {"id": "streamsnip-zernio-slot-5", "label": "Brand 5",
+                     "api_key": "new-key-5", "accounts": []},
+                ],
+            })
+
+        zernio.assert_called_once()
+        fake_publisher.verify_identity.assert_called_once()
+        fake_publisher.accounts.assert_called_once()
+        saved = core.publishing["zernio"]["connections"]
+        self.assertEqual(len(saved), 5)
+        self.assertEqual([item["id"] for item in saved], [
+            "streamsnip-zernio-slot-1", "streamsnip-zernio-slot-2",
+            "streamsnip-zernio-slot-3", "streamsnip-zernio-slot-4",
+            "streamsnip-zernio-slot-5",
+        ])
+        self.assertEqual([item["api_key"] for item in saved[:4]], [
+            "saved-key-1", "saved-key-2", "saved-key-3", "saved-key-4",
+        ])
+        self.assertEqual(saved[4]["api_key"], "new-key-5")
+        self.assertEqual(saved[4]["accounts"][0]["id"], "fb-5")
+
+    def test_refreshing_one_zernio_slot_preserves_the_other_connections_and_preferences(self):
+        core = object.__new__(autoclip.Core)
+        core.push = MagicMock()
+        core.publishing = {"provider": "zernio", "zernio": {
+            "connections": [
+                {"id": "slot-a", "label": "Brand A", "api_key": "key-a",
+                 "accounts": [{"id": "old-a", "platform": "instagram", "posting_enabled": False}]},
+                {"id": "slot-b", "label": "Brand B", "api_key": "key-b",
+                 "accounts": [{"id": "keep-b", "platform": "youtube", "posting_enabled": True}]},
+            ],
+        }}
+        core.zernio = core.publishing["zernio"]
+        core._make_publisher = MagicMock(return_value=None)
+        fake_publisher = MagicMock()
+        fake_publisher.accounts.return_value = [
+            {"id": "old-a", "platform": "instagram", "name": "Updated profile",
+             "is_active": True, "provider_enabled": True},
+        ]
+
+        with patch.object(autoclip, "ZernioPublisher", return_value=fake_publisher) as zernio, patch.object(
+            autoclip, "save_publishing_settings"
+        ):
+            accounts = core.publishing_accounts(connection_id="slot-a")
+
+        zernio.assert_called_once()
+        self.assertEqual(zernio.call_args.args[1]["api_key"], "key-a")
+        fake_publisher.accounts.assert_called_once()
+        self.assertEqual([item["id"] for item in accounts], ["old-a"])
+        saved = core.publishing["zernio"]["connections"]
+        self.assertEqual(saved[0]["accounts"][0]["id"], "old-a")
+        self.assertEqual(saved[0]["accounts"][0]["name"], "Updated profile")
+        self.assertFalse(saved[0]["accounts"][0]["posting_enabled"])
+        self.assertEqual(saved[1]["accounts"][0]["id"], "keep-b")
+        self.assertTrue(saved[1]["accounts"][0]["posting_enabled"])
+
+    def test_publishing_status_is_read_only_and_does_not_request_any_zernio_key(self):
+        core = object.__new__(autoclip.Core)
+        core.publishing = {"zernio": {"connections": [
+            {"id": "slot-a", "label": "Brand A", "api_key": "secret-a", "accounts": []},
+            {"id": "slot-b", "label": "Brand B", "api_key": "secret-b", "accounts": []},
+        ]}}
+        core.posting = {"active": False}
+        core._provider_status = MagicMock(return_value={})
+        core._public_zernio_connections = MagicMock(return_value=[
+            {"id": "slot-a", "api_key_set": True, "accounts": []},
+            {"id": "slot-b", "api_key_set": True, "accounts": []},
+        ])
+        core._make_publisher = MagicMock(side_effect=AssertionError("Status should not contact Zernio"))
+
+        status = core.publishing_status()
+
+        core._make_publisher.assert_not_called()
+        self.assertTrue(status["configured"])
+        self.assertEqual([item["id"] for item in status["connections"]], ["slot-a", "slot-b"])
+
+    def test_disconnect_removes_only_the_requested_zernio_connection_and_preserves_defaults(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.posting = {"active": False}
+        core.push = MagicMock()
+        core.publishing = {
+            "provider": "zernio",
+            "zernio": {
+                "connections": [
+                    {"id": "slot-a", "label": "Brand A", "api_key": "secret-a",
+                     "accounts": [{"id": "ig-a", "posting_enabled": True}]},
+                    {"id": "slot-b", "label": "Brand B", "api_key": "secret-b",
+                     "accounts": [{"id": "yt-b", "posting_enabled": True}]},
+                ],
+                "auto_post": True,
+                "schedule_minutes": 15,
+                "visibility": "unlisted",
+                "api_key": "",
+                "accounts": {},
+                "instagram_id": "",
+                "youtube_id": "",
+            },
+        }
+        core.zernio = core.publishing["zernio"]
+        core._make_publisher = MagicMock(return_value="updated-publisher")
+
+        with patch.object(autoclip, "save_publishing_settings") as save:
+            result = core.disconnect_zernio_connection("slot-a")
+
+        saved = core.publishing["zernio"]
+        self.assertEqual([item["id"] for item in saved["connections"]], ["slot-b"])
+        self.assertEqual(saved["connections"][0]["api_key"], "secret-b")
+        self.assertEqual(saved["connections"][0]["accounts"][0]["id"], "yt-b")
+        self.assertEqual(saved["schedule_minutes"], 15)
+        self.assertEqual(saved["visibility"], "unlisted")
+        self.assertTrue(saved["auto_post"])
+        self.assertEqual(core.zernio, saved)
+        self.assertEqual(core.publisher, "updated-publisher")
+        self.assertTrue(result["configured"])
+        save.assert_called_once_with(core.publishing)
+
+    def test_disconnect_last_legacy_zernio_connection_clears_legacy_credentials(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.posting = {"active": False}
+        core.push = MagicMock()
+        core.publishing = {"provider": "zernio", "zernio": {
+            "api_key": "legacy-secret",
+            "accounts": {"instagram": "ig-legacy"},
+            "instagram_id": "ig-legacy",
+            "youtube_id": "yt-legacy",
+            "auto_post": True,
+        }}
+        core.zernio = core.publishing["zernio"]
+        core._make_publisher = MagicMock(return_value=None)
+
+        with patch.object(autoclip, "save_publishing_settings"):
+            result = core.disconnect_zernio_connection("legacy")
+
+        saved = core.publishing["zernio"]
+        self.assertEqual(saved["api_key"], "")
+        self.assertEqual(saved["accounts"], {})
+        self.assertEqual(saved["instagram_id"], "")
+        self.assertEqual(saved["youtube_id"], "")
+        self.assertEqual(saved["connections"], [])
+        self.assertTrue(saved["auto_post"])
+        self.assertFalse(result["configured"])
+
+    def test_disconnect_rejects_unknown_connection_and_active_publish_batch(self):
+        core = object.__new__(autoclip.Core)
+        core.lock = threading.RLock()
+        core.publishing = {"zernio": {"connections": [
+            {"id": "slot-a", "api_key": "secret-a", "accounts": []}
+        ]}}
+        core.zernio = core.publishing["zernio"]
+        core.posting = {"active": True}
+        core.push = MagicMock()
+        with self.assertRaisesRegex(ValueError, "publishing batch is active"):
+            core.disconnect_zernio_connection("slot-a")
+        core.posting = {"active": False}
+        with self.assertRaisesRegex(ValueError, "not found"):
+            core.disconnect_zernio_connection("missing")
 
     def test_custom_openai_compatible_highlight_provider_uses_chat_completions(self):
         config = {
@@ -499,7 +1070,7 @@ class RegressionTests(unittest.TestCase):
                     "caption_size": 111, "font": "Poppins", "streamer_tag": "@creatorone",
                     "transcriber_provider": "custom-command", "transcriber_command": "caption-engine",
                     "transcriber_language": "en", "model": "medium",
-                    "clips_per_chunk": 5, "chunk_min": 12, "pre": 31, "post": 22,
+                    "clips_per_chunk": 5, "chunk_min": 12, "clip_duration": 45, "pre": 31, "post": 22,
                     "min_score": 91, "capture_bitrate_kbps": 12000,
                     "layout": "Blur background", "output_format": "16:9", "delete_rec": True,
                     "profanity_filter_enabled": False, "profanity_audio_mode": "mute",
@@ -517,9 +1088,12 @@ class RegressionTests(unittest.TestCase):
                                  ("custom-command", "caption-engine", "en", "medium"))
                 self.assertEqual((one["layout"], one["output_format"]), ("Blur background", "16:9"))
                 self.assertEqual((two["layout"], two["output_format"]), ("Blur background", "16:9"))
-                self.assertEqual((two["clips_per_chunk"], two["chunk_min"], two["pre"], two["post"],
-                                  two["min_score"], two["capture_bitrate_kbps"], two["delete_rec"]),
-                                 (5, 12, 31, 22, 91, 12000, True))
+                self.assertEqual(
+                    (two["clips_per_chunk"], two["chunk_min"], two["clip_duration"],
+                     two["pre"], two["post"], two["min_score"],
+                     two["capture_bitrate_kbps"], two["delete_rec"]),
+                    (5, 12, 45, 2, 43, 91, 12000, True),
+                )
                 self.assertEqual((one["profanity_filter_enabled"], one["profanity_audio_mode"]), (False, "mute"))
                 self.assertEqual((two["profanity_filter_enabled"], two["profanity_audio_mode"]),
                                  (autoclip.DEFAULTS["profanity_filter_enabled"], autoclip.DEFAULTS["profanity_audio_mode"]))
@@ -530,7 +1104,7 @@ class RegressionTests(unittest.TestCase):
                         "SELECT settings_json FROM creator_settings WHERE creator_id=?", (first,)
                     ).fetchone()["settings_json"])
                 for shared_key in ("transcriber_provider", "transcriber_command", "transcriber_language",
-                                   "model", "clips_per_chunk", "chunk_min", "pre", "post",
+                                   "model", "clips_per_chunk", "chunk_min", "clip_duration",
                                    "min_score", "capture_bitrate_kbps", "delete_rec", "cpu_threads", "language",
                                    "layout", "output_format"):
                     self.assertNotIn(shared_key, stored)
@@ -1415,7 +1989,10 @@ class RegressionTests(unittest.TestCase):
                 ],
             }}})
             publisher._publish(video, raise_errors=True)
-            callback.assert_called_once_with(video, ["instagram:account"])
+            callback.assert_called_once_with(video, ["instagram:account"], [{
+                "account_id": "account", "platform": "instagram", "post_id": "",
+                "scheduled_for": None, "published_at": None, "status": "published",
+            }])
 
     def test_zernio_scheduled_post_does_not_claim_it_is_already_posted(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1436,7 +2013,10 @@ class RegressionTests(unittest.TestCase):
             }}})
             publisher._publish(video, raise_errors=True)
             callback.assert_not_called()
-            scheduled_callback.assert_called_once_with(video, ["instagram:account"])
+            scheduled_callback.assert_called_once_with(video, ["instagram:account"], [{
+                "account_id": "account", "platform": "instagram", "post_id": "",
+                "scheduled_for": None, "published_at": None, "status": "scheduled",
+            }])
 
     def test_zernio_upload_streams_file_instead_of_reading_all_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1516,6 +2096,17 @@ class RegressionTests(unittest.TestCase):
             self.assertLessEqual(start, peak)
             self.assertGreaterEqual(end, peak)
             self.assertLessEqual(end - start, 60)
+
+    def test_clip_bounds_puts_hook_after_fixed_two_second_lead_in(self):
+        start, end = autoclip.clip_bounds(
+            peak=25, duration=120, before=2, after=28,
+            words=[(20.0, 22.0, "context"), (25.0, 27.0, "hook")],
+            limit=30, align_to_speech=False,
+        )
+        self.assertEqual(start, 23)
+        self.assertEqual(end, 53)
+        self.assertEqual(end - start, 30)
+        self.assertEqual(25 - start, 2)
 
     def test_clip_bounds_do_not_extend_to_unrelated_later_speech(self):
         words = [(33.8, 36.0, "nearby"), (75.0, 76.0, "unrelated")]

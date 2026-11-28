@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
@@ -28,6 +28,8 @@ public sealed partial class MainPage
     private readonly Dictionary<string, PasswordBox> _zernioKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, StackPanel> _zernioAccountPanels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TextBlock> _zernioSlotStatuses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TextBlock> _zernioSlotHeadings = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Button> _zernioDisconnectButtons = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _publishingSlotIds = [];
     private readonly Dictionary<string, string> _publishingSlotLabels = new(StringComparer.OrdinalIgnoreCase);
     private JsonObject _publishingStatus = new();
@@ -54,38 +56,7 @@ public sealed partial class MainPage
 
     private void RenderSettingsPage()
     {
-        AddPageHeading("Settings", "Choose where recordings and finished clips are stored, then tune the appearance of your workspace.");
-
-        var storage = new StackPanel { Spacing = 10 };
-        var recordings = Input(SettingString("rec_dir"));
-        var clips = Input(SettingString("out_dir"));
-        var recordingsBrowse = CreateButton("Browse", async () =>
-        {
-            var path = await PickFolderAsync();
-            if (!string.IsNullOrWhiteSpace(path)) recordings.Text = path;
-        });
-        var clipsBrowse = CreateButton("Browse", async () =>
-        {
-            var path = await PickFolderAsync();
-            if (!string.IsNullOrWhiteSpace(path)) clips.Text = path;
-        });
-        AddLabeled(storage, "Recordings folder", recordings);
-        storage.Children.Add(recordingsBrowse);
-        AddLabeled(storage, "Rendered clips folder", clips);
-        storage.Children.Add(clipsBrowse);
-        var saveStorage = CreateButton("Save storage settings", async () =>
-        {
-            try
-            {
-                SetSetting("rec_dir", recordings.Text.Trim());
-                SetSetting("out_dir", clips.Text.Trim());
-                await SaveCaptureSettingsAsync();
-                await DialogResultAsync("Settings saved", "The storage folders have been saved.");
-            }
-            catch (Exception ex) { await ShowErrorAsync("Could not save storage settings", ex.Message); }
-        }, primary: true);
-        storage.Children.Add(saveStorage);
-        PageHost.Children.Add(CreatePanel("Storage locations", "Choose where source recordings and completed clips are stored.", storage));
+        AddPageHeading("Settings", "Tune the appearance and maintenance of your workspace. Recordings and clips stay in their creator-specific folders.");
 
         var appearance = new StackPanel { Spacing = 12 };
         appearance.Children.Add(Txt("Theme", 11, true));
@@ -288,7 +259,7 @@ public sealed partial class MainPage
         }
         catch (Exception ex)
         {
-            _publishingStatusText = Txt(ex.Message, 10, false, "#F08A83");
+            _publishingStatusText = Txt(ex.Message, 11, false, "DangerTextBrush");
         }
 
         var zernio = GetZernioPublishingStatus();
@@ -303,10 +274,33 @@ public sealed partial class MainPage
         _zernioKeys.Clear();
         _zernioAccountPanels.Clear();
         _zernioSlotStatuses.Clear();
+        _zernioSlotHeadings.Clear();
+        _zernioDisconnectButtons.Clear();
         _publishingSlotIds.Clear();
         _publishingSlotLabels.Clear();
         _publishingAccountsDirty = false;
         _publishingOptionsDirty = false;
+
+        // Saved IDs define physical slots. Do not compress the list: a key
+        // saved as slot 4 must remain in card 4 when slots 1-3 are empty.
+        var savedConnectionSlots = new JsonObject?[5];
+        var unplacedConnections = new List<JsonObject>();
+        foreach (var connection in savedConnections)
+        {
+            var savedSlot = GetZernioSlotNumber(connection["id"]?.ToString());
+            if (savedSlot is >= 1 and <= 5 && savedConnectionSlots[savedSlot.Value - 1] is null)
+                savedConnectionSlots[savedSlot.Value - 1] = connection;
+            else
+                unplacedConnections.Add(connection);
+        }
+        foreach (var connection in unplacedConnections)
+        {
+            var freeSlot = Array.FindIndex(savedConnectionSlots, item => item is null);
+            if (freeSlot < 0) break;
+            savedConnectionSlots[freeSlot] = connection;
+        }
+
+        var allocatedConnectionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var page = new StackPanel { Spacing = 14 };
         var defaults = new StackPanel { Spacing = 10 };
@@ -335,19 +329,23 @@ public sealed partial class MainPage
         AddLabeled(defaults, "Default spacing between scheduled posts (minutes)", schedule,
             "Auto schedule uses this interval for each next clip. A 0-minute setting defaults to 5 minutes when you use Auto schedule.");
         AddLabeled(defaults, "Default visibility", visibility);
-        _publishingStatusText ??= Txt("Checking Zernio status…", 10, false, "#9CDEF2");
+        _publishingStatusText ??= Txt("Checking Zernio status...", 11, false, "BodyTextBrush");
         defaults.Children.Add(_publishingStatusText);
 
         var connectionCards = new StackPanel { Spacing = 10 };
         for (var index = 0; index < 5; index++)
         {
-            var saved = index < savedConnections.Count ? savedConnections[index] : null;
+            var slotNumber = index + 1;
+            var saved = savedConnectionSlots[index];
             var id = saved?["id"]?.ToString();
             if (string.IsNullOrWhiteSpace(id))
-                id = $"streamsnip-zernio-slot-{index + 1}";
+                id = $"streamsnip-zernio-slot-{slotNumber}";
+            if (!allocatedConnectionIds.Add(id))
+                throw new InvalidOperationException($"Duplicate Zernio connection ID detected in saved settings: {id}. Reopen Publisher after the connection list is repaired.");
             var label = saved?["label"]?.ToString();
-            if (string.IsNullOrWhiteSpace(label))
-                label = $"Zernio connection {index + 1}";
+            if (string.IsNullOrWhiteSpace(label)
+                || string.Equals(label, $"Zernio connection {slotNumber}", StringComparison.OrdinalIgnoreCase))
+                label = "Zernio connection";
             _publishingSlotIds.Add(id);
             _publishingSlotLabels[id] = label;
 
@@ -355,12 +353,15 @@ public sealed partial class MainPage
             var header = new Grid { ColumnSpacing = 8 };
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var heading = Txt($"{index + 1}. {label}", 12, true);
+            var heading = ThemeText($"{slotNumber}. {label}", 13, true, "PrimaryTextBrush");
+            _zernioSlotHeadings[id] = heading;
             header.Children.Add(heading);
-            var slotStatus = Txt(
-                saved?["api_key_set"]?.GetValue<bool>() == true ? "Connected" : "Not connected",
-                9, false,
-                saved?["api_key_set"]?.GetValue<bool>() == true ? "#70C9A3" : "#9CDEF2");
+            var slotConnected = saved?["api_key_set"]?.GetValue<bool>() == true;
+            var slotStatus = ThemeText(
+                slotConnected ? "Connected" : "Not connected",
+                11,
+                false,
+                slotConnected ? "SuccessTextBrush" : "MutedTextBrush");
             slotStatus.HorizontalAlignment = HorizontalAlignment.Right;
             Grid.SetColumn(slotStatus, 1);
             header.Children.Add(slotStatus);
@@ -383,12 +384,31 @@ public sealed partial class MainPage
             if (saved?["accounts"] is JsonArray existingAccounts)
                 RenderConnectionAccounts(id, accounts, existingAccounts);
             else
-                accounts.Children.Add(ThemeText("Save this key to discover its connected accounts.", 9, false, "MutedTextBrush"));
+                accounts.Children.Add(ThemeText("Save this key to discover its connected accounts.", 11, false, "BodyTextBrush"));
             slot.Children.Add(accounts);
 
-            slot.Children.Add(ActionRow(
+            var refreshAccountsButton = CreateButton(
+                "Refresh accounts",
+                async () => await LoadPublishingAccountsAsync(id, accounts));
+            refreshAccountsButton.IsEnabled = slotConnected;
+            // Keep the same action layout in every slot. Empty slots show the
+            // action but disable it until an API key has been saved.
+            refreshAccountsButton.Visibility = Visibility.Visible;
+            var slotActions = new List<UIElement>
+            {
                 CreateButton("Save & verify", async () => await SavePublishingConnectionsAsync(), primary: true),
-                CreateButton("Refresh accounts", async () => await LoadPublishingAccountsAsync(id, accounts))));
+                refreshAccountsButton
+            };
+            var disconnect = CreateAsyncButton(
+                "Disconnect",
+                () => DisconnectPublishingConnectionAsync(id),
+                danger: true,
+                errorTitle: "Could not disconnect Zernio");
+            _zernioDisconnectButtons[id] = disconnect;
+            disconnect.IsEnabled = slotConnected;
+            disconnect.Visibility = slotConnected ? Visibility.Visible : Visibility.Collapsed;
+            slotActions.Add(disconnect);
+            slot.Children.Add(ActionRow(slotActions.ToArray()));
             var card = new Border
             {
                 Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
@@ -493,6 +513,19 @@ public sealed partial class MainPage
         await LoadPublishingStatusAsync();
     }
 
+    private static int? GetZernioSlotNumber(string? connectionId)
+    {
+        if (string.IsNullOrWhiteSpace(connectionId)) return null;
+        for (var slot = 1; slot <= 5; slot++)
+        {
+            if (string.Equals(connectionId, $"streamsnip-zernio-slot-{slot}", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(connectionId, $"streamsnip-empty-zernio-slot-{slot}", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(connectionId, $"slot-{slot}", StringComparison.OrdinalIgnoreCase))
+                return slot;
+        }
+        return null;
+    }
+
     private JsonObject GetZernioPublishingStatus()
     {
         var providers = _publishingStatus["providers"] as JsonObject;
@@ -532,17 +565,39 @@ public sealed partial class MainPage
                 foreach (var id in _publishingSlotIds)
                 {
                     var connection = FindPublishingConnection(id);
+                    var isConnected = connection?["api_key_set"]?.GetValue<bool>() == true;
                     if (_zernioSlotStatuses.TryGetValue(id, out var status))
                     {
-                        var isConnected = connection?["api_key_set"]?.GetValue<bool>() == true;
                         status.Text = isConnected ? "Connected" : "Not connected";
                         status.Foreground = Application.Current.Resources[
-                            isConnected ? "SuccessBrush" : "MutedTextBrush"] as Brush;
+                            isConnected ? "SuccessTextBrush" : "MutedTextBrush"] as Brush;
+                    }
+                    var slotNumber = GetZernioSlotNumber(id)
+                        ?? Math.Max(1, _publishingSlotIds.IndexOf(id) + 1);
+                    var slotLabel = connection?["label"]?.ToString();
+                    if (string.IsNullOrWhiteSpace(slotLabel)
+                        || string.Equals(slotLabel, $"Zernio connection {slotNumber}", StringComparison.OrdinalIgnoreCase))
+                        slotLabel = "Zernio connection";
+                    _publishingSlotLabels[id] = slotLabel;
+                    if (_zernioSlotHeadings.TryGetValue(id, out var heading))
+                        heading.Text = $"{slotNumber}. {slotLabel}";
+                    if (_zernioKeys.TryGetValue(id, out var password))
+                        password.PlaceholderText = isConnected
+                            ? "Leave empty to keep the saved API key, or enter a replacement"
+                            : "Paste Zernio API key";
+                    if (_zernioDisconnectButtons.TryGetValue(id, out var disconnect))
+                    {
+                        disconnect.Visibility = isConnected ? Visibility.Visible : Visibility.Collapsed;
+                        disconnect.IsEnabled = isConnected
+                            && _publishingStatus["publishing_active"]?.GetValue<bool>() != true;
                     }
                     if (!_publishingAccountsDirty
                         && _zernioAccountPanels.TryGetValue(id, out var target))
                     {
-                        RenderConnectionAccounts(id, target, connection?["accounts"] as JsonArray ?? new JsonArray());
+                        if (isConnected)
+                            RenderConnectionAccounts(id, target, connection?["accounts"] as JsonArray ?? new JsonArray());
+                        else
+                            RenderEmptyConnectionAccounts(target);
                     }
                 }
             }
@@ -564,16 +619,64 @@ public sealed partial class MainPage
         }
     }
 
+    private void ClearConnectionAccountSelections(string connectionId)
+    {
+        var prefix = connectionId + "::";
+        foreach (var key in _accountChecks.Keys
+            .Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .ToArray())
+        {
+            _accountChecks.Remove(key);
+        }
+    }
+
+    private void RenderEmptyConnectionAccounts(StackPanel target)
+    {
+        target.Children.Clear();
+        target.Children.Add(ThemeText("Save this key to discover its connected accounts.", 11, false, "BodyTextBrush"));
+    }
+
+    private void ResetDisconnectedPublishingSlot(string connectionId)
+    {
+        ClearConnectionAccountSelections(connectionId);
+        var slotNumber = GetZernioSlotNumber(connectionId)
+            ?? Math.Max(1, _publishingSlotIds.FindIndex(id =>
+                string.Equals(id, connectionId, StringComparison.OrdinalIgnoreCase)) + 1);
+        var emptyLabel = "Zernio connection";
+        _publishingSlotLabels[connectionId] = emptyLabel;
+
+        if (_zernioKeys.TryGetValue(connectionId, out var password))
+        {
+            password.Password = "";
+            password.PlaceholderText = "Paste Zernio API key";
+        }
+        if (_zernioSlotHeadings.TryGetValue(connectionId, out var heading))
+            heading.Text = $"{slotNumber}. Zernio connection";
+        if (_zernioSlotStatuses.TryGetValue(connectionId, out var status))
+        {
+            status.Text = "Not connected";
+            status.Foreground = Application.Current.Resources["MutedTextBrush"] as Brush;
+        }
+        if (_zernioDisconnectButtons.TryGetValue(connectionId, out var disconnect))
+        {
+            disconnect.IsEnabled = false;
+            disconnect.Visibility = Visibility.Collapsed;
+        }
+        if (_zernioAccountPanels.TryGetValue(connectionId, out var accounts))
+            RenderEmptyConnectionAccounts(accounts);
+    }
+
     private void RenderConnectionAccounts(string connectionId, StackPanel target, JsonArray accounts)
     {
+        ClearConnectionAccountSelections(connectionId);
         target.Children.Clear();
         if (accounts.Count == 0)
         {
-            target.Children.Add(ThemeText("No connected accounts found for this key yet.", 9, false, "MutedTextBrush"));
+            target.Children.Add(ThemeText("No connected accounts found for this key yet.", 11, false, "BodyTextBrush"));
             return;
         }
 
-        target.Children.Add(Txt("Enabled destinations", 10, true));
+        target.Children.Add(ThemeText("Enabled destinations", 12, true, "PrimaryTextBrush"));
         foreach (var node in accounts)
         {
             if (node is not JsonObject account) continue;
@@ -594,7 +697,12 @@ public sealed partial class MainPage
                 IsChecked = account["posting_enabled"]?.GetValue<bool>()
                     ?? account["enabled"]?.GetValue<bool>() ?? (active && providerEnabled),
                 IsEnabled = active && providerEnabled && !rateLimited,
-                FontFamily = CurrentFont
+                FontFamily = CurrentFont,
+                FontSize = UiFontSize(13.5),
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = Application.Current.Resources["PrimaryTextBrush"] as Brush,
+                MinHeight = 36,
+                Padding = new Thickness(2, 5, 2, 5)
             };
             check.Checked += (_, _) => { if (!_applyingPublishingStatus) _publishingAccountsDirty = true; };
             check.Unchecked += (_, _) => { if (!_applyingPublishingStatus) _publishingAccountsDirty = true; };
@@ -603,7 +711,43 @@ public sealed partial class MainPage
 
             var error = account["last_error"]?.ToString();
             if (!string.IsNullOrWhiteSpace(error))
-                target.Children.Add(ThemeText(error, 9, false, "MutedTextBrush"));
+                target.Children.Add(ThemeText(error, 11, false, "DangerTextBrush"));
+        }
+    }
+
+    private async Task DisconnectPublishingConnectionAsync(string connectionId)
+    {
+        try
+        {
+            if (_engine is null)
+                throw new InvalidOperationException("The local engine is not connected.");
+
+            if (_publishingStatus["publishing_active"]?.GetValue<bool>() == true)
+            {
+                await ShowErrorAsync("Publishing is in progress", "Wait for the active publishing batch to finish before disconnecting this connection.");
+                return;
+            }
+
+            if (FindPublishingConnection(connectionId)?["api_key_set"]?.GetValue<bool>() != true)
+            {
+                ResetDisconnectedPublishingSlot(connectionId);
+                return;
+            }
+
+            // Disconnect is deliberately immediate: remove this slot's stored key
+            // and account names, without a confirmation dialog or a page reload.
+            _publishingStatus = await _engine.PostJsonAsync(
+                "/api/publishing/disconnect",
+                new JsonObject { ["connection_id"] = connectionId },
+                _shutdown.Token);
+
+            _publishingAccountsDirty = false;
+            ResetDisconnectedPublishingSlot(connectionId);
+            await LoadPublishingStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not disconnect Zernio", ex.Message);
         }
     }
 
@@ -773,6 +917,7 @@ public sealed partial class MainPage
             !string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith("#", StringComparison.Ordinal));
         _wordsCount.Text = $"{count:N0} custom entries";
     }
+
     private async Task LoadWordsAsync()
     {
         try
@@ -854,7 +999,9 @@ public sealed partial class MainPage
             UpdateActivityRows();
         };
         controls.Children.Add(_activitySearchBox);
-        controls.Children.Add(CreateButton("Download log", async () => await DownloadRuntimeLogAsync()));
+        controls.Children.Add(ActionRow(
+            CreateButton("Copy log", async () => await CopyRuntimeLogAsync()),
+            CreateButton("Download log", async () => await DownloadRuntimeLogAsync())));
 
         _activityVisibleCount = Txt("", 9, false, "#9CDEF2");
         _activityRowsHost = new StackPanel { Spacing = 3 };
@@ -976,7 +1123,7 @@ public sealed partial class MainPage
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await ShowThemedDialogAsync(dialog) != ContentDialogResult.Primary) return;
         try
         {
             var result = await PostAsync("/api/stop_file_holder", new JsonObject
@@ -993,10 +1140,53 @@ public sealed partial class MainPage
         }
     }
 
+    private static string GetRuntimeLogPath()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var configPath = Path.Combine(localAppData, "StreamSnip AI", "native-engine.json");
+        var dataRoot = "";
+        try
+        {
+            if (File.Exists(configPath))
+            {
+                var config = JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject;
+                dataRoot = config?["data_root"]?.ToString() ?? "";
+            }
+        }
+        catch { }
+
+        if (string.IsNullOrWhiteSpace(dataRoot))
+            dataRoot = Path.Combine(localAppData, "StreamSnip AI", "Library");
+        return Path.Combine(dataRoot, "streamsnip.log");
+    }
+
+    private async Task CopyRuntimeLogAsync()
+    {
+        var logPath = GetRuntimeLogPath();
+        if (!File.Exists(logPath))
+        {
+            await ShowErrorAsync("Runtime log not found", logPath);
+            return;
+        }
+
+        try
+        {
+            var content = await File.ReadAllTextAsync(logPath);
+            var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            package.SetText(content);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+            Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
+            await DialogResultAsync("Log copied", "The latest StreamSnip AI runtime log is on your clipboard.");
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not copy runtime log", ex.Message);
+        }
+    }
+
     private async Task DownloadRuntimeLogAsync()
     {
-        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "StreamSnip AI", "streamsnip.log");
+        var logPath = GetRuntimeLogPath();
         if (!File.Exists(logPath))
         {
             await ShowErrorAsync("Runtime log not found", logPath);
@@ -1013,9 +1203,11 @@ public sealed partial class MainPage
         WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         var file = await picker.PickSaveFileAsync();
         if (file is null) return;
-        await FileIO.WriteTextAsync(file, File.ReadAllText(logPath));
+        await FileIO.WriteTextAsync(file, await File.ReadAllTextAsync(logPath));
         await DialogResultAsync("Log saved", file.Path);
     }
+
+
     private void RenderHelpPage()
     {
         AddPageHeading("Help & how-to", "Setup walkthroughs, workflow guides, troubleshooting, and how the creator workspace behaves.");
@@ -1048,7 +1240,7 @@ public sealed partial class MainPage
         brand.Children.Add(Txt("StreamSnip AI", 20, true));
         brand.Children.Add(Txt("Creator Studio  ·  Native Windows desktop interface", 10, false, "#9CDEF2"));
         brand.Children.Add(Txt("The WinUI desktop app owns the windows and native controls. The Python engine handles Streamlink capture, FFmpeg media processing, Faster-Whisper transcription, AI highlight analysis, and clip rendering.", 11));
-        brand.Children.Add(Txt("Application version 4.0.16", 10, false, "MutedTextBrush"));
+        brand.Children.Add(Txt("Application version 4.1.0", 10, false, "MutedTextBrush"));
         brand.Children.Add(ActionRow(
             CreateButton("GitHub source", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai")),
             CreateButton("Latest releases", () => OpenExternal("https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"))));

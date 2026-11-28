@@ -1,3 +1,11 @@
+## [4.1.0] - 2026-11-28
+
+### Added
+- Add confirmed, per-connection Zernio disconnect actions that clear only the chosen connection.
+
+### Fixed
+- Preserve explicit selected-account order while publishing the same clip to selected destinations across Zernio connections.
+
 ## [4.0.16] - 2026-11-28
 
 ### Fixed

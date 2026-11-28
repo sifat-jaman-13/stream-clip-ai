@@ -119,6 +119,35 @@ class ThemeConsistencyTests(unittest.TestCase):
         self.assertIn('BasedOn="{StaticResource DefaultCheckBoxStyle}"', app)
         self.assertIn('BasedOn="{StaticResource DefaultRadioButtonStyle}"', app)
 
+    def test_publisher_account_selection_uses_active_accent_and_readable_labels(self):
+        native = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.xaml.cs").read_text(encoding="utf-8")
+        manage = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.Manage.cs").read_text(encoding="utf-8")
+        apply_start = native.index("private void ApplyTheme(string themeId)")
+        apply_end = native.index("private static void UpdateWindowTitleBar", apply_start)
+        apply_theme = native[apply_start:apply_end]
+
+        self.assertIn('SetResourceBrush("AccentTextBrush", accentText);', apply_theme)
+        self.assertIn('var accentText = EnsureTextContrastAcross(accent, 4.5, themePalette.App, themePalette.Surface, themePalette.Soft, themePalette.Hover);', apply_theme)
+        self.assertIn('SetResourceBrush("CheckBoxBackgroundChecked" + state, BlendHex(accent, themePalette.Surface, 0.16));', apply_theme)
+        self.assertIn('SetResourceBrush("CheckBoxBorderBrushChecked" + state, accent);', apply_theme)
+        self.assertIn('SetResourceBrush("CheckBoxCheckGlyphForegroundChecked" + state, accentText);', apply_theme)
+        self.assertNotIn('SetResourceBrush("CheckBoxBackgroundChecked" + state, themePalette.Accent);', apply_theme)
+
+        render_start = manage.index("private void RenderConnectionAccounts(")
+        render_end = manage.index("private async Task DisconnectPublishingConnectionAsync", render_start)
+        render_accounts = manage[render_start:render_end]
+        self.assertIn('Foreground = Application.Current.Resources["PrimaryTextBrush"] as Brush', render_accounts)
+        self.assertIn('FontSize = UiFontSize(13.5)', render_accounts)
+        self.assertIn('FontWeight = Microsoft.UI.Text.FontWeights.SemiBold', render_accounts)
+        self.assertIn('ThemeText("Enabled destinations", 12, true, "PrimaryTextBrush")', render_accounts)
+        self.assertIn('ThemeText("No connected accounts found for this key yet.", 11, false, "BodyTextBrush")', render_accounts)
+        self.assertIn('ThemeText(error, 11, false, "DangerTextBrush")', render_accounts)
+        self.assertIn('ThemeText("Save this key to discover its connected accounts.", 11, false, "BodyTextBrush")', manage)
+        self.assertIn('var heading = ThemeText($"{slotNumber}. {label}", 13, true, "PrimaryTextBrush");', manage)
+        self.assertIn('var slotStatus = ThemeText(', manage)
+        self.assertIn('slotConnected ? "Connected" : "Not connected"', manage)
+        self.assertIn('11,', manage)
+        self.assertIn('slotConnected ? "SuccessTextBrush" : "MutedTextBrush"', manage)
     def test_status_colors_are_not_reused_for_primary_actions(self):
         native = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.xaml.cs").read_text(encoding="utf-8")
         forest = re.search(r'new ThemePalette\("forest"[^;]+', native)
@@ -220,17 +249,17 @@ class ThemeConsistencyTests(unittest.TestCase):
         self.assertIn('SetResourceBrush("TabViewItemHeaderForegroundSelected",', native)
         self.assertIn('SetResourceBrush("TabViewItemHeaderBackgroundSelected",', native)
 
-    def test_live_creator_actions_use_a_second_row_without_squeezing_details(self):
+    def test_live_creator_picker_stays_compact_while_other_creator_controls_remain_on_creators_page(self):
         live = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.Live.cs").read_text(encoding="utf-8")
-        self.assertIn("RowSpacing = 8", live)
-        self.assertIn("row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });", live)
-        self.assertIn("Grid.SetRow(avatar, 0);", live)
-        self.assertNotIn("Grid.SetRowSpan(avatar, 2);", live)
-        self.assertIn("var actions = new Grid { ColumnSpacing = 10 };", live)
-        self.assertIn("select.HorizontalAlignment = HorizontalAlignment.Stretch;", live)
-        self.assertIn("liveAction.HorizontalAlignment = HorizontalAlignment.Stretch;", live)
-        self.assertIn("Grid.SetRow(actions, 1);", live)
-        self.assertIn("Grid.SetColumn(actions, 1);", live)
+        creators = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.Creators.cs").read_text(encoding="utf-8")
+        self.assertIn("DisplayMemberPath = nameof(CreatorItem.Name)", live)
+        self.assertIn("SelectedValuePath = nameof(CreatorItem.Id)", live)
+        self.assertIn('CreateButton("Manage creators"', live)
+        self.assertIn("_liveSelectedCreatorAction", live)
+        self.assertNotIn("foreach (var creator in _creators.OrderBy", live)
+        self.assertIn("foreach (var creator in _creators", creators)
+        self.assertIn('CreateButton("Start monitor"', creators)
+        self.assertIn('CreateButton("Stop monitor"', creators)
 
     def test_native_creator_avatar_centers_initial_and_is_reused_across_screens(self):
         main = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.xaml.cs").read_text(encoding="utf-8")
@@ -239,10 +268,14 @@ class ThemeConsistencyTests(unittest.TestCase):
         creators = (ROOT / "desktop" / "StreamSnip.Desktop" / "MainPage.Creators.cs").read_text(encoding="utf-8")
         self.assertIn('private Border CreateCreatorAvatar(string creatorName, double size = 34, bool active = false)', main)
         self.assertIn('label.TextAlignment = TextAlignment.Center;', main)
-        self.assertIn('label.HorizontalAlignment = HorizontalAlignment.Stretch;', main)
+        self.assertIn('label.HorizontalAlignment = HorizontalAlignment.Center;', main)
         self.assertIn('label.VerticalAlignment = VerticalAlignment.Center;', main)
+        self.assertIn('HorizontalAlignment = HorizontalAlignment.Stretch,', main)
+        self.assertIn('VerticalAlignment = VerticalAlignment.Stretch', main)
+        self.assertIn('Math.Max(14, size * 0.44)', main)
         self.assertIn('CreateCreatorAvatar(', dashboard)
-        self.assertIn('CreateCreatorAvatar(', live)
+        self.assertNotIn('CreateCreatorAvatar(', live)
+        self.assertIn("DisplayMemberPath = nameof(CreatorItem.Name)", live)
         self.assertIn('CreateCreatorAvatar(', creators)
 
 

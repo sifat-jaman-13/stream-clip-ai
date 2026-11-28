@@ -110,6 +110,169 @@ def test_selected_account_refs_can_include_multiple_accounts_on_same_platform():
 
 
 
+def test_one_clip_reaches_only_explicitly_selected_accounts_across_connections(monkeypatch, tmp_path):
+    calls = []
+
+    class FakePublisher:
+        def __init__(self, log, config, on_success=None):
+            self.api_key = config["api_key"]
+
+        def publish_one(self, path, schedule_minutes=None, accounts=None, caption_override=None):
+            platform, account_id = next(iter(accounts.items()))
+            calls.append((Path(path), self.api_key, platform, account_id))
+            return {"failed_platforms": []}
+
+    from pathlib import Path
+
+    monkeypatch.setattr(zc, "ZernioPublisher", FakePublisher)
+    publisher = zc.ZernioMultiPublisher(
+        lambda _message: None,
+        [
+            {
+                "id": "workspace-a",
+                "api_key": "key-a",
+                "accounts": [
+                    account("ig-selected", "instagram", enabled=True),
+                    account("fb-unselected", "facebook", enabled=True),
+                ],
+            },
+            {
+                "id": "workspace-b",
+                "api_key": "key-b",
+                "accounts": [
+                    account("yt-selected", "youtube", enabled=False),
+                ],
+            },
+        ],
+    )
+    video = tmp_path / "one-video.mp4"
+    video.write_bytes(b"same video")
+
+    selected = [
+        {"connection_id": "workspace-a", "account_id": "ig-selected"},
+        {"connection_id": "workspace-b", "account_id": "yt-selected"},
+    ]
+    result = publisher.publish_one(video, accounts=selected)
+
+    assert calls == [
+        (video, "key-a", "instagram", "ig-selected"),
+        (video, "key-b", "youtube", "yt-selected"),
+    ]
+    assert result["succeeded"] == ["workspace-a:ig-selected", "workspace-b:yt-selected"]
+    assert result["failed"] == []
+
+
+
+def test_five_connections_preserve_explicit_order_deduplicate_and_share_clip_metadata(monkeypatch, tmp_path):
+    calls = []
+
+    class FakePublisher:
+        def __init__(self, log, config, on_success=None):
+            self.api_key = config["api_key"]
+
+        def publish_one(self, path, schedule_minutes=None, accounts=None, caption_override=None):
+            platform, account_id = next(iter(accounts.items()))
+            calls.append((Path(path), self.api_key, schedule_minutes, platform, account_id, caption_override))
+            return {"failed_platforms": []}
+
+    from pathlib import Path
+
+    monkeypatch.setattr(zc, "ZernioPublisher", FakePublisher)
+    connections = []
+    for index in range(1, 6):
+        connections.append({
+            "id": f"workspace-{index}",
+            "api_key": f"key-{index}",
+            "accounts": [
+                account("shared-instagram-id", "instagram", enabled=index != 1),
+                account(f"unselected-{index}", "instagram", enabled=True),
+            ],
+        })
+    publisher = zc.ZernioMultiPublisher(lambda _message: None, connections)
+    video = tmp_path / "shared.mp4"
+    video.write_bytes(b"one source video")
+    selected = [
+        {"connection_id": "workspace-4", "account_id": "shared-instagram-id"},
+        {"connection_id": "workspace-1", "account_id": "shared-instagram-id"},
+        {"connection_id": "workspace-5", "account_id": "shared-instagram-id"},
+        {"connection_id": "workspace-1", "account_id": "shared-instagram-id"},
+        {"connection_id": "workspace-1", "account_id": "unselected-1"},
+    ]
+
+    result = publisher.publish_one(video, schedule_minutes=15, accounts=selected,
+                                   caption_override="One title\nOne description")
+
+    expected = [
+        (video, "key-4", 15, "instagram", "shared-instagram-id", "One title\nOne description"),
+        (video, "key-1", 15, "instagram", "shared-instagram-id", "One title\nOne description"),
+        (video, "key-5", 15, "instagram", "shared-instagram-id", "One title\nOne description"),
+        (video, "key-1", 15, "instagram", "unselected-1", "One title\nOne description"),
+    ]
+    assert calls == expected
+    assert result["succeeded"] == [
+        "workspace-4:shared-instagram-id",
+        "workspace-1:shared-instagram-id",
+        "workspace-5:shared-instagram-id",
+        "workspace-1:unselected-1",
+    ]
+    assert result["failed"] == []
+
+
+def test_explicit_selection_excludes_unavailable_and_rate_limited_accounts():
+    limited = account("rate-limited", "instagram")
+    limited.update({"rate_limited": True})
+    publisher = zc.ZernioMultiPublisher(lambda _message: None, [{
+        "id": "workspace-1", "api_key": "key",
+        "accounts": [
+            account("inactive", "instagram", active=False),
+            account("provider-disabled", "facebook", provider_enabled=False),
+            limited,
+        ],
+    }])
+
+    selected = publisher._selected_accounts([
+        {"connection_id": "workspace-1", "account_id": "inactive"},
+        {"connection_id": "workspace-1", "account_id": "provider-disabled"},
+        {"connection_id": "workspace-1", "account_id": "rate-limited"},
+    ])
+
+    assert selected == []
+    with pytest.raises(ValueError, match="at least one connected Zernio account"):
+        publisher.publish_one("unused.mp4", accounts=[])
+
+
+def test_failed_destination_does_not_stop_other_selected_accounts(monkeypatch, tmp_path):
+    calls = []
+
+    class FakePublisher:
+        def __init__(self, log, config, on_success=None):
+            self.api_key = config["api_key"]
+
+        def publish_one(self, path, schedule_minutes=None, accounts=None, caption_override=None):
+            platform, account_id = next(iter(accounts.items()))
+            calls.append((self.api_key, platform, account_id))
+            if account_id == "fails":
+                raise RuntimeError("destination rejected the post")
+            return {"failed_platforms": []}
+
+    monkeypatch.setattr(zc, "ZernioPublisher", FakePublisher)
+    publisher = zc.ZernioMultiPublisher(lambda _message: None, [{
+        "id": "workspace-1", "api_key": "key",
+        "accounts": [account("first", "instagram"), account("fails", "facebook"), account("last", "youtube")],
+    }])
+    video = tmp_path / "partial.mp4"
+    video.write_bytes(b"video")
+
+    result = publisher.publish_one(video)
+
+    assert calls == [
+        ("key", "instagram", "first"),
+        ("key", "facebook", "fails"),
+        ("key", "youtube", "last"),
+    ]
+    assert result["succeeded"] == ["workspace-1:first", "workspace-1:last"]
+    assert [item["ref"] for item in result["failed"]] == ["workspace-1:fails"]
+
 def test_multi_publisher_records_zernio_scheduling_separately(monkeypatch, tmp_path):
     scheduled = []
     posted = []
@@ -123,6 +286,14 @@ def test_multi_publisher_records_zernio_scheduling_separately(monkeypatch, tmp_p
             return {
                 "failed_platforms": [],
                 "scheduled_destinations": [f"{platform}:{account_id}"],
+                "delivery_records": [{
+                    "account_id": account_id,
+                    "platform": platform,
+                    "post_id": f"post-{account_id}",
+                    "scheduled_for": "2026-11-28T02:20:00Z",
+                    "published_at": None,
+                    "status": "pending",
+                }],
             }
 
     monkeypatch.setattr(zc, "ZernioPublisher", FakePublisher)
@@ -134,7 +305,7 @@ def test_multi_publisher_records_zernio_scheduling_separately(monkeypatch, tmp_p
             "accounts": [account("ig-1", "instagram")],
         }],
         on_success=lambda path, destinations: posted.append((path, destinations)),
-        on_scheduled=lambda path, destinations: scheduled.append((path, destinations)),
+        on_scheduled=lambda path, destinations, records=None: scheduled.append((path, destinations, records)),
     )
     video = tmp_path / "scheduled.mp4"
     video.write_bytes(b"video")
@@ -143,7 +314,11 @@ def test_multi_publisher_records_zernio_scheduling_separately(monkeypatch, tmp_p
 
     assert result["succeeded"] == ["connection-1:ig-1"]
     assert result["failed"] == []
-    assert scheduled == [(video, ["instagram:ig-1"])]
+    assert scheduled == [(video, ["instagram:ig-1"], [{
+        "account_id": "ig-1", "platform": "instagram", "post_id": "post-ig-1",
+        "scheduled_for": "2026-11-28T02:20:00Z", "published_at": None,
+        "status": "pending", "connection_id": "connection-1",
+    }])]
     assert posted == []
 
 

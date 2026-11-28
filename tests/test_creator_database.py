@@ -41,6 +41,17 @@ class CreatorDatabaseTests(unittest.TestCase):
             finally:
                 db.close()
 
+    def test_open_creators_folder_opens_shared_per_creator_root(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(autoclip, "_data_root", Path(folder)):
+                with patch.object(autoclip, "open_folder") as open_folder:
+                    core = object.__new__(autoclip.Core)
+                    result = core.open_creators_folder()
+                    expected = Path(folder) / "creators"
+                    self.assertTrue(expected.is_dir())
+                    self.assertEqual(result["path"], str(expected))
+                    open_folder.assert_called_once_with(expected)
+
     def test_legacy_creator_json_is_migrated_and_removed(self):
         with tempfile.TemporaryDirectory() as folder, patch.multiple(
             autoclip, _data_root=Path(folder),

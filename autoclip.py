@@ -24,6 +24,7 @@ import os, re, sys, glob, json, time, queue, shutil, secrets, threading, subproc
 import math
 import sqlite3
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 import mimetypes
 import urllib.request
 from importlib import metadata as importlib_metadata
@@ -34,7 +35,8 @@ from ai_highlights import (AIAnalysisCancelled, AIProviderError, DEFAULT_GEMINI_
                            ollama_models, select_moments, test_provider)
 from post_metadata import (DEFAULT_GEMINI_COPY_MODEL, build_hook_word_copy,
                             build_transcript_fallback, generate_social_copy)
-APP_VERSION = "4.0.16"
+from secret_store import ClosingSQLiteConnection, CredentialStore
+APP_VERSION = "4.1.0"
 MAX_ACTIVE_CREATOR_MONITORS = 10
 PRODUCT_NAME = "StreamSnip AI"
 APP_RELEASES_URL = "https://github.com/sifat-jaman-13/stream-clip-ai/releases/latest"
@@ -639,6 +641,132 @@ INSTANCE_LOCK_FILE = _data_root / ".autoclip.lock"
 _INSTANCE_LOCK_HANDLE = None
 STORAGE_PATH_WARNING = ""
 
+DATABASE_FILE = _data_root / "streamsnip.db"
+DATABASE_SCHEMA_VERSION = 4
+
+
+def _database_path(reference_path=None):
+    if reference_path is not None:
+        reference = pathlib.Path(reference_path)
+        if reference.parent.resolve() != _data_root.resolve():
+            return reference.parent / "streamsnip.db"
+    return DATABASE_FILE
+
+
+def _database_connection(reference_path=None):
+    path = _database_path(reference_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(
+        str(path), timeout=15, factory=ClosingSQLiteConnection
+    )
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys=ON")
+    db.execute("PRAGMA busy_timeout=15000")
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA synchronous=FULL")
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key TEXT PRIMARY KEY,
+            value_json TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS clip_metadata (
+            clip_path TEXT PRIMARY KEY,
+            clip_name TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            caption TEXT NOT NULL DEFAULT '',
+            updated_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_clip_metadata_name ON clip_metadata(clip_name);
+        CREATE TABLE IF NOT EXISTS clip_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            clip_path TEXT NOT NULL,
+            clip_name TEXT NOT NULL,
+            provider TEXT NOT NULL DEFAULT 'zernio',
+            connection_id TEXT NOT NULL DEFAULT '',
+            account_id TEXT NOT NULL DEFAULT '',
+            platform TEXT NOT NULL DEFAULT '',
+            post_id TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL,
+            scheduled_for TEXT,
+            accepted_at REAL,
+            published_at REAL,
+            error TEXT NOT NULL DEFAULT '',
+            extra_json TEXT NOT NULL DEFAULT '{}',
+            updated_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_clip_deliveries_clip ON clip_deliveries(clip_path, state);
+        CREATE INDEX IF NOT EXISTS idx_clip_deliveries_schedule ON clip_deliveries(state, scheduled_for);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_clip_deliveries_provider_post
+            ON clip_deliveries(provider, connection_id, post_id, account_id)
+            WHERE post_id <> '';
+        CREATE TABLE IF NOT EXISTS publishing_connections (
+            connection_id TEXT PRIMARY KEY,
+            label TEXT NOT NULL DEFAULT '',
+            credential_name TEXT NOT NULL,
+            settings_json TEXT NOT NULL DEFAULT '{}',
+            updated_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS publishing_accounts (
+            connection_id TEXT NOT NULL REFERENCES publishing_connections(connection_id) ON DELETE CASCADE,
+            account_id TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            username TEXT NOT NULL DEFAULT '',
+            settings_json TEXT NOT NULL DEFAULT '{}',
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(connection_id, account_id)
+        );
+    """)
+    db.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION}")
+    return db
+
+
+def _get_sql_setting(setting_key, default=None, reference_path=None):
+    with _database_connection(reference_path) as db:
+        row = db.execute(
+            "SELECT value_json FROM app_settings WHERE setting_key=?",
+            (str(setting_key),),
+        ).fetchone()
+    if row is None:
+        return default
+    try:
+        return json.loads(row["value_json"])
+    except (TypeError, ValueError):
+        return default
+
+
+def _set_sql_setting(setting_key, value, reference_path=None):
+    payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    with _database_connection(reference_path) as db:
+        db.execute(
+            """INSERT INTO app_settings(setting_key,value_json,updated_at) VALUES(?,?,?)
+               ON CONFLICT(setting_key) DO UPDATE SET
+               value_json=excluded.value_json,updated_at=excluded.updated_at""",
+            (str(setting_key), payload, time.time()),
+        )
+
+
+def _legacy_json(path):
+    try:
+        data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        return data if isinstance(data, (dict, list)) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _sanitize_legacy_json(path, value):
+    """Rewrite a migrated JSON source without any credential material."""
+    try:
+        atomic_json_write(path, value)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not remove migrated secrets from legacy file {path.name}: {exc}"
+        ) from exc
+
+
+
 CF = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0      # no flashing console windows
 _CHILD_PROCESS_LOCK = threading.RLock()
 _CHILD_PROCESSES = set()
@@ -815,7 +943,7 @@ def acquire_instance_lock():
 DEFAULTS = {
     "mode": "live", "target": "",
     "rec_dir": "", "out_dir": "",
-    "clips_per_chunk": 2, "chunk_min": 3, "pre": 20, "post": 15, "min_score": 80,
+    "clips_per_chunk": 2, "chunk_min": 3, "clip_duration": 30, "pre": 2, "post": 28, "min_score": 80,
     "model": "distil-large-v3", "compute_device": "gpu",
     "transcriber_provider": "faster-whisper", "transcriber_command": "", "transcriber_language": "auto",
     "color": "Yellow", "position": "Lower third", "caption_size": 82, "words_per_line": 3, "font": "Impact",
@@ -858,7 +986,7 @@ def clean_cfg(raw):
         if isinstance(v, float) and not math.isfinite(v): v = c[k]
         c[k] = max(lo, min(hi, v))
     num("clips_per_chunk", 0, 10, int); num("chunk_min", 3, 15, int)
-    num("pre", 3, 90, int); num("post", 3, 90, int)
+    num("clip_duration", 10, 60, int); c["pre"] = 2; c["post"] = c["clip_duration"] - 2
     num("capture_bitrate_kbps", 8000, 50000, int)
     num("min_score", 0, 100, float); num("caption_size", 60, 150, int); num("words_per_line", 1, 4, int)
     num("subtitle_font_size", 60, 180, int); num("subtitle_nudge", -400, 400, int)
@@ -898,7 +1026,7 @@ def clean_cfg(raw):
     for k, fallback in (("subtitle_text_color", "#FFFFFF"), ("subtitle_stroke_color", "#000000")):
         v = str(raw.get(k, fallback)).strip().upper()
         c[k] = v if re.fullmatch(r"#[0-9A-F]{6}", v) else fallback
-    tag = re.sub(r"[\r\n{}\\]", "", str(raw.get("streamer_tag", c["streamer_tag"]))).strip()[:80]
+    tag = re.sub(r"[\n{}\\]", "", str(raw.get("streamer_tag", c["streamer_tag"]))).strip()[:80]
     c["streamer_tag"] = tag
     c["show_tag_video"] = bool(raw.get("show_tag_video", c["show_tag_video"]))
     f = str(raw.get("font", c["font"])).strip()
@@ -934,7 +1062,7 @@ CREATOR_SHARED_SETTING_KEYS = (
     # clipping/rendering defaults, including the output layout and aspect ratio.
     "transcriber_provider", "transcriber_command", "transcriber_language", "model",
     "compute_device", "cpu_threads", "language",
-    "clips_per_chunk", "chunk_min", "pre", "post", "min_score",
+    "clips_per_chunk", "chunk_min", "clip_duration", "min_score",
     "capture_bitrate_kbps", "delete_rec", "layout", "output_format",
 )
 
@@ -978,7 +1106,7 @@ def apply_storage_paths(cfg):
 
 def streamer_credit(cfg):
     """Prefer an explicit credit, then infer public Twitch/YouTube handles from the source URL."""
-    override = re.sub(r"[\r\n{}\\]", "", str(cfg.get("streamer_tag", "")).strip())[:80]
+    override = re.sub(r"[\n{}\\]", "", str(cfg.get("streamer_tag", "")).strip())[:80]
     if override:
         return override
     target = str(cfg.get("target", "")).strip().strip('"')
@@ -1146,75 +1274,360 @@ def atomic_json_write(path, value):
         temp.unlink(missing_ok=True)
 
 def load_settings():
-    try:
-        raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    raw = _get_sql_setting("global_settings", None, SETTINGS_FILE)
+    if not isinstance(raw, dict):
+        raw = _legacy_json(SETTINGS_FILE)
         if not isinstance(raw, dict):
-            return dict(DEFAULTS)
-        # Version 1 stored min_score on a 0-5 scale. Version 2 uses 0-100.
-        if int(raw.get("_settings_version", 1)) < SETTINGS_VERSION:
-            try:
-                old_score = float(raw.get("min_score"))
-                if 0 < old_score <= 5:
-                    raw["min_score"] = round(50 + old_score * 20, 1)
-            except (TypeError, ValueError, OverflowError):
-                pass
-        return clean_cfg(raw)
-    except Exception:
-        return dict(DEFAULTS)
+            raw = dict(DEFAULTS)
+        else:
+            _set_sql_setting("global_settings", raw, SETTINGS_FILE)
+    # Version 1 stored min_score on a 0-5 scale. Version 2 uses 0-100.
+    if int(raw.get("_settings_version", 1)) < SETTINGS_VERSION:
+        try:
+            old_score = float(raw.get("min_score"))
+            if 0 < old_score <= 5:
+                raw["min_score"] = round(50 + old_score * 20, 1)
+        except (TypeError, ValueError, OverflowError):
+            pass
+        raw["_settings_version"] = SETTINGS_VERSION
+        _set_sql_setting("global_settings", raw, SETTINGS_FILE)
+    return clean_cfg(raw)
+
 
 def save_settings(cfg):
     try:
-        cfg = dict(cfg)
-        cfg["_settings_version"] = SETTINGS_VERSION
-        atomic_json_write(SETTINGS_FILE, cfg)
+        stored = dict(cfg)
+        stored["_settings_version"] = SETTINGS_VERSION
+        _set_sql_setting("global_settings", stored, SETTINGS_FILE)
     except Exception as exc:
         print(f"Could not save settings: {exc}", file=sys.stderr)
 
+def _credential_store_for(path):
+    # Credentials share the canonical application database; no parallel credential DB.
+    root = pathlib.Path(path).parent
+    return CredentialStore(root / "streamsnip.db")
+
+
+def _migrate_zernio_secrets(cfg, store):
+    """Move any legacy plaintext Zernio keys into the encrypted credential DB."""
+    if not isinstance(cfg, dict):
+        return False
+    changed = False
+    legacy_key = str(cfg.pop("api_key", "") or "").strip()
+    if legacy_key:
+        store.set("zernio", "legacy", legacy_key)
+        changed = True
+    connections = cfg.get("connections")
+    if isinstance(connections, list):
+        for connection in connections:
+            if not isinstance(connection, dict):
+                continue
+            key = str(connection.pop("api_key", "") or "").strip()
+            connection_id = str(connection.get("id", "") or "").strip()
+            if key and connection_id:
+                store.set("zernio", f"connection:{connection_id}", key)
+                changed = True
+    return changed
+
+
+def _hydrate_zernio_secrets(cfg, store):
+    """Expose decrypted keys only to the in-memory engine configuration."""
+    if not isinstance(cfg, dict):
+        return cfg
+    connections = cfg.get("connections")
+    if isinstance(connections, list):
+        for connection in connections:
+            if not isinstance(connection, dict):
+                continue
+            connection_id = str(connection.get("id", "") or "").strip()
+            if connection_id and not connection.get("api_key"):
+                key = store.get("zernio", f"connection:{connection_id}")
+                if key:
+                    connection["api_key"] = key
+    if not cfg.get("api_key"):
+        cfg["api_key"] = store.get("zernio", "legacy")
+    return cfg
+
+
+def _publishing_legacy_snapshot():
+    legacy_zernio = _legacy_json(ZERNIO_FILE)
+    legacy_publishing = _legacy_json(PUBLISHING_FILE)
+    zernio = dict(legacy_zernio) if isinstance(legacy_zernio, dict) else {}
+    if isinstance(legacy_publishing, dict):
+        saved_zernio = legacy_publishing.get("zernio")
+        if isinstance(saved_zernio, dict):
+            zernio.update(saved_zernio)
+    return {
+        "provider": "zernio",
+        "zernio": zernio,
+    }
+
+
+def _persist_publishing_relations(zernio):
+    now = time.time()
+    with _database_connection(PUBLISHING_FILE) as db:
+        db.execute("DELETE FROM publishing_connections")
+        connections = zernio.get("connections") if isinstance(zernio, dict) else []
+        for item in connections if isinstance(connections, list) else []:
+            if not isinstance(item, dict):
+                continue
+            connection_id = str(item.get("id") or "").strip()
+            if not connection_id:
+                continue
+            credential_name = f"connection:{connection_id}"
+            non_secret = {
+                key: value for key, value in item.items()
+                if key not in {"api_key", "accounts"}
+            }
+            db.execute(
+                """INSERT INTO publishing_connections(connection_id,label,credential_name,settings_json,updated_at)
+                   VALUES(?,?,?,?,?)""",
+                (connection_id, str(item.get("label") or ""), credential_name,
+                 json.dumps(non_secret, ensure_ascii=False), now),
+            )
+            for account in item.get("accounts", []) if isinstance(item.get("accounts"), list) else []:
+                if not isinstance(account, dict) or not account.get("id"):
+                    continue
+                account_settings = {
+                    key: value for key, value in account.items()
+                    if key not in {"id", "platform", "name", "username"}
+                }
+                db.execute(
+                    """INSERT INTO publishing_accounts(
+                           connection_id,account_id,platform,name,username,settings_json,updated_at
+                       ) VALUES(?,?,?,?,?,?,?)""",
+                    (connection_id, str(account["id"]), str(account.get("platform") or ""),
+                     str(account.get("name") or ""), str(account.get("username") or ""),
+                     json.dumps(account_settings, ensure_ascii=False), now),
+                )
+
+
 def load_zernio_settings():
-    try:
-        raw = json.loads(ZERNIO_FILE.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
-    except Exception:
-        return {}
+    return load_publishing_settings().get("zernio", {})
+
 
 def save_zernio_settings(cfg):
-    # This file is local-only and ignored by Git. Never send the API key to the browser.
-    atomic_json_write(ZERNIO_FILE, cfg)
+    current = load_publishing_settings()
+    current["zernio"] = dict(cfg) if isinstance(cfg, dict) else {}
+    save_publishing_settings(current)
+
 
 def load_publishing_settings():
-    defaults = {"provider": "zernio", "zernio": load_zernio_settings()}
-    try:
-        raw = json.loads(PUBLISHING_FILE.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            zernio = raw.get("zernio")
-            if isinstance(zernio, dict):
-                defaults["zernio"].update(zernio)
-    except Exception:
-        pass
-    return defaults
+    stored = _get_sql_setting("publishing", None, PUBLISHING_FILE)
+    store = _credential_store_for(PUBLISHING_FILE)
+    if not isinstance(stored, dict):
+        stored = _publishing_legacy_snapshot()
+        zernio = stored.get("zernio") if isinstance(stored.get("zernio"), dict) else {}
+        # Migrate credentials from both old JSON locations before scrubbing them.
+        _migrate_zernio_secrets(zernio, store)
+        stored["zernio"] = zernio
+        _set_sql_setting("publishing", stored, PUBLISHING_FILE)
+        _persist_publishing_relations(zernio)
+
+        # These compatibility files are no longer sources of truth. Preserve
+        # non-secret settings for rollback, but remove every plaintext key.
+        if PUBLISHING_FILE.exists():
+            safe = json.loads(json.dumps(stored))
+            atomic_json_write(PUBLISHING_FILE, safe)
+        if ZERNIO_FILE.exists():
+            atomic_json_write(ZERNIO_FILE, {})
+
+    result = json.loads(json.dumps(stored))
+    zernio = result.get("zernio")
+    if not isinstance(zernio, dict):
+        zernio = {}
+        result["zernio"] = zernio
+    result["zernio"] = _hydrate_zernio_secrets(zernio, store)
+    return result
+
 
 def save_publishing_settings(cfg):
-    atomic_json_write(PUBLISHING_FILE, cfg)
+    """Persist publishing preferences in SQLite; DPAPI-encrypt every API key."""
+    persisted = json.loads(json.dumps(cfg if isinstance(cfg, dict) else {}))
+    zernio = persisted.get("zernio")
+    if not isinstance(zernio, dict):
+        zernio = {}
+        persisted["zernio"] = zernio
+
+    store = _credential_store_for(PUBLISHING_FILE)
+    keep = set()
+    legacy_key = str(zernio.pop("api_key", "") or "").strip()
+    if legacy_key:
+        store.set("zernio", "legacy", legacy_key)
+        keep.add("legacy")
+
+    connections = zernio.get("connections")
+    if isinstance(connections, list):
+        seen_ids = set()
+        for connection in connections:
+            if not isinstance(connection, dict):
+                continue
+            connection_id = str(connection.get("id") or "").strip()
+            if not connection_id or connection_id in seen_ids:
+                raise ValueError("Every Zernio connection must have a unique connection ID.")
+            seen_ids.add(connection_id)
+            key = str(connection.pop("api_key", "") or "").strip()
+            if key:
+                store.set("zernio", f"connection:{connection_id}", key)
+            keep.add(f"connection:{connection_id}")
+
+    store.prune("zernio", keep)
+    _set_sql_setting("publishing", persisted, PUBLISHING_FILE)
+    _persist_publishing_relations(zernio)
+
+    # Clear old plaintext stores so a disconnected credential cannot be
+    # resurrected by a compatibility merge on the next launch.
+    if PUBLISHING_FILE.exists():
+        atomic_json_write(PUBLISHING_FILE, {})
+    if ZERNIO_FILE.exists():
+        atomic_json_write(ZERNIO_FILE, {})
+
+def _clip_path_for_delivery_name(name):
+    path = find_clip_path(name)
+    if path:
+        return str(path.resolve())
+    with _database_connection() as db:
+        row = db.execute(
+            "SELECT clip_path FROM clip_metadata WHERE clip_name=? ORDER BY updated_at DESC LIMIT 1",
+            (str(name),),
+        ).fetchone()
+    return str(row["clip_path"]) if row else ""
+
+
+def _delivery_rows_for_state(state):
+    with _database_connection() as db:
+        rows = db.execute(
+            """SELECT clip_path,clip_name,connection_id,account_id,platform,post_id,
+                      state,scheduled_for,accepted_at,published_at,error,extra_json
+               FROM clip_deliveries WHERE state=? ORDER BY accepted_at DESC,id DESC""",
+            (str(state),),
+        ).fetchall()
+    return rows
+
+
+def _legacy_delivery_import(state, legacy_path):
+    legacy = _legacy_json(legacy_path)
+    if not isinstance(legacy, dict):
+        return
+    # Only import once. The old files do not contain per-post IDs or verified
+    # provider schedule timestamps, so those fields intentionally remain empty.
+    marker = f"legacy_{state}_registry_imported"
+    if _get_sql_setting(marker, False, legacy_path):
+        return
+    now = time.time()
+    with _database_connection(legacy_path) as db:
+        for name, item in legacy.items():
+            if not isinstance(item, dict):
+                continue
+            clip_path = _clip_path_for_delivery_name(name)
+            account_values = item.get("accounts", [])
+            if not isinstance(account_values, list) or not account_values:
+                account_values = [""]
+            for destination in account_values:
+                value = str(destination or "")
+                platform, separator, account_id = value.partition(":")
+                db.execute(
+                    """INSERT INTO clip_deliveries(
+                           clip_path,clip_name,provider,connection_id,account_id,platform,
+                           post_id,state,scheduled_for,accepted_at,published_at,error,extra_json,updated_at
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        clip_path, str(name), "zernio", "", account_id if separator else "",
+                        platform if separator else "", "", state,
+                        None, float(item.get("scheduled_at", 0) or item.get("posted_at", 0) or now),
+                        float(item.get("posted_at", 0) or 0) if state == "posted" else None,
+                        "", json.dumps({"migrated_from": legacy_path.name}), now,
+                    ),
+                )
+    _set_sql_setting(marker, True, legacy_path)
+    # The old file has been imported into SQL and may contain no secrets.
+    atomic_json_write(legacy_path, {})
+
+
+def _registry_from_sql(state):
+    _legacy_delivery_import(state, POSTED_FILE if state == "posted" else SCHEDULED_FILE)
+    rows = _delivery_rows_for_state(state)
+    registry = {}
+    for row in rows:
+        name = str(row["clip_name"])
+        item = registry.setdefault(name, {
+            "platform": "zernio",
+            "accounts": [],
+            "post_ids": [],
+            "connection_ids": [],
+        })
+        if row["platform"] and row["account_id"]:
+            item["accounts"].append(f"{row['platform']}:{row['account_id']}")
+        if row["post_id"]:
+            item["post_ids"].append(row["post_id"])
+        if row["connection_id"]:
+            item["connection_ids"].append(row["connection_id"])
+        if state == "posted":
+            item["posted_at"] = max(float(item.get("posted_at", 0) or 0), float(row["published_at"] or row["accepted_at"] or 0))
+        else:
+            item["scheduled_at"] = max(float(item.get("scheduled_at", 0) or 0), float(row["accepted_at"] or 0))
+            if row["scheduled_for"]:
+                item.setdefault("scheduled_for", row["scheduled_for"])
+    for item in registry.values():
+        for key in ("accounts", "post_ids", "connection_ids"):
+            item[key] = list(dict.fromkeys(item[key]))
+    return registry
+
 
 def load_posted_registry():
-    try:
-        raw = json.loads(POSTED_FILE.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
-    except Exception:
-        return {}
+    return _registry_from_sql("posted")
+
 
 def save_posted_registry(registry):
-    atomic_json_write(POSTED_FILE, registry)
+    now = time.time()
+    with _database_connection() as db:
+        db.execute("DELETE FROM clip_deliveries WHERE state='posted'")
+        for name, item in (registry or {}).items():
+            if not isinstance(item, dict):
+                continue
+            clip_path = _clip_path_for_delivery_name(name)
+            accounts = item.get("accounts", []) if isinstance(item.get("accounts"), list) else [""]
+            for destination in accounts or [""]:
+                platform, separator, account_id = str(destination or "").partition(":")
+                db.execute(
+                    """INSERT INTO clip_deliveries(
+                           clip_path,clip_name,provider,connection_id,account_id,platform,
+                           post_id,state,accepted_at,published_at,extra_json,updated_at
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (clip_path, str(name), "zernio", "", account_id if separator else "",
+                     platform if separator else "", "", "posted",
+                     float(item.get("posted_at", now) or now), float(item.get("posted_at", now) or now),
+                     "{}", now),
+                )
+    _set_sql_setting("legacy_posted_registry_imported", True)
+
 
 def load_scheduled_registry():
-    try:
-        raw = json.loads(SCHEDULED_FILE.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
-    except Exception:
-        return {}
+    return _registry_from_sql("scheduled")
+
 
 def save_scheduled_registry(registry):
-    atomic_json_write(SCHEDULED_FILE, registry)
+    now = time.time()
+    with _database_connection() as db:
+        db.execute("DELETE FROM clip_deliveries WHERE state='scheduled'")
+        for name, item in (registry or {}).items():
+            if not isinstance(item, dict):
+                continue
+            clip_path = _clip_path_for_delivery_name(name)
+            accounts = item.get("accounts", []) if isinstance(item.get("accounts"), list) else [""]
+            for destination in accounts or [""]:
+                platform, separator, account_id = str(destination or "").partition(":")
+                db.execute(
+                    """INSERT INTO clip_deliveries(
+                           clip_path,clip_name,provider,connection_id,account_id,platform,
+                           post_id,state,scheduled_for,accepted_at,extra_json,updated_at
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (clip_path, str(name), "zernio", "", account_id if separator else "",
+                     platform if separator else "", "", "scheduled", item.get("scheduled_for"),
+                     float(item.get("scheduled_at", now) or now), "{}", now),
+                )
+    _set_sql_setting("legacy_scheduled_registry_imported", True)
+
 
 def _merge_registry_accounts(previous, accounts=None):
     return list(dict.fromkeys(
@@ -1222,56 +1635,255 @@ def _merge_registry_accounts(previous, accounts=None):
         + [str(x)[:150] for x in (accounts or [])]
     ))[:20]
 
-def record_zernio_posted(name, accounts=None):
-    path = find_clip_path(name)
-    if not path:
-        raise ValueError("Clip not found.")
-    registry = load_posted_registry()
-    previous = registry.get(name, {}) if isinstance(registry.get(name), dict) else {}
-    scheduled = load_scheduled_registry()
-    scheduled.pop(name, None)
-    save_scheduled_registry(scheduled)
-    registry[name] = {
-        "posted_at": time.time(), "platform": "zernio",
-        "accounts": _merge_registry_accounts(previous, accounts),
-    }
-    save_posted_registry(registry)
-    invalidate_clip_cache()
-    return registry[name]
 
-def record_zernio_scheduled(name, accounts=None):
-    path = find_clip_path(name)
-    if not path:
+def _delivery_epoch(value, fallback=None):
+    """Convert provider ISO timestamps or numeric epochs into SQLite REAL values."""
+    if value in (None, ""):
+        return fallback
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        pass
+    try:
+        parsed = __import__("datetime").datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        )
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=__import__("datetime").timezone.utc)
+        return parsed.timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+
+
+def _write_delivery_records(name, state, accounts=None, records=None):
+    clip_path = _clip_path_for_delivery_name(name)
+    if not clip_path:
         raise ValueError("Clip not found.")
-    registry = load_scheduled_registry()
-    previous = registry.get(name, {}) if isinstance(registry.get(name), dict) else {}
-    posted = load_posted_registry()
-    posted.pop(name, None)
-    save_posted_registry(posted)
-    registry[name] = {
-        "scheduled_at": time.time(), "platform": "zernio",
-        "accounts": _merge_registry_accounts(previous, accounts),
-    }
-    save_scheduled_registry(registry)
+    now = time.time()
+    record_rows = []
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            provider_status = str(record.get("status") or state).strip().lower()
+            record_state = (
+                "posted" if provider_status in {"published", "success", "posted"}
+                else "scheduled" if provider_status in {
+                    "scheduled", "queued", "pending", "processing", "submitted", "draft"
+                }
+                else state
+            )
+            if record_state not in {"posted", "scheduled"}:
+                continue
+            record_rows.append({
+                "connection_id": str(record.get("connection_id") or ""),
+                "account_id": str(record.get("account_id") or ""),
+                "platform": str(record.get("platform") or "").lower(),
+                "post_id": str(record.get("post_id") or ""),
+                "scheduled_for": record.get("scheduled_for"),
+                "accepted_at": _delivery_epoch(record.get("accepted_at"), now),
+                "published_at": _delivery_epoch(
+                    record.get("published_at"), now if record_state == "posted" else None
+                ),
+                "state": record_state,
+                "status": provider_status,
+                "extra": record.get("extra") if isinstance(record.get("extra"), dict) else {},
+            })
+    if not record_rows:
+        for destination in accounts or []:
+            platform, separator, account_id = str(destination or "").partition(":")
+            record_rows.append({
+                "connection_id": "",
+                "account_id": account_id if separator else "",
+                "platform": platform.lower() if separator else "",
+                "post_id": "",
+                "scheduled_for": None,
+                "accepted_at": now,
+                "published_at": now if state == "posted" else None,
+                "state": state,
+                "status": state,
+                "extra": {},
+            })
+    if not record_rows and state == "posted":
+        # Keep compatibility with success callbacks that only confirm a clip
+        # and do not supply a destination list.
+        record_rows.append({
+            "connection_id": "",
+            "account_id": "",
+            "platform": "",
+            "post_id": "",
+            "scheduled_for": None,
+            "accepted_at": now,
+            "published_at": now,
+            "state": state,
+            "status": state,
+            "extra": {},
+        })
+    if not record_rows:
+        raise ValueError("The provider did not confirm any destinations.")
+
+    with _database_connection() as db:
+        # Records supplied by current provider callbacks are destination-specific.
+        # Upsert them without deleting other successful destinations for the clip.
+        # Legacy callbacks without post IDs retain their replace-the-clip behaviour.
+        structured = any(record["post_id"] for record in record_rows)
+        if not structured:
+            db.execute(
+                "DELETE FROM clip_deliveries WHERE clip_path=? AND state IN ('posted','scheduled')",
+                (clip_path,),
+            )
+        for record in record_rows:
+            values = (
+                clip_path, str(name), "zernio", record["connection_id"],
+                record["account_id"], record["platform"], record["post_id"],
+                record["state"], record["scheduled_for"], record["accepted_at"],
+                record["published_at"], "", json.dumps({
+                    "provider_status": record["status"], **record["extra"],
+                }), now,
+            )
+            existing = None
+            if record["post_id"]:
+                # Zernio can expose the same workspace post through more than one
+                # saved API key. A remote destination is globally identified by
+                # post ID + platform + account, not by the local API-key slot.
+                existing = db.execute(
+                    """SELECT id FROM clip_deliveries
+                       WHERE provider='zernio' AND post_id=? AND account_id=? AND platform=?
+                       ORDER BY CASE WHEN connection_id=? THEN 0 ELSE 1 END, id ASC
+                       LIMIT 1""",
+                    (
+                        record["post_id"], record["account_id"], record["platform"],
+                        record["connection_id"],
+                    ),
+                ).fetchone()
+            if existing:
+                db.execute(
+                    """UPDATE clip_deliveries SET clip_path=?,clip_name=?,platform=?,state=?,
+                           scheduled_for=?,accepted_at=?,published_at=?,error=?,extra_json=?,updated_at=?
+                       WHERE id=?""",
+                    (
+                        clip_path, str(name), record["platform"], record["state"],
+                        record["scheduled_for"], record["accepted_at"], record["published_at"],
+                        "", values[12], now, existing["id"],
+                    ),
+                )
+                # Remove only local duplicate rows for this exact confirmed
+                # remote destination. No provider action is performed here.
+                db.execute(
+                    """DELETE FROM clip_deliveries
+                       WHERE provider='zernio' AND post_id=? AND account_id=?
+                         AND platform=? AND id<>?""",
+                    (
+                        record["post_id"], record["account_id"], record["platform"],
+                        existing["id"],
+                    ),
+                )
+            else:
+                db.execute(
+                    """INSERT INTO clip_deliveries(
+                           clip_path,clip_name,provider,connection_id,account_id,platform,post_id,
+                           state,scheduled_for,accepted_at,published_at,error,extra_json,updated_at
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    values,
+                )
     invalidate_clip_cache()
-    return registry[name]
+    if state == "scheduled":
+        return load_scheduled_registry().get(str(name), {})
+    return load_posted_registry().get(str(name), {})
+
+
+def record_zernio_posted(name, accounts=None, records=None):
+    return _write_delivery_records(name, "posted", accounts, records)
+
+
+def record_zernio_scheduled(name, accounts=None, records=None):
+    return _write_delivery_records(name, "scheduled", accounts, records)
+
+
+def zernio_posts_to_local_deliveries(posts, connection_id, local_clip_names):
+    """Match read-only Zernio post-list results to videos that still exist locally."""
+    names = {str(name) for name in (local_clip_names or [])}
+    matched = {}
+    for post in posts if isinstance(posts, list) else []:
+        if not isinstance(post, dict):
+            continue
+        post_id = str(post.get("_id") or post.get("id") or "")
+        post_state = str(post.get("status") or "").strip().lower()
+        external_id = str(post.get("externalId") or post.get("external_id") or "")
+        media_items = post.get("mediaItems") if isinstance(post.get("mediaItems"), list) else []
+        media_urls = [
+            urllib.parse.unquote(str(item.get("url") or ""))
+            for item in media_items if isinstance(item, dict)
+        ]
+        matched_names = {
+            name for name in names
+            if name == external_id or any(name in url for url in media_urls)
+        }
+        if not matched_names:
+            continue
+
+        platform_rows = post.get("platforms") if isinstance(post.get("platforms"), list) else []
+        for name in matched_names:
+            bucket = matched.setdefault(name, {"posted": [], "scheduled": []})
+            for destination in platform_rows:
+                if not isinstance(destination, dict):
+                    continue
+                platform = str(destination.get("platform") or "").strip().lower()
+                account_value = destination.get("accountId") or destination.get("account_id")
+                if isinstance(account_value, dict):
+                    account_id = str(account_value.get("_id") or account_value.get("id") or "").strip()
+                else:
+                    account_id = str(account_value or "").strip()
+                status = str(destination.get("status") or post_state).strip().lower()
+                if status in {"published", "success", "posted"}:
+                    record_state = "posted"
+                elif status in {"scheduled", "queued", "pending", "processing", "submitted", "draft"}:
+                    record_state = "scheduled"
+                else:
+                    continue
+                bucket[record_state].append({
+                    "connection_id": str(connection_id or ""),
+                    "account_id": account_id,
+                    "platform": platform,
+                    "post_id": post_id,
+                    "scheduled_for": (
+                        destination.get("scheduledFor")
+                        or destination.get("scheduled_for")
+                        or post.get("scheduledFor")
+                        or post.get("scheduled_for")
+                    ),
+                    "published_at": (
+                        destination.get("publishedAt")
+                        or destination.get("published_at")
+                        or post.get("publishedAt")
+                        or post.get("published_at")
+                    ),
+                    "status": status,
+                    "extra": {
+                        "platform_post_id": destination.get("platformPostId") or "",
+                        "platform_post_url": destination.get("platformPostUrl") or "",
+                        "media_urls": media_urls,
+                    },
+                })
+    return matched
+
 
 def forget_posted_clips(names):
-    posted = load_posted_registry()
-    scheduled = load_scheduled_registry()
-    posted_changed = False
-    scheduled_changed = False
-    for name in names:
-        if name in posted:
-            posted.pop(name, None)
-            posted_changed = True
-        if name in scheduled:
-            scheduled.pop(name, None)
-            scheduled_changed = True
-    if posted_changed:
-        save_posted_registry(posted)
-    if scheduled_changed:
-        save_scheduled_registry(scheduled)
+    now = time.time()
+    normalized = [str(name) for name in (names or [])]
+    if not normalized:
+        return
+    placeholders = ",".join("?" for _ in normalized)
+    with _database_connection() as db:
+        db.execute(
+            f"""UPDATE clip_deliveries SET state='removed',updated_at=?
+                WHERE clip_name IN ({placeholders}) AND state IN ('posted','scheduled')""",
+            [now, *normalized],
+        )
+        db.execute(
+            f"DELETE FROM clip_metadata WHERE clip_name IN ({placeholders})",
+            normalized,
+        )
     invalidate_clip_cache()
 
 def load_ai_settings():
@@ -1636,7 +2248,7 @@ def _profanity_matches(tokens, terms):
 
 def _profanity_terms(extra_terms=""):
     terms = {tuple(_profanity_tokens(term)) for term in DEFAULT_PROFANITY_TERMS}
-    for line in re.split(r"[\r\n,;]+", str(extra_terms or "")):
+    for line in re.split(r"[\n,;]+", str(extra_terms or "")):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -1928,7 +2540,7 @@ class FileBusyError(RuntimeError):
         self.details = details
         super().__init__(details["message"])
 
-def clip_bounds(peak, duration, before, after, words, limit=60):
+def clip_bounds(peak, duration, before, after, words, limit=60, *, align_to_speech=True):
     """Choose a bounded clip window that always contains its detected peak."""
     duration = max(0.0, float(duration))
     if duration == 0:
@@ -1947,9 +2559,10 @@ def clip_bounds(peak, duration, before, after, words, limit=60):
         start = max(0.0, min(peak - limit / 2, duration - limit))
         end = min(duration, start + limit)
 
-    starts = [w for w in words if abs(w[0] - start) < 3 and w[0] <= peak]
-    if starts:
-        start = max(0, min(starts, key=lambda w: abs(w[0] - start))[0] - 0.25)
+    if align_to_speech:
+        starts = [w for w in words if abs(w[0] - start) < 3 and w[0] <= peak]
+        if starts:
+            start = max(0, min(starts, key=lambda w: abs(w[0] - start))[0] - 0.25)
     start = min(start, peak)
     if peak > start + limit:
         start = peak - limit
@@ -1959,10 +2572,11 @@ def clip_bounds(peak, duration, before, after, words, limit=60):
     # Extend only through speech adjacent to this clip boundary. A later
     # conversation elsewhere in a long recording must not pull the clip out
     # to the 60-second cap and fill it with silence.
-    ends = [w for w in words if abs(w[1] - end) < 3 and w[1] >= peak]
-    if ends:
-        nearest = min(ends, key=lambda w: abs(w[1] - end))
-        end = min(max_end, max(end, nearest[1] + 0.35))
+    if align_to_speech:
+        ends = [w for w in words if abs(w[1] - end) < 3 and w[1] >= peak]
+        if ends:
+            nearest = min(ends, key=lambda w: abs(w[1] - end))
+            end = min(max_end, max(end, nearest[1] + 0.35))
     return start, end
 
 
@@ -2651,7 +3265,13 @@ class Engine:
         stamp = time.strftime("%H%M%S")
         for i, (p, sc) in enumerate(peaks, 1):
             self.check()
-            start, end = clip_bounds(p, dur, self.cfg["pre"], self.cfg["post"], raw_words)
+            clip_duration = int(self.cfg.get("clip_duration", DEFAULTS["clip_duration"]))
+            # Put the selected high-virality moment at the opening hook:
+            # exactly two seconds of lead-in, then the chosen total duration.
+            start, end = clip_bounds(
+                p, dur, 2, max(1, clip_duration - 2), raw_words,
+                limit=clip_duration, align_to_speech=False,
+            )
             base_name = f"{stem}_{stamp}_clip{i}"
             name = base_name
             suffix = 2
@@ -3039,7 +3659,7 @@ class Core:
                         if not isinstance(item, dict):
                             continue
                         creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(item.get("id", "")))[:48]
-                        name = re.sub(r"[\r\n\x00-\x1f]", "", str(item.get("name", ""))).strip()[:80]
+                        name = re.sub(r"[\n\x00-\x1f]", "", str(item.get("name", ""))).strip()[:80]
                         target = str(item.get("target", "")).strip()[:1000]
                         if creator_id and name and target:
                             db.execute("INSERT OR IGNORE INTO creators(id,name,target) VALUES(?,?,?)",
@@ -3231,7 +3851,7 @@ class Core:
             return result
 
     def add_creator(self, body):
-        name = re.sub(r"[\r\n\x00-\x1f]", "", str(body.get("name", ""))).strip()[:80]
+        name = re.sub(r"[\n\x00-\x1f]", "", str(body.get("name", ""))).strip()[:80]
         target = normalize_stream_target(str(body.get("target", "")).strip()[:1000])
         if not name:
             raise ValueError("Give this creator a name.")
@@ -3265,6 +3885,13 @@ class Core:
             raise ValueError("Unknown creator folder.")
         open_folder(folder)
         return {"ok": True}
+
+    def open_creators_folder(self):
+        """Open the common parent containing every creator's clips and recordings."""
+        folder = _data_root / "creators"
+        folder.mkdir(parents=True, exist_ok=True)
+        open_folder(folder)
+        return {"ok": True, "path": str(folder)}
 
     def start_vod_watch(self, creator_id):
         creator_id = re.sub(r"[^A-Za-z0-9_-]", "", str(creator_id))[:48]
@@ -3570,8 +4197,8 @@ class Core:
         if isinstance(connections, list) and connections and ZernioMultiPublisher:
             return ZernioMultiPublisher(
                 self.push, connections,
-                on_success=lambda path, platforms: record_zernio_posted(path.name, platforms),
-                on_scheduled=lambda path, platforms: record_zernio_scheduled(path.name, platforms),
+                on_success=lambda path, platforms, records=None: record_zernio_posted(path.name, platforms, records),
+                on_scheduled=lambda path, platforms, records=None: record_zernio_scheduled(path.name, platforms, records),
                 on_account_success=self._record_zernio_account_success,
                 on_account_error=self._record_zernio_account_error,
                 on_account_resume=self._record_zernio_account_resume,
@@ -3581,8 +4208,8 @@ class Core:
             )
         return ZernioPublisher(
             self.push, cfg,
-            on_success=lambda path, destinations: record_zernio_posted(path.name, destinations),
-            on_scheduled=lambda path, destinations: record_zernio_scheduled(path.name, destinations),
+            on_success=lambda path, destinations, records=None: record_zernio_posted(path.name, destinations, records),
+            on_scheduled=lambda path, destinations, records=None: record_zernio_scheduled(path.name, destinations, records),
         )
 
     def _record_zernio_account_success(self, account):
@@ -3745,16 +4372,34 @@ class Core:
                 return {"ok": True, "stopping": True}
         return {"ok": True, "stopping": False}
 
-    def state(self, since, clip_offset=0, clip_tab="clips"):
-        clips = list_clips(offset=clip_offset, clip_tab=clip_tab)
-        clip_total = len(list_clips(limit=1_000_000, clip_tab=clip_tab))
+    def state(self, since, clip_offset=0, clip_tab="clips", include_clips=True):
+        # Reuse the folder index and delivery maps. Counts must never read clip
+        # metadata for every MP4 just to discover the number of clips.
+        indexed = _clip_index()
         posted_registry = load_posted_registry()
-        posted_total = sum(1 for item in _clip_index() if item["name"] in posted_registry)
         scheduled_registry = load_scheduled_registry()
-        scheduled_total = sum(
-            1 for item in _clip_index()
-            if item["name"] in posted_registry or item["name"] in scheduled_registry
+        posted_names = set(posted_registry)
+        scheduled_names = set(scheduled_registry)
+        ready_total = posted_total = scheduled_total = 0
+        for item in indexed:
+            name = item["name"]
+            is_posted = name in posted_names
+            is_scheduled = name in scheduled_names
+            if is_posted:
+                posted_total += 1
+            if is_posted or is_scheduled:
+                scheduled_total += 1
+            else:
+                ready_total += 1
+        clip_total = (
+            posted_total if clip_tab == "posted"
+            else scheduled_total if clip_tab == "scheduled"
+            else ready_total
         )
+        clips = list_clips(
+            offset=clip_offset, clip_tab=clip_tab,
+            _indexed=indexed, _posted=posted_registry, _scheduled=scheduled_registry,
+        ) if include_clips else []
         with self.lock:
             s = self.session
             el = int((s["ended"] or time.time()) - s["started"]) if s["started"] else 0
@@ -3888,16 +4533,108 @@ class Core:
                     instagram_id=cfg.get("instagram_id", ""), youtube_id=cfg.get("youtube_id", ""),
                     connections=self._public_zernio_connections(cfg))
 
+    def sync_zernio_posts(self):
+        """Reconcile local clips against Zernio's post list without creating posts."""
+        connections = self._configured_zernio_connections(self._config_for())
+        if not connections:
+            raise ValueError("Connect a Zernio API key before syncing posts.")
+
+        local_names = {item["name"] for item in _clip_index()}
+        posted_destinations = 0
+        scheduled_destinations = 0
+        matched_clips = set()
+        errors = []
+        seen_remote_destinations = set()
+        for connection in connections:
+            connection_id = str(connection.get("id") or "")
+            api_key = str(connection.get("api_key") or "").strip()
+            if not api_key:
+                continue
+            client = ZernioPublisher(self.push, {"enabled": True, "api_key": api_key})
+            page = 1
+            page_count = 1
+            try:
+                while page <= page_count and page <= 25:
+                    query = urllib.parse.urlencode({
+                        "limit": 100,
+                        "page": page,
+                        "sortBy": "created-desc",
+                    })
+                    response = client._json_request("GET", f"https://zernio.com/api/v1/posts?{query}")
+                    root = response if isinstance(response, dict) else {}
+                    data = root.get("data") if isinstance(root.get("data"), dict) else root
+                    posts = data.get("posts") if isinstance(data, dict) else None
+                    if not isinstance(posts, list):
+                        raise RuntimeError("Zernio returned an unexpected posts list.")
+                    pagination = root.get("pagination")
+                    if not isinstance(pagination, dict) and isinstance(data, dict):
+                        pagination = data.get("pagination")
+                    if isinstance(pagination, dict):
+                        try:
+                            page_count = max(1, min(25, int(pagination.get("pages", page_count) or 1)))
+                        except (TypeError, ValueError):
+                            page_count = 1
+
+                    matches = zernio_posts_to_local_deliveries(posts, connection_id, local_names)
+                    for name, states in matches.items():
+                        path = find_clip_path(name)
+                        if not path or not path.is_file():
+                            continue
+                        matched_clips.add(name)
+                        unique_posted = []
+                        unique_scheduled = []
+                        for record in states["posted"]:
+                            identity = (
+                                name, record.get("post_id"), record.get("platform"),
+                                record.get("account_id"),
+                            )
+                            if identity in seen_remote_destinations:
+                                continue
+                            seen_remote_destinations.add(identity)
+                            unique_posted.append(record)
+                        for record in states["scheduled"]:
+                            identity = (
+                                name, record.get("post_id"), record.get("platform"),
+                                record.get("account_id"),
+                            )
+                            if identity in seen_remote_destinations:
+                                continue
+                            seen_remote_destinations.add(identity)
+                            unique_scheduled.append(record)
+
+                        if unique_posted:
+                            record_zernio_posted(name, records=unique_posted)
+                            posted_destinations += len(unique_posted)
+                        if unique_scheduled:
+                            record_zernio_scheduled(name, records=unique_scheduled)
+                            scheduled_destinations += len(unique_scheduled)
+                    if not posts or len(posts) < 100:
+                        break
+                    page += 1
+            except Exception as exc:
+                errors.append({"connection_id": connection_id, "error": str(exc)[:350]})
+                self.push(f"Zernio sync error [{connection_id}]: {exc}")
+
+        return {
+            "ok": not errors,
+            "clips_matched": len(matched_clips),
+            "posted_destinations": posted_destinations,
+            "scheduled_destinations": scheduled_destinations,
+            "errors": errors,
+            "message": (
+                f"Synced {len(matched_clips)} local clip(s): {posted_destinations} published "
+                f"and {scheduled_destinations} still scheduled."
+            ),
+        }
+
     def publishing_status(self):
+        # Reading connection status must not make provider requests or mutate
+        # any of the five saved slots. Discovery and publishing are explicit actions.
         cfg = self._config_for()
-        if isinstance(cfg.get("connections"), list) and ZERNIO_AVAILABLE:
-            publisher = self._make_publisher("zernio", False)
-            if isinstance(publisher, ZernioMultiPublisher):
-                publisher.refresh_expired()
-            cfg = self._config_for()
         public_connections = self._public_zernio_connections(cfg)
         configured = any(item["api_key_set"] for item in public_connections) or bool(cfg.get("api_key"))
         status = dict(self._provider_status("zernio"), api_key_set=configured, configured=configured,
+                      publishing_active=bool(getattr(self, "posting", {}).get("active")),
                       connections=public_connections,
                       schedule_minutes=int(cfg.get("schedule_minutes", 0) or 0),
                       visibility=cfg.get("visibility", "public"),
@@ -3931,13 +4668,15 @@ class Core:
                 raise ValueError("Duplicate Zernio connection identifier.")
             seen.add(connection_id)
             previous = existing.get(connection_id, {})
-            api_key = str(raw.get("api_key") or previous.get("api_key") or "").strip()
+            previous_key = str(previous.get("api_key") or "").strip()
+            supplied_api_key = str(raw.get("api_key") or "").strip()
+            api_key = supplied_api_key or previous_key
             if not api_key:
                 raise ValueError(f"Enter the API key for {raw.get('label') or 'Zernio connection ' + str(position)}.")
             if api_key in seen_api_keys:
                 raise ValueError("Each API-key connection slot must use a different key. Different keys can still share the same Zernio billing-team request quota.")
             seen_api_keys.add(api_key)
-            label = str(raw.get("label") or previous.get("label") or f"Zernio API connection {position}").strip()[:80]
+            label = str(raw.get("label") or previous.get("label") or f"Zernio connection {position}").strip()[:80]
             previous_accounts = {
                 str(item.get("id")): item for item in previous.get("accounts", [])
                 if isinstance(item, dict) and item.get("id")
@@ -3946,19 +4685,28 @@ class Core:
                 str(item.get("id")): item for item in raw.get("accounts", [])
                 if isinstance(item, dict) and item.get("id")
             } if isinstance(raw.get("accounts"), list) else {}
-            identity = {}
-            identity_publisher = ZernioPublisher(self.push, {"enabled": True, "api_key": api_key})
-            try:
-                identity = identity_publisher.verify_identity()
-            except Exception as exc:
-                self.push(
-                    f"Zernio identity for {label} could not be verified. "
-                    "This API key slot cannot be confirmed as an independent billing workspace."
-                )
-            try:
-                discovered = identity_publisher.accounts()
-            except Exception as exc:
-                raise ValueError(f"Could not verify {label} or discover its accounts: {exc}") from exc
+
+            # Only contact Zernio when a slot receives a new or replacement key.
+            # Saving a label or another slot must not make all existing keys a
+            # dependency of the operation or erase their last known accounts.
+            key_changed = not previous_key or api_key != previous_key
+            identity = {"user_id": str(previous.get("identity_user_id") or "")}
+            if key_changed:
+                identity_publisher = ZernioPublisher(self.push, {"enabled": True, "api_key": api_key})
+                try:
+                    identity = identity_publisher.verify_identity() or {}
+                except Exception:
+                    self.push(
+                        f"Zernio identity for {label} could not be verified. "
+                        "Account discovery will still verify whether the key works."
+                    )
+                    identity = {"user_id": ""}
+                try:
+                    discovered = identity_publisher.accounts()
+                except Exception as exc:
+                    raise ValueError(f"Could not verify {label} or discover its accounts: {exc}") from exc
+            else:
+                discovered = list(previous_accounts.values())
             accounts = []
             for account in apply_account_slots(discovered, previous_accounts):
                 account_id = str(account["id"])
@@ -4003,6 +4751,39 @@ class Core:
         self.publisher = self._make_publisher("zernio", cfg["auto_post"])
         return self.publishing_status()
 
+    def disconnect_zernio_connection(self, connection_id):
+        connection_id = str(connection_id or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", connection_id):
+            raise ValueError("Invalid Zernio connection identifier.")
+        with self.lock:
+            if getattr(self, "posting", {}).get("active"):
+                raise ValueError("A Zernio publishing batch is active. Wait for it to finish before disconnecting.")
+
+            cfg = dict(self._config_for("zernio"))
+            connections = self._configured_zernio_connections(cfg)
+            remaining = [
+                item for item in connections
+                if str(item.get("id", "")) != connection_id
+            ]
+            if len(remaining) == len(connections):
+                raise ValueError("Zernio connection was not found.")
+
+            cfg["connections"] = remaining
+            # The multi-connection list is authoritative. Clear legacy fields so
+            # disconnecting the final (including a migrated legacy) slot is final.
+            cfg["api_key"] = ""
+            cfg["accounts"] = {}
+            cfg["instagram_id"] = ""
+            cfg["youtube_id"] = ""
+            self.publishing["zernio"] = cfg
+            self.publishing["provider"] = "zernio"
+            self.zernio = cfg
+            save_publishing_settings(self.publishing)
+            self.publisher = self._make_publisher("zernio", bool(cfg.get("auto_post", False)))
+
+        self.push(f"Disconnected Zernio connection {connection_id}. Its saved key and discovered account settings were removed from this PC.")
+        return self.publishing_status()
+
     def publishing_account_toggle(self, body):
         connection_id = str(body.get("connection_id", "")).strip()
         account_id = str(body.get("account_id", "")).strip()
@@ -4034,11 +4815,9 @@ class Core:
         return self.publishing_status()
 
     def publishing_accounts(self, provider=None, connection_id=None):
+        # This endpoint is called only after an explicit account refresh. Query
+        # each selected slot directly, without refreshing unrelated keys first.
         cfg = dict(self._config_for())
-        publisher = self._make_publisher("zernio", False)
-        if isinstance(publisher, ZernioMultiPublisher):
-            publisher.refresh_expired()
-            cfg = dict(self._config_for())
         connections = self._configured_zernio_connections(cfg)
         if not connections:
             raise ValueError("Add a Zernio API key to discover connected social accounts.")
@@ -4155,7 +4934,16 @@ class Core:
         multi_connection = bool(cfg.get("connections")) and bool(ZERNIO_AVAILABLE and ZernioMultiPublisher)
         if multi_connection:
             connections = self._configured_zernio_connections(cfg)
-            enabled_refs = {
+            available_refs = {
+                f"{connection.get('id')}:{account.get('id')}"
+                for connection in connections
+                for account in connection.get("accounts", [])
+                if isinstance(account, dict) and account.get("id")
+                and account.get("is_active", True)
+                and account.get("provider_enabled", True)
+                and not account.get("rate_limited", False)
+            }
+            default_enabled_refs = {
                 f"{connection.get('id')}:{account.get('id')}"
                 for connection in connections
                 for account in connection.get("accounts", [])
@@ -4163,23 +4951,28 @@ class Core:
                 and account.get("posting_enabled", account.get("enabled", account.get("is_active", True)))
                 and account.get("is_active", True)
                 and account.get("provider_enabled", True)
+                and not account.get("rate_limited", False)
             }
             if isinstance(account_ids, list):
                 selected_accounts = []
+                seen_refs = set()
                 for item in account_ids:
                     if not isinstance(item, dict):
                         continue
                     connection_id = str(item.get("connection_id", ""))
                     account_id = str(item.get("account_id") or item.get("id") or "")
                     ref = f"{connection_id}:{account_id}"
-                    if connection_id and account_id and ref in enabled_refs:
+                    if connection_id and account_id and ref in available_refs and ref not in seen_refs:
                         selected_accounts.append({"connection_id": connection_id, "account_id": account_id})
+                        seen_refs.add(ref)
             elif account_ids is None:
                 selected_accounts = None
+            elif isinstance(account_ids, dict):
+                selected_accounts = account_ids
             else:
                 selected_accounts = []
-            if selected_accounts == [] or (selected_accounts is None and not enabled_refs):
-                raise ValueError("Enable at least one connected Zernio account for posting.")
+            if selected_accounts == [] or (selected_accounts is None and not default_enabled_refs):
+                raise ValueError("Select at least one available Zernio account for this publish.")
         else:
             if not cfg.get("api_key"):
                 raise ValueError(f"Save and verify a {provider.title()} API key first.")
@@ -4345,6 +5138,51 @@ def find_clip_path(name):
             return path if path.is_file() else None
     return None
 
+def _clip_thumbnail_target(clip_path):
+    path = pathlib.Path(clip_path).resolve()
+    if not path.is_file() or not CLIP_RE.fullmatch(path.name):
+        raise FileNotFoundError("Rendered clip not found.")
+    stat = path.stat()
+    identity = f"{path}|{stat.st_size}|{stat.st_mtime_ns}"
+    key = hashlib.sha1(identity.encode("utf-8")).hexdigest()
+    folder = _data_root / "cache" / "clip-thumbnails"
+    return path, folder / f"{key}.jpg", key
+
+
+def cached_clip_thumbnail_path(clip_path):
+    """Return a cached thumbnail without starting FFmpeg."""
+    try:
+        _, thumbnail, _ = _clip_thumbnail_target(clip_path)
+    except (OSError, FileNotFoundError):
+        return None
+    return thumbnail if thumbnail.is_file() and thumbnail.stat().st_size > 1024 else None
+
+
+def clip_thumbnail_path(clip_path):
+    """Generate a cached JPEG frame. Call from a background worker, never the request thread."""
+    path, thumbnail, key = _clip_thumbnail_target(clip_path)
+    if thumbnail.is_file() and thumbnail.stat().st_size > 1024:
+        return thumbnail
+    folder = thumbnail.parent
+    folder.mkdir(parents=True, exist_ok=True)
+    temporary = folder / f".{key}.{threading.get_ident()}.tmp.jpg"
+    result = run([
+        ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+        "-ss", "0.15", "-i", str(path),
+        "-frames:v", "1",
+        "-vf", "scale=480:270:force_original_aspect_ratio=decrease,pad=480:270:(ow-iw)/2:(oh-ih)/2",
+        "-q:v", "5", "-y", str(temporary),
+    ], capture_output=True, text=True, timeout=25)
+    if result.returncode != 0 or not temporary.is_file() or temporary.stat().st_size <= 1024:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError((result.stderr or "FFmpeg could not create a clip thumbnail.").strip()[-300:])
+    try:
+        os.replace(temporary, thumbnail)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return thumbnail
+
+
 def split_clip_post_copy(text):
     """Split the public clip sidecar into editable title and description fields."""
     value = str(text or "").strip()
@@ -4354,10 +5192,109 @@ def split_clip_post_copy(text):
     return parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
 
 
-def list_clips(limit=60, offset=0, clip_tab="clips"):
-    posted = load_posted_registry()
-    scheduled = load_scheduled_registry()
-    indexed = _clip_index()
+def get_clip_metadata(clip_path):
+    """Return SQL-owned clip copy, importing an existing sidecar once."""
+    path = pathlib.Path(clip_path).resolve()
+    return get_clip_metadata_many([path]).get(str(path), {
+        "title": "", "description": "", "caption": "",
+    })
+
+
+def get_clip_metadata_many(clip_paths):
+    """Load metadata for a visible page with one SQLite read and one optional batch backfill."""
+    paths = list(dict.fromkeys(pathlib.Path(item).resolve() for item in clip_paths))
+    if not paths:
+        return {}
+    placeholders = ",".join("?" for _ in paths)
+    keys = [str(path) for path in paths]
+    with _database_connection() as db:
+        rows = db.execute(
+            f"SELECT clip_path,title,description,caption FROM clip_metadata WHERE clip_path IN ({placeholders})",
+            keys,
+        ).fetchall()
+
+    existing = {str(row["clip_path"]): row for row in rows}
+    result = {}
+    backfill = []
+    now = time.time()
+    for path in paths:
+        row = existing.get(str(path))
+        title = str(row["title"] or "").strip() if row is not None else ""
+        description = str(row["description"] or "").strip() if row is not None else ""
+        caption = str(row["caption"] or "").strip() if row is not None else ""
+        if row is None or not title or not description:
+            recovered_title, recovered_description = split_clip_post_copy(caption)
+            if not recovered_description:
+                try:
+                    sidecar_caption = path.with_suffix(".txt").read_text(
+                        encoding="utf-8", errors="replace"
+                    ).strip()
+                except OSError:
+                    sidecar_caption = ""
+                sidecar_title, sidecar_description = split_clip_post_copy(sidecar_caption)
+                if sidecar_title or sidecar_description:
+                    caption = sidecar_caption
+                    recovered_title = sidecar_title
+                    recovered_description = sidecar_description
+            title = title or recovered_title
+            description = description or recovered_description
+            caption = caption or title + (("\n\n" + description) if description else "")
+            if title:
+                backfill.append((str(path), path.name, title, description, caption, now))
+        result[str(path)] = {
+            "title": title,
+            "description": description,
+            "caption": caption,
+        }
+
+    if backfill:
+        with _database_connection() as db:
+            db.executemany(
+                """INSERT INTO clip_metadata(
+                       clip_path,clip_name,title,description,caption,updated_at
+                   ) VALUES(?,?,?,?,?,?)
+                   ON CONFLICT(clip_path) DO UPDATE SET
+                     clip_name=excluded.clip_name,
+                     title=CASE WHEN clip_metadata.title='' THEN excluded.title ELSE clip_metadata.title END,
+                     description=CASE WHEN clip_metadata.description='' THEN excluded.description ELSE clip_metadata.description END,
+                     caption=CASE WHEN clip_metadata.caption='' THEN excluded.caption ELSE clip_metadata.caption END,
+                     updated_at=excluded.updated_at""",
+                backfill,
+            )
+    return result
+
+
+def save_clip_metadata(clip_path, title, description, caption=None, write_sidecar=True):
+    path = pathlib.Path(clip_path).resolve()
+    title = re.sub(r"[\n]+", " ", str(title or "")).strip()[:100]
+    description = str(description or "").replace("\x00", "").strip()[:2200]
+    if not title:
+        raise ValueError("Add a title before saving clip metadata.")
+    caption = str(caption if caption is not None else title + (("\n\n" + description) if description else "")).strip()
+    now = time.time()
+    with _database_connection() as db:
+        db.execute(
+            """INSERT INTO clip_metadata(clip_path,clip_name,title,description,caption,updated_at)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(clip_path) DO UPDATE SET
+                 clip_name=excluded.clip_name,title=excluded.title,
+                 description=excluded.description,caption=excluded.caption,
+                 updated_at=excluded.updated_at""",
+            (str(path), path.name, title, description, caption, now),
+        )
+    if write_sidecar:
+        _atomic_text_write(path.with_suffix(".txt"), caption)
+    invalidate_clip_cache()
+    return {"name": path.name, "title": title, "description": description, "caption": caption}
+
+
+def list_clips(
+    limit=60, offset=0, clip_tab="clips", *,
+    _indexed=None, _posted=None, _scheduled=None,
+):
+    posted = _posted if _posted is not None else load_posted_registry()
+    scheduled = _scheduled if _scheduled is not None else load_scheduled_registry()
+    indexed = _indexed if _indexed is not None else _clip_index()
     if clip_tab == "posted":
         indexed = [item for item in indexed if item["name"] in posted]
         indexed.sort(key=lambda item: float(posted[item["name"]].get("posted_at", item["mtime"])), reverse=True)
@@ -4373,20 +5310,27 @@ def list_clips(limit=60, offset=0, clip_tab="clips"):
         )
     else:
         indexed = [item for item in indexed if item["name"] not in posted and item["name"] not in scheduled]
-    items = [dict(item) for item in indexed[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]]
-    for item in items:
+    selected = indexed[max(0, int(offset)):max(0, int(offset)) + max(1, int(limit))]
+    metadata_by_path = get_clip_metadata_many([item["_path"] for item in selected])
+    items = []
+    for source_item in selected:
+        item = dict(source_item)
         clip_path = pathlib.Path(item.pop("_path"))
-        try:
-            item["caption"] = clip_path.with_suffix(".txt").read_text(encoding="utf-8")
-        except Exception:
-            item["caption"] = ""
-        item["title"], item["description"] = split_clip_post_copy(item["caption"])
+        metadata = metadata_by_path.get(str(clip_path.resolve()), {
+            "title": "", "description": "", "caption": "",
+        })
+        item["caption"] = metadata["caption"]
+        item["title"] = metadata["title"]
+        item["description"] = metadata["description"]
         item["posted"] = item["name"] in posted
         item["posted_at"] = posted.get(item["name"], {}).get("posted_at")
-        item["scheduled"] = item["name"] in scheduled and item["name"] not in posted
+        # Keep the clip in Scheduled while any destination is still pending.
+        item["scheduled"] = item["name"] in scheduled
         item["scheduled_at"] = scheduled.get(item["name"], {}).get("scheduled_at")
-        item["delivery_state"] = "posted" if item["posted"] else "scheduled" if item["scheduled"] else "ready"
+        item["delivery_state"] = "scheduled" if item["scheduled"] else "posted" if item["posted"] else "ready"
+        items.append(item)
     return items
+
 
 def reveal(path):
     path = pathlib.Path(path).resolve()
@@ -4593,6 +5537,49 @@ def schedule_quit_after_response(delay=0.8):
     return timer
 
 
+_CLIP_THUMBNAIL_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="clip-thumbnail")
+_CLIP_THUMBNAIL_LOCK = threading.Lock()
+_CLIP_THUMBNAILS_PENDING = set()
+
+
+def schedule_clip_thumbnail(clip_path):
+    """Queue one thumbnail extraction per source file and return immediately."""
+    try:
+        path, thumbnail, key = _clip_thumbnail_target(clip_path)
+    except (OSError, FileNotFoundError):
+        return False
+    if thumbnail.is_file() and thumbnail.stat().st_size > 1024:
+        return True
+    with _CLIP_THUMBNAIL_LOCK:
+        if key in _CLIP_THUMBNAILS_PENDING:
+            return False
+        _CLIP_THUMBNAILS_PENDING.add(key)
+
+    def worker():
+        try:
+            clip_thumbnail_path(path)
+            try:
+                CORE.push(f"Clip thumbnail ready: {path.name}")
+            except Exception:
+                pass
+        except Exception as exc:
+            try:
+                CORE.push(f"Clip thumbnail failed for {path.name}: {exc}")
+            except Exception:
+                pass
+        finally:
+            with _CLIP_THUMBNAIL_LOCK:
+                _CLIP_THUMBNAILS_PENDING.discard(key)
+
+    try:
+        _CLIP_THUMBNAIL_EXECUTOR.submit(worker)
+        return False
+    except RuntimeError:
+        with _CLIP_THUMBNAIL_LOCK:
+            _CLIP_THUMBNAILS_PENDING.discard(key)
+        return False
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = PRODUCT_NAME
     protocol_version = "HTTP/1.1"
@@ -4786,7 +5773,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 except ValueError: clip_offset = 0
                 clip_tab = q.get("clip_tab", ["clips"])[0]
                 if clip_tab not in {"clips", "posted", "scheduled"}: clip_tab = "clips"
-                return self._send(200, CORE.state(since, clip_offset, clip_tab))
+                include_clips = q.get("include_clips", ["1"])[0].strip().lower() not in {"0", "false", "no"}
+                return self._send(200, CORE.state(since, clip_offset, clip_tab, include_clips))
             if path == "/api/log/download":
                 if not RUNTIME_LOG.is_file():
                     return self._send(200, b"", "text/plain; charset=utf-8")
@@ -4798,6 +5786,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 asset = asset_file(path.rsplit("/", 1)[-1])
                 if asset:
                     return self._send(200, asset.read_bytes(), "image/png")
+            if path.startswith("/clip-thumbnails/"):
+                name = urllib.parse.unquote(path[len("/clip-thumbnails/"):])
+                if not CLIP_RE.fullmatch(name):
+                    return self._send(404, {"error": "not found"})
+                clip_path = find_clip_path(name)
+                if not clip_path:
+                    return self._send(404, {"error": "not found"})
+                thumbnail = cached_clip_thumbnail_path(clip_path)
+                if thumbnail is None:
+                    schedule_clip_thumbnail(clip_path)
+                    # The card keeps its local placeholder; FFmpeg runs on a
+                    # bounded background queue and a later page refresh retries.
+                    return self._send(
+                        404, b"", "image/jpeg",
+                        extra_headers={"Cache-Control": "no-store", "Retry-After": "12"},
+                    )
+                return self._send(
+                    200, thumbnail.read_bytes(), "image/jpeg",
+                    extra_headers={"Cache-Control": "public, max-age=3600"},
+                )
             if path.startswith("/clips/"):
                 return self._serve_clip(urllib.parse.unquote(path[7:]))
             self._send(404, {"error": "not found"})
@@ -4856,6 +5864,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, CORE.remove_creator(body.get("id")))
                 if path == "/api/creators/open":
                     return self._send(200, CORE.open_creator_folder(body.get("id"), body.get("folder", "live_clips")))
+                if path == "/api/creators/open-root":
+                    return self._send(200, CORE.open_creators_folder())
                 if path == "/api/creators/watch-vods":
                     return self._send(200, CORE.start_vod_watch(body.get("id")))
                 if path == "/api/creators/stop-vod-watch":
@@ -4898,11 +5908,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(200, CORE.publish_clips([str(n) for n in names]))
                 if path == "/api/publishing":
                     return self._send(200, CORE.publishing_save(body))
+                if path == "/api/publishing/sync-posts":
+                    return self._send(200, CORE.sync_zernio_posts())
                 if path == "/api/publishing/accounts":
                     return self._send(200, {"accounts": CORE.publishing_accounts(
                         str(body.get("provider", "")).lower() or None,
                         connection_id=str(body.get("connection_id", "")).strip() or None,
                     )})
+                if path == "/api/publishing/disconnect":
+                    return self._send(200, CORE.disconnect_zernio_connection(body.get("connection_id")))
                 if path == "/api/publishing/account":
                     return self._send(200, CORE.publishing_account_toggle(body))
                 if path == "/api/publishing/publish":
@@ -5002,17 +6016,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     clip_path = find_clip_path(name)
                     if not clip_path:
                         raise ValueError("Clip not found.")
-                    title = re.sub(r"[\r\n]+", " ", str(body.get("title", ""))).strip()[:100]
-                    description = str(body.get("description", "")).replace("\x00", "").strip()[:2200]
+                    title = re.sub(r"[\\r\n]+", " ", str(body.get("title", ""))).strip()[:100]
+                    description = str(body.get("description", "")).replace("\\x00", "").strip()[:2200]
                     if not title:
                         raise ValueError("Add a title before saving clip metadata.")
                     sidecar = clip_path.with_suffix(".txt")
                     if sidecar.is_symlink():
                         raise ValueError("The metadata sidecar is a symbolic link and cannot be edited.")
                     metadata = title + (("\n\n" + description) if description else "")
-                    _atomic_text_write(sidecar, metadata)
-                    CORE.push(f"Updated TXT metadata for {name}")
-                    return self._send(200, {"ok": True, "name": name, "caption": metadata})
+                    saved = save_clip_metadata(clip_path, title, description, caption=metadata, write_sidecar=True)
+                    CORE.push(f"Updated SQL clip metadata for {name}")
+                    return self._send(200, {"ok": True, **saved})
                 if path == "/api/open_folder":
                     open_folder(OUT); return self._send(200, {"ok": True})
                 if path == "/api/output-preview":
@@ -5533,8 +6547,13 @@ header{padding:16px 26px;border-bottom:1px solid var(--line);background:rgba(9,1
     <div class="two">
       <div><div class="row"><label>Clips / chunk (0 = no limit)</label><b id="v-cpc"></b></div><input type="range" id="r-cpc" min="0" max="10" step="1"></div>
       <div><div class="row"><label>Analysis window</label><b id="v-chunk"></b></div><input type="range" id="r-chunk" min="3" max="15" step="1"><p class="hint">3 min = faster AI reviews; 15 min = deeper context. The full local video is still transcribed and analyzed.</p></div>
-      <div><div class="row"><label>Before peak</label><b id="v-pre"></b></div><input type="range" id="r-pre" min="5" max="60" step="1"></div>
-      <div><div class="row"><label>After peak</label><b id="v-post"></b></div><input type="range" id="r-post" min="5" max="60" step="1"></div>
+      <div><div class="row"><label>Clip duration</label><b id="v-duration"></b></div>
+        <select id="clip-duration" class="field">
+          <option value="15">15 seconds</option><option value="20">20 seconds</option>
+          <option value="30">30 seconds</option><option value="45">45 seconds</option>
+          <option value="60">60 seconds</option>
+        </select>
+        <p class="hint">The selected viral moment is the hook. A two-second lead-in is added automatically.</p></div>
     </div>
   </div>
 
@@ -5916,12 +6935,21 @@ let saveT=null;
 function scheduleSave(){clearTimeout(saveT);saveT=setTimeout(()=>{api("/api/settings",S).catch(()=>{})},500)}
 function paintRange(el){const p=(el.value-el.min)/(el.max-el.min)*100;el.style.setProperty("--p",p+"%")}
 const RANGES=[["r-sens","min_score","v-sens",v=>Math.round(+v),true],["r-cpc","clips_per_chunk","v-cpc",v=>v,true],["r-chunk","chunk_min","v-chunk",v=>v+" min",true],
- ["r-pre","pre","v-pre",v=>v+" s",true],["r-post","post","v-post",v=>v+" s",true],["r-size","caption_size","v-size",v=>v,true]];
+ ["r-size","caption_size","v-size",v=>v,true]];
 RANGES.forEach(([id,key,lab,fmt])=>{
   const el=$("#"+id);el.value=S[key];
   const upd=()=>{S[key]=+el.value;$("#"+lab).textContent=fmt(el.value);paintRange(el)};
   el.addEventListener("input",()=>{upd();preview();scheduleSave()});upd();
 });
+const clipDurationSelect=$("#clip-duration");
+clipDurationSelect.value=String(S.clip_duration||30);
+function updateClipDuration(){
+  S.clip_duration=Number(clipDurationSelect.value)||30;
+  $("#v-duration").textContent=S.clip_duration+" s";
+  scheduleSave();
+}
+clipDurationSelect.addEventListener("change",updateClipDuration);
+updateClipDuration();
 $$(".seg[data-key]").forEach(sg=>{
   const key=sg.dataset.key,num=!!sg.dataset.num;
   const paint=()=>$$("button",sg).forEach(b=>b.classList.toggle("on",b.dataset.v===String(S[key])));
@@ -5979,7 +7007,7 @@ function syncStreamerTag(){
 }
 $("#target").value=S.target||"";syncStreamerTag();
 $("#target").addEventListener("input",e=>{S.target=e.target.value;syncStreamerTag();scheduleSave()});
-$("#streamer-tag").addEventListener("input",e=>{tagManual=true;S.streamer_tag=e.target.value.replace(/[\r\n{}\\]/g,"").slice(0,80);scheduleSave()});
+$("#streamer-tag").addEventListener("input",e=>{tagManual=true;S.streamer_tag=e.target.value.replace(/[\n{}\\]/g,"").slice(0,80);scheduleSave()});
 function onMode(){
   const live=S.mode==="live";
   const facecam=S.layout.startsWith("Facecam"),selected=S.layout.startsWith("Selected");

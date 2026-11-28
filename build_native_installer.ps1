@@ -73,6 +73,7 @@ foreach ($required in @(
     (Join-Path $publishDir "Assets\Fonts\NunitoSans-Variable.ttf"),
     (Join-Path $publishDir "Assets\Fonts\FiraCode-Variable.ttf"),
     (Join-Path $PSScriptRoot "zernio_connections.py"),
+    (Join-Path $PSScriptRoot "secret_store.py"),
     (Join-Path $PSScriptRoot "dashboard\dist\index.html"),
     (Join-Path $PSScriptRoot "installer\setup_windows.ps1")
 )) {

@@ -22,14 +22,13 @@ public sealed partial class MainPage
     private Button? _startCaptureButton;
     private Button? _stopCaptureButton;
     private TabView? _liveTabs;
-    private Image? _sourcePreviewImage;
-    private StackPanel? _sourcePreviewPlaceholder;
-    private TextBlock? _sourcePreviewInfo;
     private string? _liveSelectedCreatorId;
     private bool _switchingLiveMode;
-    private readonly Dictionary<string, TextBlock> _liveCreatorDetailsById = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, Button> _liveCreatorActionsById = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, Button> _liveCreatorSelectButtonsById = new(StringComparer.OrdinalIgnoreCase);
+    private bool _switchingLiveCreator;
+    private ComboBox? _liveCreatorSelector;
+    private TextBlock? _liveSelectedCreatorDetails;
+    private Button? _liveSelectedCreatorAction;
+    private string[] _liveCreatorSnapshotIds = [];
 
     private void RenderLiveStudioPage()
     {
@@ -87,143 +86,46 @@ public sealed partial class MainPage
         AddLabeled(sourcePanel, "Source type", _liveModeInput);
         _switchingLiveMode = false;
 
-        if (_liveModeInput.SelectedIndex == 0)
-            AddLiveCreatorPicker(sourcePanel);
-
         _liveTargetInput = Input(
             SettingString("target"),
             SettingString("mode", "live") == "file"
-                ? "Choose a local video file…" : "Select a saved creator above");
+                ? "Choose a local video file?" : "Selected creator URL");
         _liveTargetInput.IsReadOnly = _liveModeInput.SelectedIndex == 0;
-        AddLabeled(sourcePanel, "Stream URL or video file", _liveTargetInput,
-            "The same source is used for creator detection, frame preview, and capture.");
-        _sourcePreviewInfo = ThemeText("Preview updates from the selected source.", 14, false, "MutedTextBrush");
-        var sourcePreview = new StackPanel { Spacing = 8 };
-        var previewSurface = new Grid { MinHeight = 120 };
-        _sourcePreviewImage = new Image
-        {
-            Stretch = Stretch.Uniform,
-            MaxHeight = 260,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        previewSurface.Children.Add(_sourcePreviewImage);
 
-        _sourcePreviewPlaceholder = new StackPanel
+        if (_liveModeInput.SelectedIndex == 0)
         {
-            Spacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        _sourcePreviewPlaceholder.Children.Add(new PathIcon
+            AddLiveCreatorPicker(sourcePanel);
+            _liveTargetInput.Text = _creators.FirstOrDefault(item => item.Id == _liveSelectedCreatorId)?.Target ?? "";
+            _liveTargetInput.Visibility = Visibility.Collapsed;
+        }
+        else
         {
-            Data = CreateVideoIconGeometry(),
-            Width = 30,
-            Height = 30,
-            Foreground = Application.Current.Resources["MutedTextBrush"] as Brush
-        });
-        var previewTitle = ThemeText("Source preview", 14, true, "PrimaryTextBrush");
-        previewTitle.HorizontalAlignment = HorizontalAlignment.Center;
-        _sourcePreviewPlaceholder.Children.Add(previewTitle);
-        var previewHint = ThemeText("Paste a stream URL or choose a video file.", 12, false, "MutedTextBrush");
-        previewHint.HorizontalAlignment = HorizontalAlignment.Center;
-        _sourcePreviewPlaceholder.Children.Add(previewHint);
-        previewSurface.Children.Add(_sourcePreviewPlaceholder);
-        previewSurface.SizeChanged += (_, args) =>
-            previewSurface.Height = Math.Max(120, args.NewSize.Width * 9.0 / 16.0);
-        previewSurface.Loaded += (_, _) =>
-            previewSurface.Height = Math.Max(120, previewSurface.ActualWidth * 9.0 / 16.0);
-
-        sourcePreview.Children.Add(new Border
-        {
-            Background = Application.Current.Resources["SurfaceSoftBrush"] as Brush,
-            BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(9),
-            Padding = new Thickness(10),
-            Child = previewSurface
-        });
-        sourcePreview.Children.Add(_sourcePreviewInfo);
-        _liveTargetInput.TextChanged += (_, _) =>
-        {
-            if (_sourcePreviewImage is not null) _sourcePreviewImage.Source = null;
-            if (_sourcePreviewPlaceholder is not null) _sourcePreviewPlaceholder.Visibility = Visibility.Visible;
-            if (_sourcePreviewInfo is not null)
+            AddLabeled(sourcePanel, "Video file", _liveTargetInput);
+            sourcePanel.Children.Add(ActionRow(CreateButton("Browse video", async () =>
             {
-                var detected = InferCreatorHandle(_liveTargetInput.Text);
-                _sourcePreviewInfo.Text = detected is null
-                    ? "Creator handle is not exposed by this URL."
-                    : $"Detected creator handle: {detected}";
-            }
-        };
-        var browseButton = CreateButton("Browse video", async () =>
-        {
-            try
-            {
-                var file = await PickVideoFileAsync();
-                if (file is not null)
+                try
                 {
-                    _liveModeInput.SelectedIndex = 1;
+                    var file = await PickVideoFileAsync();
+                    if (file is null) return;
+                    if (_liveModeInput is not null && _liveModeInput.SelectedIndex != 1)
+                    {
+                        _switchingLiveMode = true;
+                        _liveModeInput.SelectedIndex = 1;
+                        _switchingLiveMode = false;
+                    }
                     _liveTargetInput.Text = file.Path;
                     SetSetting("mode", "file");
                     SetSetting("target", file.Path);
                 }
-            }
-            catch (Exception ex) { await ShowErrorAsync("File selection failed", ex.Message); }
-        });
-        var detect = CreateButton("Preview source frame", async () =>
-        {
-            var target = _liveTargetInput.Text.Trim();
-            if (target.Length == 0) return;
-            try
-            {
-                var result = await PostAsync("/api/frame", new JsonObject
+                catch (Exception ex)
                 {
-                    ["mode"] = SettingString("mode", "live"),
-                    ["target"] = target
-                });
-                var frameData = result["image"]?.GetValue<string>();
-                if (string.IsNullOrWhiteSpace(frameData))
-                    throw new InvalidOperationException("The source preview response did not contain an image.");
-                var separator = frameData.IndexOf(',');
-                var base64 = separator >= 0 ? frameData[(separator + 1)..] : frameData;
-                var bytes = Convert.FromBase64String(base64);
-                using var stream = new InMemoryRandomAccessStream();
-                using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
-                {
-                    writer.WriteBytes(bytes);
-                    await writer.StoreAsync();
-                    await writer.FlushAsync();
+                    _switchingLiveMode = false;
+                    await ShowErrorAsync("File selection failed", ex.Message);
                 }
-                stream.Seek(0);
-                var bitmap = new BitmapImage();
-                await bitmap.SetSourceAsync(stream);
-                if (_sourcePreviewImage is not null) _sourcePreviewImage.Source = bitmap;
-                if (_sourcePreviewPlaceholder is not null) _sourcePreviewPlaceholder.Visibility = Visibility.Collapsed;
-                var detected = InferCreatorHandle(target);
-                if (_sourcePreviewInfo is not null)
-                    _sourcePreviewInfo.Text = detected is null
-                        ? "Frame captured · this URL does not expose a creator handle. Creator credit can be entered in Captions."
-                        : $"Frame captured · detected creator handle: {detected}";
-            }
-            catch (Exception ex) { await ShowErrorAsync("Source preview failed", ex.Message); }
-        });
-        sourcePanel.Children.Add(ActionRow(browseButton, detect));
-        sourcePanel.Children.Add(sourcePreview);
-
-        if (_liveModeInput.SelectedIndex == 1)
-        {
+            })));
             sourcePanel.Children.Add(ThemeText(
-                "Local video settings are separate from live creators. Use this mode for cat videos, downloaded VODs, and any MP4 you want to clip.",
+                "Local VOD processing uses the local-video profile. Creator profiles keep their own framing and captions.",
                 11, false, "MutedTextBrush"));
-        }
-        else if (_liveSelectedCreatorId is not null)
-        {
-            var selectedCreator = _creators.FirstOrDefault(item => item.Id == _liveSelectedCreatorId);
-            if (selectedCreator is not null)
-                sourcePanel.Children.Add(ThemeText(
-                    $"Using {selectedCreator.Name}'s own facecam/game framing, crop coordinates, subtitle styling, and profanity treatment. AI provider, caption provider, video layout, output format, and clipping settings are shared across creators.",
-                    11, false, "MutedTextBrush"));
         }
 
         var tabs = new TabView
@@ -243,12 +145,32 @@ public sealed partial class MainPage
         captureGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (var row = 0; row < 3; row++)
             captureGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        AddSettingNumber(captureGrid, 0, 0, "Capture chunk length (minutes)", "chunk_min", 3, 15);
-        AddSettingNumber(captureGrid, 1, 0, "Seconds before highlight", "pre", 3, 90);
-        AddSettingNumber(captureGrid, 0, 1, "Seconds after highlight", "post", 3, 90);
-        AddSettingNumber(captureGrid, 1, 1, "Minimum highlight score", "min_score", 0, 100);
-        AddSettingNumber(captureGrid, 0, 2, "Capture bitrate (Kbps)", "capture_bitrate_kbps", 8000, 50000);
-        AddSettingNumber(captureGrid, 1, 2, "Clips per batch", "clips_per_chunk", 0, 10);
+        AddSettingNumber(captureGrid, 0, 0, "AI analysis segment (minutes)", "chunk_min", 3, 15);
+
+        var clipDurationField = new StackPanel { Spacing = 5 };
+        var clipDuration = new ComboBox
+        {
+            ItemsSource = new[] { "15 seconds", "20 seconds", "30 seconds", "45 seconds", "60 seconds" },
+            MinWidth = 180,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var savedClipDuration = (int)SettingNumber("clip_duration", 30);
+        clipDuration.SelectedItem = $"{savedClipDuration} seconds";
+        clipDuration.SelectionChanged += (_, _) =>
+        {
+            var selected = clipDuration.SelectedItem?.ToString() ?? "30 seconds";
+            if (int.TryParse(selected.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0], out var seconds))
+                SetSetting("clip_duration", seconds);
+        };
+        AddLabeled(clipDurationField, "Clip duration", clipDuration,
+            "The selected viral moment is the hook. StreamSnip automatically keeps two seconds of context before it.");
+        Grid.SetColumn(clipDurationField, 1);
+        Grid.SetRow(clipDurationField, 0);
+        captureGrid.Children.Add(clipDurationField);
+
+        AddSettingNumber(captureGrid, 0, 1, "Minimum virality score (0?100)", "min_score", 0, 100);
+        AddSettingNumber(captureGrid, 1, 1, "Capture bitrate (Kbps)", "capture_bitrate_kbps", 8000, 50000);
+        AddSettingNumber(captureGrid, 0, 2, "Clips per analysis segment", "clips_per_chunk", 0, 10);
         capture.Children.Add(captureGrid);
 
         var renderDefaults = new Grid { ColumnSpacing = 14, RowSpacing = 8 };
@@ -268,15 +190,18 @@ public sealed partial class MainPage
         var format = new ComboBox { ItemsSource = new[] { "9:16", "16:9", "1:1", "4:5" }, MinWidth = 150, HorizontalAlignment = HorizontalAlignment.Stretch };
         format.SelectedItem = SettingString("output_format", "9:16");
         format.SelectionChanged += (_, _) => SetSetting("output_format", format.SelectedItem?.ToString() ?? "9:16");
-        AddLabeled(formatField, "Output format", format, "Shared aspect ratio for every creator.");
+        AddLabeled(formatField, "Output format", format, "This exact aspect ratio is used by the final output preview.");
+        var formatHint = ThemeText("", 10, false, "MutedTextBrush");
+        void UpdateFormatHint() => formatHint.Text = OutputFormatDescription();
+        format.SelectionChanged += (_, _) => UpdateFormatHint();
+        UpdateFormatHint();
+        formatField.Children.Add(formatHint);
         Grid.SetColumn(formatField, 1);
         renderDefaults.Children.Add(formatField);
         capture.Children.Add(ThemeText("Shared clipping defaults for every creator", 11, true, "PrimaryTextBrush"));
         capture.Children.Add(renderDefaults);
 
         capture.Children.Add(ThemeText("Settings are applied to the next capture. Existing work is not changed.", 10, false, "MutedTextBrush"));
-        tabs.TabItems.Add(new TabViewItem { Header = "Capture", Content = capture, IsClosable = false });
-
         var framing = BuildFramingTab();
         tabs.TabItems.Add(new TabViewItem { Header = "Framing", Content = framing, IsClosable = false });
 
@@ -427,7 +352,25 @@ public sealed partial class MainPage
         profanity.Checked += (_, _) => SetSetting("profanity_filter_enabled", true);
         profanity.Unchecked += (_, _) => SetSetting("profanity_filter_enabled", false);
         captions.Children.Add(profanity);
+
+        var captionPreviewPlayer = CreateOutputPreviewPlayer();
+        var captionPreviewStatus = ThemeText(
+            "Render a sample using the selected creator's real crop, export format, subtitle preset, placement, and profanity settings.",
+            11, false, "MutedTextBrush");
+        captionPreviewStatus.TextWrapping = TextWrapping.Wrap;
+        captions.Children.Add(CreatePanel(
+            "Final clip appearance",
+            OutputFormatDescription() + ". This is rendered with the same FFmpeg layout and ASS caption pipeline used for exported clips.",
+            Vertical(
+                captionPreviewPlayer,
+                ActionRow(CreateAsyncButton(
+                    "Preview final clip with captions",
+                    async () => await RenderActualClipPreviewAsync(captionPreviewPlayer, captionPreviewStatus),
+                    primary: true)),
+                captionPreviewStatus)));
+
         tabs.TabItems.Add(new TabViewItem { Header = "Captions", Content = captions, IsClosable = false });
+        tabs.TabItems.Add(new TabViewItem { Header = "Capture", Content = capture, IsClosable = false });
 
         var saveCreatorSetup = CreateButton(
             _liveModeInput.SelectedIndex == 1 ? "Save local video setup" : "Save creator setup",
@@ -582,10 +525,11 @@ public sealed partial class MainPage
         PageActionHost.Child = actionBar;
         PageActionHost.Visibility = Visibility.Visible;
 
-        PageHost.Children.Add(AdaptiveColumns(
-            CreatePanel("Source", "Select the stream or recording you want to process.", sourcePanel),
-            setupPanel,
-            0.95, 1.05));
+        PageHost.Children.Add(CreatePanel(
+            "Source",
+            "Choose the creator or local video. Independent background monitors remain available on the Creators page.",
+            sourcePanel));
+        PageHost.Children.Add(setupPanel);
     }
 
     private static string LiveCreatorDetails(CreatorItem creator)
@@ -604,155 +548,112 @@ public sealed partial class MainPage
 
     private void UpdateLiveCreatorRows()
     {
-        if (_currentPage != "live") return;
-        if (_liveCreatorDetailsById.Count != _creators.Count ||
-            _creators.Any(creator => !_liveCreatorDetailsById.ContainsKey(creator.Id)))
-        {
-            RenderCurrentPage();
+        if (_currentPage != "live" || _liveCreatorSelector is null)
             return;
-        }
-        foreach (var creator in _creators)
+
+        var ordered = _creators
+            .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        var ids = ordered.Select(item => item.Id).ToArray();
+        if (!_liveCreatorSnapshotIds.SequenceEqual(ids, StringComparer.Ordinal))
         {
-            if (_liveCreatorDetailsById.TryGetValue(creator.Id, out var details))
-            {
-                details.Text = LiveCreatorDetails(creator);
-                details.Foreground = Application.Current.Resources[creator.CaptureActive ? "SuccessBrush" : "MutedTextBrush"] as Brush;
-            }
-            if (_liveCreatorActionsById.TryGetValue(creator.Id, out var action))
-            {
-                action.Content = creator.CaptureStopping ? "Stopping\u2026" :
-                    creator.CaptureActive ? "Stop capture" : creator.Running ? "Stop live" : "Start live";
-                action.IsEnabled = _engine is not null && !creator.CaptureStopping &&
-                    !string.Equals(creator.Phase, "stopping", StringComparison.OrdinalIgnoreCase);
-            }
-            if (_liveCreatorSelectButtonsById.TryGetValue(creator.Id, out var select))
-            {
-                var selected = creator.Id == _liveSelectedCreatorId;
-                select.Content = selected ? "Selected" : "Use creator";
-                select.IsEnabled = _engine is not null && _state?.Running != true && !selected;
-            }
+            _switchingLiveCreator = true;
+            _liveCreatorSelector.ItemsSource = ordered;
+            _liveCreatorSelector.SelectedValue = _liveSelectedCreatorId;
+            _liveCreatorSnapshotIds = ids;
+            _switchingLiveCreator = false;
+        }
+
+        var selected = ordered.FirstOrDefault(item => item.Id == _liveSelectedCreatorId);
+        if (_liveSelectedCreatorDetails is not null)
+        {
+            _liveSelectedCreatorDetails.Text = selected is null
+                ? "Choose a saved creator to load its individual framing and caption profile."
+                : LiveCreatorDetails(selected);
+            _liveSelectedCreatorDetails.Foreground = Application.Current.Resources[
+                selected is not null && (selected.CaptureActive || selected.Running)
+                    ? "SuccessTextBrush" : "BodyTextBrush"] as Brush;
+        }
+
+        if (_liveSelectedCreatorAction is not null)
+        {
+            _liveSelectedCreatorAction.Content = selected is null
+                ? "Select a creator"
+                : selected.CaptureStopping ? "Stopping?"
+                : selected.CaptureActive ? "Stop capture"
+                : selected.Running ? "Stop live" : "Start live";
+            _liveSelectedCreatorAction.IsEnabled = _engine is not null && selected is not null &&
+                !selected.CaptureStopping &&
+                !string.Equals(selected.Phase, "stopping", StringComparison.OrdinalIgnoreCase);
         }
     }
 
     private void AddLiveCreatorPicker(StackPanel parent)
     {
-        _liveCreatorDetailsById.Clear();
-        _liveCreatorActionsById.Clear();
-        _liveCreatorSelectButtonsById.Clear();
-        var header = new Grid { ColumnSpacing = 12 };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new StackPanel { Spacing = 3 };
-        title.Children.Add(Txt("Saved creators", 14, true));
-        title.Children.Add(ThemeText(
-            "Each creator keeps separate facecam/game framing, crop coordinates, subtitle styling, and profanity treatment. AI provider, caption provider, video layout, output format, and clipping settings are shared defaults.",
-            11, false, "MutedTextBrush"));
-        header.Children.Add(title);
+        _switchingLiveCreator = true;
+        _liveCreatorSnapshotIds = _creators
+            .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(item => item.Id)
+            .ToArray();
+
+        _liveCreatorSelector = new ComboBox
+        {
+            ItemsSource = _creators.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            DisplayMemberPath = nameof(CreatorItem.Name),
+            SelectedValuePath = nameof(CreatorItem.Id),
+            SelectedValue = _liveSelectedCreatorId,
+            MinWidth = 240,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        _switchingLiveCreator = false;
+        _liveCreatorSelector.SelectionChanged += async (_, _) =>
+        {
+            if (_switchingLiveCreator || _liveCreatorSelector.SelectedItem is not CreatorItem creator ||
+                creator.Id == _liveSelectedCreatorId)
+                return;
+            try
+            {
+                await SelectLiveCreatorAsync(creator);
+            }
+            catch (Exception ex)
+            {
+                await ShowErrorAsync("Could not load creator settings", ex.Message);
+                UpdateLiveCreatorRows();
+            }
+        };
+
+        var row = new Grid { ColumnSpacing = 12 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var selection = new StackPanel { Spacing = 4 };
+        selection.Children.Add(ThemeText("Selected creator", 11, true, "MutedTextBrush"));
+        selection.Children.Add(_liveCreatorSelector);
+        row.Children.Add(selection);
         var manage = CreateButton("Manage creators", () => NavigateTo("creators"));
         Grid.SetColumn(manage, 1);
-        header.Children.Add(manage);
-        parent.Children.Add(header);
+        row.Children.Add(manage);
+        parent.Children.Add(row);
 
-        if (_creators.Count == 0)
-        {
-            var empty = new StackPanel { Spacing = 8 };
-            empty.Children.Add(ThemeText(
-                "No saved creators yet. Add your Twitch or YouTube channels and they will appear here.",
-                12, false, "MutedTextBrush"));
-            empty.Children.Add(CreateButton("Add a creator", () => NavigateTo("creators"), primary: true));
-            parent.Children.Add(CreatePanel("Creator sources", "", empty));
-            return;
-        }
+        _liveSelectedCreatorDetails = ThemeText("", 11, false, "BodyTextBrush");
+        _liveSelectedCreatorDetails.TextWrapping = TextWrapping.Wrap;
+        parent.Children.Add(_liveSelectedCreatorDetails);
 
-        var list = new StackPanel { Spacing = 0 };
-        foreach (var creator in _creators.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
-        {
-            var isSelected = creator.Id == _liveSelectedCreatorId;
-            var copy = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
-            copy.Children.Add(Txt(creator.Name, 13, true));
-            copy.Children.Add(ThemeText(creator.Target, 10, false, "MutedTextBrush"));
-            var detailsText = ThemeText(LiveCreatorDetails(creator), 10, false,
-                creator.CaptureActive ? "SuccessBrush" : "MutedTextBrush");
-            copy.Children.Add(detailsText);
-            _liveCreatorDetailsById[creator.Id] = detailsText;
-
-            var select = CreateButton(isSelected ? "Selected" : "Use creator", async () =>
+        _liveSelectedCreatorAction = CreateAsyncButton(
+            "Start live",
+            async () =>
             {
-                try { await SelectLiveCreatorAsync(creator); }
-                catch (Exception ex) { await ShowErrorAsync("Could not load creator settings", ex.Message); }
-            }, primary: isSelected);
-            select.IsEnabled = _engine is not null && _state?.Running != true && !isSelected;
-            _liveCreatorSelectButtonsById[creator.Id] = select;
-
-            var liveActionLabel = creator.CaptureStopping
-                ? "Stopping..."
-                : creator.CaptureActive ? "Stop capture"
-                : creator.Running ? "Stop live" : "Start live";
-            var liveAction = CreateButton(liveActionLabel, async () =>
-            {
-                try { await ToggleCreatorLiveAsync(creator); }
-                catch (Exception ex) { await ShowErrorAsync("Could not change creator state", ex.Message); }
-            }, primary: !creator.Running && !creator.CaptureActive, danger: creator.Running || creator.CaptureActive);
-            liveAction.IsEnabled = _engine is not null && !creator.CaptureStopping &&
-                !string.Equals(creator.Phase, "stopping", StringComparison.OrdinalIgnoreCase);
-            _liveCreatorActionsById[creator.Id] = liveAction;
-
-            // Keep identity and channel details on the first row. Action buttons share a
-            // full-width second row so narrow Live Studio panels never crush the URL/status text.
-            var row = new Grid
-            {
-                ColumnSpacing = 10,
-                RowSpacing = 8,
-                Padding = new Thickness(9, 10, 9, 10)
-            };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            var avatar = CreateCreatorAvatar(
-                creator.Name, size: 32, active: creator.Running || creator.CaptureActive);
-            Grid.SetRow(avatar, 0);
-            Grid.SetColumn(avatar, 0);
-            row.Children.Add(avatar);
-
-            Grid.SetColumn(copy, 1);
-            row.Children.Add(copy);
-
-            var actions = new Grid { ColumnSpacing = 10 };
-            actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            select.HorizontalAlignment = HorizontalAlignment.Stretch;
-            select.HorizontalContentAlignment = HorizontalAlignment.Center;
-            liveAction.HorizontalAlignment = HorizontalAlignment.Stretch;
-            liveAction.HorizontalContentAlignment = HorizontalAlignment.Center;
-            Grid.SetColumn(select, 0);
-            actions.Children.Add(select);
-            Grid.SetColumn(liveAction, 1);
-            actions.Children.Add(liveAction);
-            Grid.SetRow(actions, 1);
-            Grid.SetColumn(actions, 1);
-            row.Children.Add(actions);
-            list.Children.Add(new Border
-            {
-                BorderBrush = Application.Current.Resources["LineBrush"] as Brush,
-                BorderThickness = new Thickness(0, 0, 0, 1),
-                Background = isSelected
-                    ? Application.Current.Resources["AccentSoftBrush"] as Brush
-                    : new SolidColorBrush(Colors.Transparent),
-                Child = row
-            });
-        }
-        parent.Children.Add(list);
-
-        if (_liveSelectedCreatorId is not null)
-        {
-            var selectedCreator = _creators.FirstOrDefault(item => item.Id == _liveSelectedCreatorId);
-            if (selectedCreator is not null)
-                parent.Children.Add(ThemeText(
-                    $"Selected creator: {selectedCreator.Name}. This profile stores facecam/game framing, crop coordinates, subtitle styling, and profanity treatment. AI provider, caption provider, video layout, output format, and clipping settings are shared across creators.",
-                    11, false, "BodyTextBrush"));
-        }
+                var selected = _creators.FirstOrDefault(item => item.Id == _liveSelectedCreatorId);
+                if (selected is not null)
+                    await ToggleCreatorLiveAsync(selected);
+            },
+            primary: true,
+            errorTitle: "Could not change creator state");
+        _liveSelectedCreatorAction.IsEnabled = false;
+        parent.Children.Add(ActionRow(_liveSelectedCreatorAction));
+        parent.Children.Add(ThemeText(
+            "This selector loads one creator's framing and captions. Start or stop other independent monitors from Manage creators.",
+            10, false, "MutedTextBrush"));
+        UpdateLiveCreatorRows();
     }
 
     private async Task ToggleCreatorLiveAsync(CreatorItem creator)
@@ -890,9 +791,8 @@ public sealed partial class MainPage
     private static double DefaultSettingNumber(string key) => key switch
     {
         "chunk_min" => 10,
-        "pre" => 20,
-        "post" => 15,
-        "min_score" => 70,
+        "clip_duration" => 30,
+        "min_score" => 80,
         "capture_bitrate_kbps" => 8000,
         "clips_per_chunk" => 2,
         _ => 0

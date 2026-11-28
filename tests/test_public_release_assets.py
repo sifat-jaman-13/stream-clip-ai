@@ -184,11 +184,19 @@ class PublicReleaseAssetTests(unittest.TestCase):
         self.assertIn('..\\dist\\FacecamInference\\*', installer)
         self.assertIn('DestDir: "{app}\\source\\facecam-inference"', installer)
 
+    def test_secret_store_is_included_in_python_package_and_native_installer(self):
+        import tomllib
+
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        installer = (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8")
+        self.assertIn("secret_store", project["tool"]["setuptools"]["py-modules"])
+        self.assertIn('Source: "..\\secret_store.py"', installer)
+
     def test_release_version_is_consistent(self):
-        self.assertIn('APP_VERSION = "4.0.16"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
-        self.assertIn('version = "4.0.16"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertIn('#define MyAppVersion "4.0.16"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
-        self.assertIn('Version="4.0.16.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
+        self.assertIn('APP_VERSION = "4.1.0"', (ROOT / "autoclip.py").read_text(encoding="utf-8"))
+        self.assertIn('version = "4.1.0"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertIn('#define MyAppVersion "4.1.0"', (ROOT / "installer" / "StreamSnipNative.iss").read_text(encoding="utf-8"))
+        self.assertIn('Version="4.1.0.0"', (ROOT / "desktop" / "StreamSnip.Desktop" / "Package.appxmanifest").read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

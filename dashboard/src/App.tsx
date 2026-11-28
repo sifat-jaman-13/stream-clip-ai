@@ -987,11 +987,20 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
   busy: string; post: <T,>(key: string, path: string, body?: RecordLike) => Promise<T | null>;
 }) {
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [previewClip, setPreviewClip] = useState<Clip | null>(null);
   const [metadataDraft, setMetadataDraft] = useState<{ name: string; title: string; description: string } | null>(null);
   const [confirm, setConfirm] = useState<"selected" | "all" | null>(null);
   const [confirmAutoSchedule, setConfirmAutoSchedule] = useState(false);
   const title = metadataDraft && metadataDraft.name === selectedClip?.name ? metadataDraft.title : selectedClip?.title || "";
   const description = metadataDraft && metadataDraft.name === selectedClip?.name ? metadataDraft.description : selectedClip?.description || "";
+  useEffect(() => {
+    if (!previewClip) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewClip(null);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [previewClip]);
   const setTitle = (value: string) => {
     if (!selectedClip) return;
     setMetadataDraft((current) => ({
@@ -1052,12 +1061,30 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
       setMetadataDraft(null);
     }
   };
+  const copyPostCopy = async (clip: Clip) => {
+    const text = [clip.title || clip.name, clip.description || clip.caption || ""].filter(Boolean).join("\n\n");
+    if (!navigator.clipboard?.writeText) {
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "error", title: "Clipboard unavailable" } }));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "success", title: "Copied post copy" } }));
+    } catch {
+      window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "error", title: "Could not copy post copy" } }));
+    }
+  };
+  const deleteClipCard = (clip: Clip) => {
+    setSelectedNames([]);
+    setSelectedClip(clip);
+    setConfirm("selected");
+  };
   return <div className="page-stack">
     <PageHeading
       title={published ? "Scheduled" : "Clip library"}
       description={published
         ? "Scheduled Zernio posts and completed publishing history appear here."
-        : "Review generated clips, edit metadata, publish a single video, or schedule the ready queue."}
+        : "Browse portrait previews, edit metadata, and post or schedule finished clips."}
       actions={<>
         {!published ? <Button kind="primary" onClick={() => setConfirmAutoSchedule(true)} disabled={!workspace.state.clip_total || postingBlocked}>
           <CalendarClock size={15} />Auto schedule
@@ -1086,44 +1113,100 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
       <Button size="small" kind="quiet" onClick={() => setSelectedNames([])}>Clear</Button>
     </div> : null}
     <div className={"clip-library-layout" + (selectedClip ? " has-inspector" : "")}>
-      <section className="clip-list-panel">
-        <div className="clip-list-head">
-          <label><input type="checkbox" checked={filtered.length > 0 && selectedNames.length === filtered.length} onChange={toggleAll} /><span>{filtered.length ? "Select this page" : "Clips"}</span></label>
+      <section className="clip-grid-panel">
+        <div className="clip-grid-toolbar">
+          <label>
+            <input
+              type="checkbox"
+              checked={filtered.length > 0 && selectedNames.length === filtered.length}
+              disabled={!filtered.length}
+              onChange={toggleAll}
+            />
+            <span>{filtered.length ? "Select this page" : "Clips"}</span>
+          </label>
           <span>{count(total)} total</span>
-          <button className="text-button danger-text" onClick={() => setConfirm("all")} disabled={!total}>Delete all</button>
+          <button className="text-button danger-text" type="button" onClick={() => setConfirm("all")} disabled={!total}>Delete all</button>
         </div>
-        {filtered.length ? <div className="clip-list">{filtered.map((clip) => <div className={"clip-row" + (selectedClip?.name === clip.name ? " selected" : "")} key={clip.name}>
-          <input className="clip-checkbox" type="checkbox" aria-label={"Select " + (clip.title || clip.name)} checked={selectedNames.includes(clip.name)} onChange={() => toggleOne(clip.name)} />
-          <button className="clip-thumb" onClick={() => setSelectedClip(clip)} aria-label={"Preview " + (clip.title || clip.name)}>
-            <video src={clipUrl(clip.name)} muted playsInline preload="metadata" onLoadedMetadata={(event) => { try { event.currentTarget.currentTime = 0.35; } catch { /* This file may not seek on metadata load. */ } }} />
-            <span className="thumb-play"><Play size={15} fill="currentColor" /></span>
-          </button>
-          <button className="clip-main-copy" onClick={() => setSelectedClip(clip)}>
-            <strong>{clip.title || clip.name}</strong>
-            <span>{clip.creator_name || clip.source || "Generated clip"}</span>
-            <small>{dateLabel(clip.mtime)} · {sizeLabel(clip.size_mb)}{clip.posted ? " · Posted" : clip.scheduled ? " · Scheduled" : ""}</small>
-          </button>
-          {published
-            ? <button className="icon-button clip-row-open" aria-label={"Open " + clip.name} onClick={() => setSelectedClip(clip)}><ArrowUpRight size={16} /></button>
-            : <>
-              <button
-                className="button button-primary button-small clip-row-publish"
-                type="button"
-                onClick={() => void publishClip(clip)}
-                disabled={postingBlocked || clip.posted || clip.scheduled}
-                aria-label={"Post " + (clip.title || clip.name) + " via Zernio"}
-              ><Send size={13} />{busy === "publish-" + clip.name ? "Posting…" : "Post"}</button>
-              <Button size="small" kind="secondary" onClick={() => void publishClip(clip, clip.title || clip.name, clip.description || "", true)} disabled={postingBlocked || clip.posted || clip.scheduled}><CalendarClock size={13} />{busy === "schedule-" + clip.name ? "Scheduling…" : "Schedule"}</Button></>}
-        </div>)}</div> : <EmptyState
-          icon={published ? BadgeCheck : Clapperboard}
-          title={query ? "No matching clips" : published ? "Nothing scheduled yet" : "Your clip library is empty"}
-          description={query
-            ? "Try another title, file name, or creator."
-            : published
-              ? "Scheduled posts and completed Zernio posts will appear here after the provider confirms them."
-              : "Clips appear here after a source has been processed and a highlight rendered."}
-          action={query ? <Button onClick={() => setQuery("")}>Clear search</Button> : undefined}
-        />}
+        {filtered.length ? <div className="clip-grid">
+          {filtered.map((clip, index) => {
+            const selected = selectedClip?.name === clip.name;
+            const checked = selectedNames.includes(clip.name);
+            const status = clip.posted ? "Posted" : clip.scheduled ? "Scheduled" : "";
+            const blocked = postingBlocked || clip.posted || clip.scheduled;
+            return <article className={"clip-card" + (selected ? " is-active" : "") + (checked ? " is-checked" : "")} key={clip.name}>
+              <div className="clip-card-media">
+                <button
+                  type="button"
+                  className="clip-card-preview"
+                  onClick={() => setPreviewClip(clip)}
+                  aria-label={"Play preview of " + (clip.title || clip.name)}
+                >
+                  <video
+                    src={clipUrl(clip.name)}
+                    muted
+                    loop
+                    playsInline
+                    preload={index < 8 ? "metadata" : "none"}
+                    onLoadedMetadata={(event) => { try { event.currentTarget.currentTime = 0.35; } catch { /* The browser may not be ready to seek yet. */ } }}
+                    onMouseEnter={(event) => { event.currentTarget.preload = "auto"; void event.currentTarget.play().catch(() => {}); }}
+                    onMouseLeave={(event) => {
+                      const video = event.currentTarget;
+                      video.pause();
+                      try { video.currentTime = 0.35; } catch { /* Keep the preview frame when seeking is unavailable. */ }
+                    }}
+                  />
+                  <span className="clip-card-play" aria-hidden="true"><Play size={15} fill="currentColor" /></span>
+                </button>
+                <label className="clip-card-select" title="Select clip">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    aria-label={"Select " + (clip.title || clip.name)}
+                    onChange={() => toggleOne(clip.name)}
+                  />
+                </label>
+                {status ? <span className={"clip-card-status " + (clip.posted ? "is-posted" : "is-scheduled")}>{status}</span> : null}
+              </div>
+              <div className="clip-card-body">
+                <button type="button" className="clip-card-title" onClick={() => setSelectedClip(clip)}>
+                  {clip.title || clip.name}
+                </button>
+                <span className="clip-card-source">{clip.creator_name || clip.source || "Generated clip"}</span>
+                <div className="clip-card-meta">
+                  <span>{dateLabel(clip.mtime)}</span><span aria-hidden="true">&#183;</span><span>{sizeLabel(clip.size_mb)}</span>
+                </div>
+                <div className="clip-card-actions">
+                  {!published ? <>
+                    <Button kind="primary" size="small" onClick={() => void publishClip(clip)} disabled={blocked}>
+                      <Send size={13} />{busy === "publish-" + clip.name ? "Posting..." : "Post"}
+                    </Button>
+                    <Button kind="secondary" size="small" onClick={() => void publishClip(clip, clip.title || clip.name, clip.description || "", true)} disabled={blocked}>
+                      <CalendarClock size={13} />{busy === "schedule-" + clip.name ? "Scheduling..." : "Schedule"}
+                    </Button>
+                  </> : <Button kind="secondary" size="small" onClick={() => setSelectedClip(clip)}><FileText size={13} />Details</Button>}
+                </div>
+                <div className="clip-card-tools" aria-label="Clip actions">
+                  <button type="button" title="Copy post title and description" aria-label="Copy post title and description" onClick={() => void copyPostCopy(clip)}><Copy size={14} /></button>
+                  <a title="Download clip" aria-label="Download clip" href={clipUrl(clip.name)} download><Download size={14} /></a>
+                  <button type="button" title="Show in folder" aria-label="Show in folder" onClick={() => void post("reveal-clip-" + clip.name, "/api/reveal", { name: clip.name })}><FolderOpen size={14} /></button>
+                  <button type="button" title="Edit clip details" aria-label="Edit clip details" onClick={() => setSelectedClip(clip)}><FileText size={14} /></button>
+                  <button type="button" className="clip-card-delete" title="Delete clip" aria-label="Delete clip" onClick={() => deleteClipCard(clip)}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            </article>;
+          })}
+        </div> : <div className="clip-grid-empty">
+          <EmptyState
+            icon={published ? BadgeCheck : Clapperboard}
+            title={query ? "No matching clips" : published ? "Nothing scheduled yet" : "Your clip library is empty"}
+            description={query
+              ? "Try another title, file name, or creator."
+              : published
+                ? "Scheduled posts and completed Zernio posts will appear here after the provider confirms them."
+                : "Clips appear here after a source has been processed and a highlight rendered."}
+            action={query ? <Button onClick={() => setQuery("")}>Clear search</Button> : undefined}
+          />
+        </div>}
         <div className="pagination-row">
           <span>Page {currentPage} of {maxPages}</span>
           <div>
@@ -1144,12 +1227,36 @@ function ClipLibraryPage({ workspace, published, navigate, query, setQuery, sele
         </div>
         <div className="inspector-subactions">
           <a href={clipUrl(selectedClip.name)} download><Download size={14} />Download clip</a>
-          <button type="button" onClick={() => { const text = [title.trim(), description.trim()].filter(Boolean).join("\n\n"); if (!text) return; void navigator.clipboard?.writeText(text).then(() => window.dispatchEvent(new CustomEvent("streamsnip:toast", { detail: { tone: "success", title: "Copied post copy" } }))); }}><Copy size={14} />Copy post copy</button>
+          <button type="button" onClick={() => void copyPostCopy({ ...selectedClip, title, description })}><Copy size={14} />Copy post copy</button>
           <button onClick={() => void post("reveal-clip", "/api/reveal", { name: selectedClip.name })}><FolderOpen size={14} />Show in folder</button>
         </div>
-        <Button kind="danger" size="small" onClick={() => setConfirm("selected")}><Trash2 size={14} />Delete clip</Button>
+        <Button kind="danger" size="small" onClick={() => deleteClipCard(selectedClip)}><Trash2 size={14} />Delete clip</Button>
       </aside> : null}
     </div>
+    {previewClip ? <div className="clip-preview-overlay" role="presentation" onClick={() => setPreviewClip(null)}>
+      <div className="clip-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="clip-preview-title" onClick={(event) => event.stopPropagation()}>
+        <video className="clip-preview-player" src={clipUrl(previewClip.name)} controls autoPlay playsInline />
+        <aside className="clip-preview-side">
+          <div className="clip-preview-head">
+            <div>
+              <h2 id="clip-preview-title">{previewClip.title || previewClip.name}</h2>
+              <span>{previewClip.creator_name || previewClip.source || "Generated clip"} &#183; {sizeLabel(previewClip.size_mb)}</span>
+            </div>
+            <button className="icon-button" type="button" aria-label="Close clip preview" onClick={() => setPreviewClip(null)}><X size={17} /></button>
+          </div>
+          <div className="clip-preview-copy">
+            <strong>Post description</strong>
+            <p>{previewClip.description || previewClip.caption || "No description saved for this clip yet."}</p>
+          </div>
+          <div className="clip-preview-actions">
+            <Button size="small" onClick={() => void copyPostCopy(previewClip)}><Copy size={14} />Copy post copy</Button>
+            <a className="button button-secondary button-small" href={clipUrl(previewClip.name)} download><Download size={14} />Download</a>
+            <Button kind="primary" size="small" onClick={() => { setSelectedClip(previewClip); setPreviewClip(null); }}><FileText size={14} />Edit details</Button>
+            <Button size="small" kind="quiet" onClick={() => setPreviewClip(null)}>Close preview</Button>
+          </div>
+        </aside>
+      </div>
+    </div> : null}
     {confirmAutoSchedule && !published ? <div className="inline-confirm" role="alert">
       <span>Schedule all {count(workspace.state.clip_total)} ready clips through the enabled Zernio accounts? The default spacing is 5 minutes when no interval is configured. Clips move here only after Zernio confirms acceptance.</span>
       <Button kind="primary" size="small" onClick={() => void autoSchedule()} disabled={postingBlocked}>Schedule all</Button>
